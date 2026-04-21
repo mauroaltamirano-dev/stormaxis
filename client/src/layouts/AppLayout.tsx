@@ -13,7 +13,6 @@ import {
   ChevronRight,
   ExternalLink,
   LogOut,
-  MessageCircle,
   Newspaper,
   Search,
   Settings,
@@ -302,7 +301,7 @@ export function AppLayout() {
 
         <div style={styles.railBottom}>
           <div style={styles.discordPanel}>
-            <MessageCircle size={16} color="#a5b4fc" />
+            <DiscordIcon />
             <div style={{ minWidth: 0 }}>
               <div style={styles.discordTitle}>Comunidad Discord</div>
               <div style={styles.discordText}>Anuncios, soporte y testers</div>
@@ -581,6 +580,24 @@ function TelemetryRow({
 
 function MiniState({ text }: { text: string }) {
   return <div style={styles.miniState}>{text}</div>;
+}
+
+function DiscordIcon() {
+  return (
+    <svg
+      aria-hidden="true"
+      width="18"
+      height="18"
+      viewBox="0 0 24 24"
+      fill="none"
+      style={{ flexShrink: 0 }}
+    >
+      <path
+        fill="#a5b4fc"
+        d="M19.54 5.34A17.3 17.3 0 0 0 15.23 4c-.19.34-.4.8-.55 1.16a16.1 16.1 0 0 0-5.36 0A9.8 9.8 0 0 0 8.77 4c-1.5.26-2.95.72-4.31 1.34C1.73 9.42 1 13.4 1.37 17.32A17.5 17.5 0 0 0 6.65 20c.42-.58.8-1.2 1.12-1.86-.62-.23-1.2-.52-1.76-.86.15-.11.3-.23.44-.35a12.4 12.4 0 0 0 11.1 0l.44.35c-.56.34-1.14.63-1.76.86.32.66.7 1.28 1.12 1.86a17.45 17.45 0 0 0 5.28-2.68c.44-4.55-.75-8.5-3.09-11.98ZM8.67 14.9c-1.03 0-1.88-.94-1.88-2.1 0-1.16.83-2.1 1.88-2.1s1.9.95 1.88 2.1c0 1.16-.83 2.1-1.88 2.1Zm6.66 0c-1.03 0-1.88-.94-1.88-2.1 0-1.16.83-2.1 1.88-2.1s1.9.95 1.88 2.1c0 1.16-.83 2.1-1.88 2.1Z"
+      />
+    </svg>
+  );
 }
 
 const styles: Record<string, React.CSSProperties> = {
