@@ -26,6 +26,7 @@ import {
 import { useAuthStore } from "../stores/auth.store";
 import { api } from "../lib/api";
 import { useSocketStore } from "../stores/socket.store";
+import { useMatchmakingStore } from "../stores/matchmaking.store";
 
 const LEVEL_COLORS: Record<number, string> = {
   1: "#6b7280",
@@ -150,6 +151,14 @@ function formatMatchDate(value: string) {
   });
 }
 
+function formatQueueTime(seconds: number) {
+  const minutes = Math.floor(seconds / 60)
+    .toString()
+    .padStart(2, "0");
+  const rest = (seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${rest}`;
+}
+
 function winrate(wins: number, losses: number) {
   const total = wins + losses;
   if (total === 0) return 0;
@@ -159,6 +168,12 @@ function winrate(wins: number, losses: number) {
 export function AppLayout() {
   const { user, logout } = useAuthStore();
   const { status: socketStatus, reconnectAttempts, lastError } = useSocketStore();
+  const {
+    status: matchmakingStatus,
+    searchStartedAt,
+    queuePosition,
+    queueEtaSeconds,
+  } = useMatchmakingStore();
   const navigate = useNavigate();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
@@ -169,6 +184,7 @@ export function AppLayout() {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [queueElapsed, setQueueElapsed] = useState(0);
 
   const levelMeta = useMemo(() => getLevelMeta(user?.mmr ?? 0), [user?.mmr]);
   const level = levelMeta.level;
@@ -178,6 +194,22 @@ export function AppLayout() {
       ? 0
       : Math.max(0, levelMeta.nextLevelAt - user.mmr);
   const socketMeta = getSocketMeta(socketStatus);
+  const isSearchingMatch = matchmakingStatus === "searching";
+  const isMatchFound = matchmakingStatus === "found" || matchmakingStatus === "accepting";
+
+  useEffect(() => {
+    if (!isSearchingMatch || !searchStartedAt) {
+      setQueueElapsed(0);
+      return;
+    }
+
+    const tick = () => {
+      setQueueElapsed(Math.max(0, Math.floor((Date.now() - searchStartedAt) / 1000)));
+    };
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
+  }, [isSearchingMatch, searchStartedAt]);
 
   useEffect(() => {
     if (!user?.username) return;
@@ -289,7 +321,21 @@ export function AppLayout() {
 
         <RailSection eyebrow="Matchmaking">
           {primaryNav.map((item) => (
-            <RailItem key={item.label} item={item} active={isNavActive(pathname, item)} />
+            <RailItem
+              key={item.label}
+              item={item}
+              active={isNavActive(pathname, item)}
+              queueState={
+                item.to === "/dashboard" && (isSearchingMatch || isMatchFound)
+                  ? {
+                      status: matchmakingStatus,
+                      elapsed: queueElapsed,
+                      position: queuePosition,
+                      etaSeconds: queueEtaSeconds,
+                    }
+                  : undefined
+              }
+            />
           ))}
         </RailSection>
 
@@ -462,19 +508,49 @@ function RailSection({ eyebrow, children }: { eyebrow: string; children: React.R
   );
 }
 
-function RailItem({ item, active }: { item: NavItem; active: boolean }) {
+function RailItem({
+  item,
+  active,
+  queueState,
+}: {
+  item: NavItem;
+  active: boolean;
+  queueState?: {
+    status: string;
+    elapsed: number;
+    position: number | null;
+    etaSeconds: number | null;
+  };
+}) {
   const Icon = item.icon;
+  const hasQueueState = Boolean(queueState);
   const content = (
     <div
       style={{
         ...styles.railItem,
         ...(active ? styles.railItemActive : {}),
+        ...(hasQueueState ? styles.railItemSearching : {}),
         ...(item.disabled ? styles.railItemDisabled : {}),
       }}
     >
       <Icon size={17} />
       <span style={{ flex: 1 }}>{item.label}</span>
+      {queueState && (
+        <span style={styles.queueNavPulseWrap}>
+          <span style={styles.queueNavPulse} />
+          {queueState.status === "searching" ? "Buscando" : "Match"}
+        </span>
+      )}
       {item.badge && <span style={styles.railBadge}>{item.badge}</span>}
+      {queueState && (
+        <div style={styles.queueNavMeta}>
+          <span>{formatQueueTime(queueState.elapsed)}</span>
+          <span>
+            Pos. {queueState.position ?? "—"}
+            {queueState.etaSeconds != null ? ` · espera ~${queueState.etaSeconds}s` : ""}
+          </span>
+        </div>
+      )}
     </div>
   );
 
@@ -734,6 +810,7 @@ const styles: Record<string, React.CSSProperties> = {
   railItem: {
     display: "flex",
     alignItems: "center",
+    flexWrap: "wrap",
     gap: "10px",
     minHeight: "40px",
     padding: "0 11px",
@@ -754,6 +831,16 @@ const styles: Record<string, React.CSSProperties> = {
     color: "#e0f7ff",
     boxShadow: "0 0 22px rgba(0,200,255,0.08)",
   },
+  railItemSearching: {
+    borderColor: "rgba(74,222,128,0.36)",
+    borderLeftColor: "#4ade80",
+    background:
+      "linear-gradient(90deg, rgba(74,222,128,0.13), rgba(0,200,255,0.045))",
+    color: "#dcfce7",
+    boxShadow: "0 0 24px rgba(74,222,128,0.08)",
+    paddingTop: "8px",
+    paddingBottom: "8px",
+  },
   railItemDisabled: { opacity: 0.56, cursor: "not-allowed" },
   railBadge: {
     padding: "2px 6px",
@@ -761,6 +848,38 @@ const styles: Record<string, React.CSSProperties> = {
     color: "rgba(232,244,255,0.34)",
     fontSize: "9px",
     letterSpacing: "1px",
+  },
+  queueNavPulseWrap: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
+    padding: "2px 6px",
+    border: "1px solid rgba(74,222,128,0.28)",
+    background: "rgba(74,222,128,0.08)",
+    color: "#86efac",
+    fontSize: "9px",
+    fontWeight: 900,
+    letterSpacing: "1px",
+  },
+  queueNavPulse: {
+    width: "6px",
+    height: "6px",
+    borderRadius: "999px",
+    background: "#4ade80",
+    boxShadow: "0 0 10px #4ade80",
+    animation: "blink 1s infinite",
+  },
+  queueNavMeta: {
+    width: "100%",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "8px",
+    paddingLeft: "27px",
+    color: "rgba(220,252,231,0.62)",
+    fontSize: "10px",
+    fontWeight: 800,
+    letterSpacing: "0.6px",
+    textTransform: "none",
   },
   railBottom: { marginTop: "28px", display: "grid", gap: "10px" },
   discordPanel: {
