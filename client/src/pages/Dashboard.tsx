@@ -6,7 +6,7 @@ import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { reportClientError } from "../lib/monitoring";
 import { MatchFoundModal } from "../components/matchmaking/MatchFoundModal";
-import { Plus, Search, Swords, Shield, Zap, Heart, Users } from "lucide-react";
+import { Plus, Search } from "lucide-react";
 
 const LEVEL_COLORS: Record<number, string> = {
   1: "#6b7280", // Hierro       — gris apagado, sin glamour
@@ -28,14 +28,6 @@ function parseLevel(user: { level?: number; rank: string }) {
     return rankLevel;
   return 1;
 }
-
-const ROLES = [
-  { key: "TANK", label: "Tank", Icon: Shield },
-  { key: "DPS", label: "DPS", Icon: Swords },
-  { key: "BRUISER", label: "Bruiser", Icon: Zap },
-  { key: "SUPPORT", label: "Support", Icon: Users },
-  { key: "HEALER", label: "Healer", Icon: Heart },
-];
 
 const MODES = [
   { key: "COMPETITIVE", label: "Competitivo", desc: "Draft · MMR activo" },
@@ -342,12 +334,6 @@ export function Dashboard() {
     setAvatarLoadError(false);
   }, [user?.avatar]);
 
-  function toggleRole(role: string) {
-    setSelectedRoles((prev) =>
-      prev.includes(role) ? prev.filter((r) => r !== role) : [...prev, role],
-    );
-  }
-
   async function handleFindMatch() {
     if (hasActiveMatch) return;
 
@@ -428,10 +414,8 @@ export function Dashboard() {
   }
 
   const isSearching = status === "searching";
-  const queueControlsLocked = isSearching || hasActiveMatch;
   const findMatchDisabled = hasActiveMatch;
   const queuePreviewForDisplay = queuePreview;
-  const displayQueueCount = queuePreview.length;
 
   function formatElapsed(s: number) {
     const m = Math.floor(s / 60)
@@ -446,1028 +430,588 @@ export function Dashboard() {
   const level = parseLevel(user);
   const rankColor = LEVEL_COLORS[level] || "#00c8ff";
 
+  const profileRoles = [user.mainRole, user.secondaryRole].filter(Boolean) as string[];
+  const queuePhase = hasActiveMatch
+    ? "MATCH ACTIVO"
+    : isSearching
+      ? "EN COLA"
+      : "LISTO";
+
   return (
     <>
       {pendingMatch && <MatchFoundModal match={pendingMatch} />}
 
-      {/* ─── PARTY SLOTS (FACEIT style) ─── */}
       <section
         style={{
-          position: "relative",
-          width: "100%",
-          padding: "2rem 0 0",
-          marginBottom: "2rem",
-          overflow: "hidden",
+          display: "grid",
+          gap: "1.25rem",
+          maxWidth: "1180px",
+          margin: "0 auto",
         }}
       >
-        {/* Faint background glow behind center card */}
-        <div
+        <header
           style={{
-            position: "absolute",
-            left: "50%",
-            top: "50%",
-            transform: "translate(-50%, -50%)",
-            width: "300px",
-            height: "200px",
-            background: `radial-gradient(ellipse, ${rankColor}20, transparent 70%)`,
-            pointerEvents: "none",
-          }}
-        />
-
-        <div
-          style={{
+            position: "relative",
+            overflow: "hidden",
+            border: "1px solid rgba(0,200,255,0.14)",
+            background:
+              "linear-gradient(135deg, rgba(0,200,255,0.10), rgba(124,77,255,0.06) 42%, rgba(2,6,14,0.92)), url('/images/ranked.webp') center/cover",
+            minHeight: "230px",
+            padding: "1.4rem",
             display: "grid",
-            gridTemplateColumns: "repeat(5, 1fr)",
-            gap: "0.75rem",
-            alignItems: "stretch",
+            alignItems: "end",
           }}
         >
-          {SLOT_ORDER.map((idx) => {
-            const isCenter = idx === 2;
-
-            if (isCenter) {
-              // ─── USER CARD ───
-              return (
-                <div
-                  key="user"
-                  style={{
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "stretch",
-                    position: "relative",
-                    zIndex: 2,
-                  }}
-                >
-                  {/* "You" label above */}
-                  <div
-                    style={{
-                      textAlign: "center",
-                      fontFamily: "var(--font-display)",
-                      fontSize: "0.6rem",
-                      fontWeight: 700,
-                      letterSpacing: "0.2em",
-                      textTransform: "uppercase",
-                      color: rankColor,
-                      marginBottom: "0.5rem",
-                      opacity: 0.8,
-                    }}
-                  >
-                    ★ Tú ★
-                  </div>
-
-                  <div
-                    style={{
-                      border: `1px solid ${rankColor}66`,
-                      background: `linear-gradient(160deg, #0d1422 60%, ${rankColor}0d)`,
-                      position: "relative",
-                      overflow: "hidden",
-                      flex: 1,
-                    }}
-                  >
-                    {/* Top accent */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        height: "2px",
-                        background: `linear-gradient(90deg, transparent, ${rankColor}, transparent)`,
-                      }}
-                    />
-
-                    {/* Avatar area */}
-                    <div
-                      style={{
-                        padding: "1.5rem 1rem 1rem",
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: "0.75rem",
-                      }}
-                    >
-                      {/* Avatar hex */}
-                      <div style={{ position: "relative" }}>
-                        <div
-                          style={{
-                            width: "72px",
-                            height: "72px",
-                            clipPath:
-                              "polygon(50% 0%, 95% 25%, 95% 75%, 50% 100%, 5% 75%, 5% 25%)",
-                            background: `linear-gradient(135deg, #1a3a5c, #0d2040)`,
-                            border: `2px solid ${rankColor}`,
-                            display: "flex",
-                            alignItems: "center",
-                            justifyContent: "center",
-                            fontFamily: "var(--font-display)",
-                            fontSize: "1.5rem",
-                            fontWeight: 900,
-                            color: rankColor,
-                            overflow: "hidden",
-                            position: "relative",
-                          }}
-                        >
-                          {user.avatar && !avatarLoadError ? (
-                            <img
-                              src={user.avatar}
-                              alt={user.username}
-                              onError={() => setAvatarLoadError(true)}
-                              style={{
-                                width: "100%",
-                                height: "100%",
-                                objectFit: "cover",
-                                display: "block",
-                              }}
-                            />
-                          ) : (
-                            user.username.slice(0, 2).toUpperCase()
-                          )}
-                        </div>
-                        {/* Online dot */}
-                        <div
-                          style={{
-                            position: "absolute",
-                            bottom: "4px",
-                            right: "4px",
-                            width: "10px",
-                            height: "10px",
-                            background: "#00e676",
-                            border: "2px solid #0d1422",
-                            borderRadius: "50%",
-                          }}
-                        />
-                      </div>
-
-                      {/* Username & Level */}
-                      <div style={{ textAlign: "center", width: "100%" }}>
-                        <div
-                          style={{
-                            fontFamily: "var(--font-display)",
-                            fontSize: "0.95rem",
-                            fontWeight: 700,
-                            color: "#fff",
-                            letterSpacing: "0.05em",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {user.username}
-                        </div>
-                      </div>
-
-                      {/* Level hex badge */}
-                      <div
-                        title={`Nivel ${level}`}
-                        style={{
-                          position: "relative",
-                          display: "inline-flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          width: "44px",
-                          height: "44px",
-                          flexShrink: 0,
-                        }}
-                      >
-                        <svg
-                          width="44"
-                          height="44"
-                          viewBox="0 0 44 44"
-                          style={{ position: "absolute", inset: 0 }}
-                        >
-                          <polygon
-                            points="22,3 39,12.5 39,31.5 22,41 5,31.5 5,12.5"
-                            fill={`${rankColor}18`}
-                            stroke={rankColor}
-                            strokeWidth="1.5"
-                          />
-                        </svg>
-                        <span
-                          style={{
-                            position: "relative",
-                            fontFamily: "var(--font-display)",
-                            fontSize: level >= 10 ? "0.85rem" : "1rem",
-                            fontWeight: 900,
-                            color: rankColor,
-                            letterSpacing: "-0.02em",
-                            lineHeight: 1,
-                            textShadow: `0 0 10px ${rankColor}80`,
-                          }}
-                        >
-                          {level}
-                        </span>
-                      </div>
-
-                      {/* MMR number */}
-                      <div
-                        style={{
-                          textAlign: "center",
-                          borderTop: "1px solid rgba(255,255,255,0.06)",
-                          width: "100%",
-                          paddingTop: "0.875rem",
-                        }}
-                      >
-                        <div
-                          style={{
-                            fontFamily: "var(--font-display)",
-                            fontSize: "1.6rem",
-                            fontWeight: 900,
-                            color: "#fff",
-                            lineHeight: 1,
-                          }}
-                        >
-                          {user.mmr.toLocaleString()}
-                        </div>
-                        <div
-                          style={{
-                            fontSize: "0.6rem",
-                            textTransform: "uppercase",
-                            letterSpacing: "0.2em",
-                            color: "#64748b",
-                            marginTop: "0.25rem",
-                            fontWeight: 700,
-                          }}
-                        >
-                          MMR
-                        </div>
-                      </div>
-
-                      {/* W/L */}
-                      <div
-                        style={{
-                          display: "grid",
-                          gridTemplateColumns: "1fr 1fr",
-                          gap: "0.5rem",
-                          width: "100%",
-                          paddingBottom: "1rem",
-                        }}
-                      >
-                        <div
-                          style={{
-                            textAlign: "center",
-                            background: "rgba(0,230,118,0.06)",
-                            border: "1px solid rgba(0,230,118,0.15)",
-                            padding: "0.5rem 0.25rem",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontFamily: "var(--font-display)",
-                              fontSize: "1rem",
-                              fontWeight: 700,
-                              color: "#00e676",
-                            }}
-                          >
-                            {user.wins}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "0.6rem",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.15em",
-                              color: "#64748b",
-                              fontWeight: 700,
-                            }}
-                          >
-                            Wins
-                          </div>
-                        </div>
-                        <div
-                          style={{
-                            textAlign: "center",
-                            background: "rgba(255,71,87,0.06)",
-                            border: "1px solid rgba(255,71,87,0.15)",
-                            padding: "0.5rem 0.25rem",
-                          }}
-                        >
-                          <div
-                            style={{
-                              fontFamily: "var(--font-display)",
-                              fontSize: "1rem",
-                              fontWeight: 700,
-                              color: "#ff4757",
-                            }}
-                          >
-                            {user.losses}
-                          </div>
-                          <div
-                            style={{
-                              fontSize: "0.6rem",
-                              textTransform: "uppercase",
-                              letterSpacing: "0.15em",
-                              color: "#64748b",
-                              fontWeight: 700,
-                            }}
-                          >
-                            Losses
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              );
-            }
-
-            // ─── EMPTY SLOT ───
-            return (
-              <div
-                key={idx}
-                style={{
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "stretch",
-                }}
-              >
-                {/* Spacer to align with "Tú" label */}
-                <div style={{ height: "1.5rem", marginBottom: "0.5rem" }} />
-
-                <button
-                  style={{
-                    flex: 1,
-                    display: "flex",
-                    flexDirection: "column",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: "0.75rem",
-                    border: "1px dashed rgba(255,255,255,0.1)",
-                    background: "rgba(255,255,255,0.02)",
-                    cursor: "pointer",
-                    padding: "2rem 1rem",
-                    transition: "all 0.2s",
-                    minHeight: "200px",
-                  }}
-                  onMouseEnter={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background =
-                      "rgba(0,200,255,0.04)";
-                    (e.currentTarget as HTMLButtonElement).style.borderColor =
-                      "rgba(0,200,255,0.25)";
-                  }}
-                  onMouseLeave={(e) => {
-                    (e.currentTarget as HTMLButtonElement).style.background =
-                      "rgba(255,255,255,0.02)";
-                    (e.currentTarget as HTMLButtonElement).style.borderColor =
-                      "rgba(255,255,255,0.1)";
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "40px",
-                      height: "40px",
-                      border: "1px dashed rgba(255,255,255,0.15)",
-                      display: "flex",
-                      alignItems: "center",
-                      justifyContent: "center",
-                      color: "rgba(255,255,255,0.2)",
-                    }}
-                  >
-                    <Plus size={20} />
-                  </div>
-                  <span
-                    style={{
-                      fontFamily: "var(--font-display)",
-                      fontSize: "0.65rem",
-                      fontWeight: 700,
-                      textTransform: "uppercase",
-                      letterSpacing: "0.15em",
-                      color: "#334155",
-                    }}
-                  >
-                    Invitar
-                  </span>
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* ─── MODE + ROLE + FIND MATCH ─── */}
-      <section style={{ marginBottom: "2rem" }}>
-        {/* Mode tabs */}
-        <div
-          style={{
-            display: "flex",
-            gap: "0",
-            borderBottom: "1px solid rgba(255,255,255,0.06)",
-            marginBottom: "1.25rem",
-            justifyContent: "center",
-          }}
-        >
-          {MODES.map((mode) => (
-            <button
-              key={mode.key}
-              onClick={() => !queueControlsLocked && setSelectedMode(mode.key)}
-              style={{
-                padding: "0.6rem 1.25rem",
-                fontFamily: "var(--font-display)",
-                fontSize: "1rem",
-                fontWeight: 700,
-                letterSpacing: "0.1em",
-                textTransform: "uppercase",
-                color: selectedMode === mode.key ? "#00c8ff" : "#475569",
-                background: "none",
-                border: "none",
-                borderBottom: `2px solid ${selectedMode === mode.key ? "#00c8ff" : "transparent"}`,
-                marginBottom: "-1px",
-                cursor: queueControlsLocked ? "default" : "pointer",
-                transition: "all 0.15s",
-              }}
-            >
-              {mode.label}
-              <span
-                style={{
-                  display: "block",
-                  fontSize: "0.7rem",
-                  fontWeight: 400,
-                  color: "#cfcfcf",
-                  letterSpacing: "0.05em",
-                  textTransform: "none",
-                  marginTop: "1px",
-                }}
-              >
-                {mode.desc}
-              </span>
-            </button>
-          ))}
-        </div>
-
-        {/* Role selector */}
-        <div
-          style={{ display: "flex", gap: "0.5rem", marginBottom: "1.25rem" }}
-        >
-          <span
-            style={{
-              fontFamily: "var(--font-display)",
-              fontSize: "1rem",
-              fontWeight: 800,
-              textTransform: "uppercase",
-              letterSpacing: "0.15em",
-              color: "#d4d4d4",
-              alignSelf: "center",
-              marginRight: "0.25rem",
-              whiteSpace: "nowrap",
-            }}
-          >
-            Rol:
-          </span>
-          {ROLES.map(({ key, label, Icon }) => {
-            const active = selectedRoles.includes(key);
-            return (
-              <button
-                key={key}
-                onClick={() => !queueControlsLocked && toggleRole(key)}
-                style={{
-                  flex: 1,
-                  display: "flex",
-                  flexDirection: "column",
-                  alignItems: "center",
-                  gap: "0.3rem",
-                  padding: "0.625rem 0.25rem",
-                  background: active
-                    ? "rgba(124,77,255,0.12)"
-                    : "rgba(255,255,255,0.03)",
-                  border: `1px solid ${active ? "#7c4dff66" : "rgba(255,255,255,0.06)"}`,
-                  cursor: queueControlsLocked ? "default" : "pointer",
-                  transition: "all 0.15s",
-                  color: active ? "#7c4dff" : "#475569",
-                }}
-              >
-                <Icon size={16} />
-                <span
-                  style={{
-                    fontFamily: "var(--font-display)",
-                    fontSize: "0.6rem",
-                    fontWeight: 700,
-                    textTransform: "uppercase",
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  {label}
-                </span>
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Find match button */}
-        <button
-          onClick={handleFindMatch}
-          disabled={findMatchDisabled}
-          style={{
-            width: "100%",
-            padding: "1rem",
-            fontFamily: "var(--font-display)",
-            fontSize: "1rem",
-            fontWeight: 900,
-            letterSpacing: "0.2em",
-            textTransform: "uppercase",
-            background: findMatchDisabled
-              ? "rgba(148,163,184,0.25)"
-              : isSearching
-                ? "transparent"
-                : "#00c8ff",
-            color: findMatchDisabled ? "#cbd5e1" : isSearching ? "#00c8ff" : "#000",
-            border: findMatchDisabled
-              ? "1px solid rgba(148,163,184,0.35)"
-              : isSearching
-                ? "1px solid #00c8ff"
-                : "none",
-            cursor: findMatchDisabled ? "not-allowed" : "pointer",
-            transition: "all 0.2s",
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "0.75rem",
-            opacity: findMatchDisabled ? 0.9 : 1,
-          }}
-        >
-          {findMatchDisabled ? (
-            <>Partida activa en curso</>
-          ) : isSearching ? (
-            <>
-              <div
-                style={{
-                  width: "10px",
-                  height: "10px",
-                  background: "#00c8ff",
-                  animation: "blink 1s infinite",
-                }}
-              />
-              Buscando... {formatElapsed(elapsed)}
-              <span style={{ fontSize: "0.7rem", fontWeight: 400, opacity: 1 }}>
-                — Cancelar
-              </span>
-            </>
-          ) : (
-            <>
-              <Search size={18} />
-              Buscar Partida
-            </>
-          )}
-        </button>
-        {hasActiveMatch && (
           <div
             style={{
-              marginTop: "0.7rem",
-              color: "#94a3b8",
-              fontSize: "0.82rem",
-              textAlign: "center",
+              position: "absolute",
+              inset: 0,
+              background:
+                "linear-gradient(90deg, rgba(2,6,14,0.96), rgba(2,6,14,0.76) 45%, rgba(2,6,14,0.42))",
             }}
-          >
-            No podés buscar otra partida hasta cerrar la actual.
-          </div>
-        )}
-
-        {isSearching && (
+          />
           <div
             style={{
-              marginTop: "0.9rem",
-              border: "1px solid rgba(0,200,255,0.16)",
-              background: "rgba(0,200,255,0.05)",
-              padding: "0.85rem 1rem",
-              display: "grid",
-              gap: "0.75rem",
+              position: "absolute",
+              inset: 0,
+              backgroundImage:
+                "linear-gradient(90deg, rgba(0,200,255,0.07) 1px, transparent 1px), linear-gradient(rgba(0,200,255,0.05) 1px, transparent 1px)",
+              backgroundSize: "34px 34px",
+              opacity: 0.45,
             }}
-          >
+          />
+
+          <div style={{ position: "relative", display: "grid", gap: "1.1rem" }}>
             <div
               style={{
                 display: "flex",
-                justifyContent: "space-between",
                 alignItems: "center",
+                justifyContent: "space-between",
                 gap: "1rem",
+                flexWrap: "wrap",
               }}
             >
               <div>
                 <div
                   style={{
-                    fontSize: "0.62rem",
                     color: "#7dd3fc",
+                    fontFamily: "var(--font-display)",
+                    fontSize: "0.72rem",
+                    fontWeight: 900,
+                    letterSpacing: "0.22em",
                     textTransform: "uppercase",
-                    letterSpacing: "0.18em",
-                    fontWeight: 800,
+                    marginBottom: "0.45rem",
                   }}
                 >
-                  Cola de test
+                  South America · Custom lobby queue
                 </div>
-                <div style={{ color: "#e2e8f0", fontWeight: 700 }}>
-                  {queueSize} real{queueSize === 1 ? "" : "es"} buscando ·{" "}
-                  {displayQueueCount}/10 visibles
-                </div>
+                <h1
+                  style={{
+                    margin: 0,
+                    color: "#fff",
+                    fontFamily: "var(--font-display)",
+                    fontSize: "clamp(2rem, 5vw, 4.1rem)",
+                    lineHeight: 0.9,
+                    fontWeight: 900,
+                    letterSpacing: "0.04em",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Buscar partida
+                </h1>
               </div>
+
               <div
                 style={{
-                  color: "#94a3b8",
-                  fontSize: "0.82rem",
-                  fontWeight: 700,
+                  minWidth: "160px",
+                  border: `1px solid ${rankColor}66`,
+                  background: "rgba(2,6,14,0.72)",
+                  padding: "0.9rem 1rem",
+                  textAlign: "right",
                 }}
               >
-                Llenado con bots disponible desde panel admin
-              </div>
-            </div>
-
-            <div style={{ color: "#94a3b8", fontSize: "0.82rem" }}>
-              Se actualiza cada 3s. Los bots de testing ahora son reales de
-              backend (solo para esta fase).
-            </div>
-            {isSearching && (
-              <div style={{ color: "#7dd3fc", fontSize: "0.8rem", fontWeight: 700 }}>
-                Posición {queuePosition ?? "—"} en cola · ETA{" "}
-                {queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "calculando..."}
-              </div>
-            )}
-
-            <div style={{ display: "grid", gap: "0.45rem" }}>
-              {queuePreviewForDisplay.length === 0 ? (
-                <div style={{ color: "#94a3b8", fontSize: "0.9rem" }}>
-                  Todavía no hay nadie visible en cola.
+                <div style={{ color: "rgba(232,244,255,0.42)", fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.18em", fontWeight: 800 }}>
+                  Estado
                 </div>
-              ) : (
-                queuePreviewForDisplay.map((entry, index) => (
-                  <div
-                    key={entry.userId}
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      gap: "0.75rem",
-                      border: "1px solid rgba(255,255,255,0.06)",
-                      background: "rgba(15,23,42,0.65)",
-                      padding: "0.65rem 0.8rem",
-                    }}
-                  >
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.7rem",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "30px",
-                          height: "30px",
-                          borderRadius: "50%",
-                          border: "1px solid rgba(0,200,255,0.25)",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          color: "#7dd3fc",
-                          fontFamily: "var(--font-display)",
-                          fontWeight: 800,
-                          fontSize: "0.72rem",
-                          background: "rgba(0,200,255,0.08)",
-                        }}
-                      >
-                        {entry.username.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div>
-                        <div style={{ color: "#fff", fontWeight: 700 }}>
-                          {entry.username}{" "}
-                          {entry.userId === user.id ? "(vos)" : ""}
-                        </div>
-                        <div style={{ color: "#64748b", fontSize: "0.78rem" }}>
-                          #{index + 1} en la preview · MMR {entry.mmr}
-                          {entry.isBot ? " · bot testing" : " · usuario real"}
-                        </div>
-                      </div>
-                    </div>
-
-                    <div
-                      style={{
-                        color: "#94a3b8",
-                        fontSize: "0.78rem",
-                        textAlign: "right",
-                      }}
-                    >
-                      {entry.isBot
-                        ? "Bot del sistema"
-                        : entry.joinedAt
-                          ? `Esperando ${Math.max(0, Math.floor((Date.now() - entry.joinedAt) / 1000))}s`
-                          : "Esperando…"}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-        )}
-
-        {hiddenActiveMatchId && (
-          <div
-            style={{
-              marginTop: "0.9rem",
-              border: "1px solid rgba(251,191,36,0.22)",
-              background: "rgba(251,191,36,0.08)",
-              padding: "0.85rem 1rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              gap: "1rem",
-            }}
-          >
-            <div>
-              <div
-                style={{
-                  color: "#fde68a",
-                  fontWeight: 800,
-                  fontSize: "0.82rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.14em",
-                }}
-              >
-                Match activo oculto
-              </div>
-              <div style={{ color: "#e2e8f0", fontSize: "0.92rem" }}>
-                Saliste del matchroom, pero la partida sigue viva. Podés volver
-                cuando quieras.
+                <div style={{ color: rankColor, fontFamily: "var(--font-display)", fontSize: "1.35rem", fontWeight: 900, letterSpacing: "0.08em" }}>
+                  {queuePhase}
+                </div>
               </div>
             </div>
-            <button
-              onClick={() => {
-                window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
-                setDismissedActiveMatchId(null);
-                navigate({
-                  to: "/match/$matchId",
-                  params: { matchId: hiddenActiveMatchId },
-                });
-              }}
-              style={{
-                border: "none",
-                background: "#fbbf24",
-                color: "#111827",
-                padding: "0.75rem 1rem",
-                fontWeight: 800,
-                cursor: "pointer",
-              }}
-            >
-              Reabrir match
-            </button>
-          </div>
-        )}
-      </section>
 
-      {/* ─── STATS ROW ─── */}
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(3,1fr)",
-          gap: "0.625rem",
-          marginBottom: "1.75rem",
-        }}
-      >
-        {[
-          {
-            label: "Winrate",
-            value:
-              user && user.wins + user.losses > 0
-                ? `${Math.round((user.wins / (user.wins + user.losses)) * 100)}%`
-                : "—",
-            color: "#00e676",
-            sub: `${user?.wins ?? 0}W / ${user?.losses ?? 0}L`,
-          },
-          {
-            label: "MMR actual",
-            value: user?.mmr.toLocaleString() ?? "—",
-            color: "#00c8ff",
-            sub: "Rating global",
-          },
-          {
-            label: "Partidas",
-            value: ((user?.wins ?? 0) + (user?.losses ?? 0)).toString(),
-            color: "#f0a500",
-            sub: "Esta temporada",
-          },
-        ].map((stat) => (
-          <div
-            key={stat.label}
-            style={{
-              border: "1px solid rgba(255,255,255,0.06)",
-              background: "rgba(255,255,255,0.02)",
-              padding: "0.875rem 1rem",
-            }}
-          >
             <div
               style={{
-                fontSize: "0.6rem",
-                color: "#475569",
-                textTransform: "uppercase",
-                letterSpacing: "0.15em",
-                marginBottom: "0.375rem",
-                fontWeight: 700,
+                display: "grid",
+                gridTemplateColumns: "repeat(4, minmax(120px, 1fr))",
+                gap: "0.7rem",
               }}
             >
-              {stat.label}
-            </div>
-            <div
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: "1.5rem",
-                fontWeight: 700,
-                color: stat.color,
-                lineHeight: 1,
-              }}
-            >
-              {stat.value}
-            </div>
-            <div
-              style={{
-                fontSize: "0.65rem",
-                color: "#334155",
-                marginTop: "0.2rem",
-              }}
-            >
-              {stat.sub}
+              <HeroMetric label="Modo" value={MODES.find((m) => m.key === selectedMode)?.label ?? "Competitivo"} tone="#38bdf8" />
+              <HeroMetric label="Cola" value={`${queueSize ?? 0}/10`} tone="#a78bfa" />
+              <HeroMetric label="Posición" value={queuePosition ?? "—"} tone="#facc15" />
+              <HeroMetric label="ETA" value={queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "—"} tone="#4ade80" />
             </div>
           </div>
-        ))}
-      </div>
+        </header>
 
-      {user.role === "ADMIN" && (
         <section
           style={{
-            border: "1px solid rgba(248,113,113,0.18)",
-            background: "rgba(127,29,29,0.08)",
-            padding: "1rem",
             display: "grid",
-            gap: "0.9rem",
+            gridTemplateColumns: "minmax(0, 1.2fr) minmax(310px, 0.8fr)",
+            gap: "1rem",
+            alignItems: "stretch",
           }}
         >
           <div
             style={{
-              display: "flex",
-              justifyContent: "space-between",
+              border: "1px solid rgba(232,244,255,0.07)",
+              background: "linear-gradient(180deg, rgba(17,25,39,0.82), rgba(8,12,20,0.72))",
+              padding: "1rem",
+              display: "grid",
               gap: "1rem",
-              alignItems: "center",
             }}
           >
-            <div>
-              <div
-                style={{
-                  fontSize: "0.7rem",
-                  color: "#fca5a5",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.18em",
-                  fontWeight: 800,
-                }}
-              >
-                Admin · Rescue panel
-              </div>
-              <div style={{ color: "#fff", fontWeight: 700 }}>
-                Cancelá o borrá matches trabados para destrabar el MVP.
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
+              <PanelTitle eyebrow="Party setup" title="Escuadra previa" />
+              <div style={{ color: "rgba(232,244,255,0.40)", fontSize: "0.8rem", fontWeight: 700 }}>
+                Roles desde tu perfil competitivo
               </div>
             </div>
-            <div style={{ color: "#94a3b8", fontSize: "0.82rem" }}>
-              {adminLoading
-                ? "Actualizando…"
-                : `${adminMatches.length} activo(s)`}
-            </div>
-          </div>
 
-          <div style={{ display: "flex", justifyContent: "flex-end" }}>
-            <button
-              onClick={handleAdminFillBots}
-              disabled={adminFillingBots}
-              style={{
-                border: "1px solid rgba(125,211,252,0.4)",
-                background: "rgba(14,116,144,0.25)",
-                color: "#bae6fd",
-                padding: "0.6rem 0.9rem",
-                fontWeight: 800,
-                cursor: adminFillingBots ? "not-allowed" : "pointer",
-              }}
-            >
-              {adminFillingBots
-                ? "Completando…"
-                : "Completar cola a 10 con bots"}
-            </button>
-          </div>
-
-          {adminError && (
             <div
               style={{
-                border: "1px solid rgba(248,113,113,0.26)",
-                background: "rgba(248,113,113,0.08)",
-                color: "#fecaca",
-                padding: "0.8rem 0.9rem",
+                display: "grid",
+                gridTemplateColumns: "repeat(5, minmax(90px, 1fr))",
+                gap: "0.7rem",
               }}
             >
-              {adminError}
-            </div>
-          )}
-
-          {adminMatches.length === 0 ? (
-            <div style={{ color: "#94a3b8", fontSize: "0.92rem" }}>
-              No hay matches activos o colgados ahora mismo.
-            </div>
-          ) : (
-            <div style={{ display: "grid", gap: "0.7rem" }}>
-              {adminMatches.map((match) => {
-                const humanPlayers = match.players.filter(
-                  (player) => !player.isBot,
-                );
-                const accepted = humanPlayers.filter(
-                  (player) => player.accepted === true,
-                ).length;
-                return (
-                  <div
-                    key={match.id}
-                    style={{
-                      border: "1px solid rgba(255,255,255,0.08)",
-                      background: "rgba(15,23,42,0.72)",
-                      padding: "0.9rem",
-                      display: "grid",
-                      gap: "0.65rem",
-                    }}
-                  >
+              {SLOT_ORDER.map((idx) => {
+                const isYou = idx === 2;
+                return isYou ? (
+                  <div key="you" style={{ ...slotBaseStyle, borderColor: `${rankColor}66`, background: `linear-gradient(180deg, ${rankColor}12, rgba(2,6,14,0.74))` }}>
+                    <div style={{ color: rankColor, fontSize: "0.62rem", letterSpacing: "0.18em", fontWeight: 900, textTransform: "uppercase" }}>Tú</div>
                     <div
                       style={{
-                        display: "flex",
-                        justifyContent: "space-between",
-                        gap: "1rem",
-                        alignItems: "center",
+                        width: "64px",
+                        height: "64px",
+                        borderRadius: "999px",
+                        overflow: "hidden",
+                        display: "grid",
+                        placeItems: "center",
+                        border: `1px solid ${rankColor}`,
+                        color: rankColor,
+                        fontFamily: "var(--font-display)",
+                        fontWeight: 900,
+                        fontSize: "1.25rem",
+                        background: "rgba(0,0,0,0.25)",
                       }}
                     >
-                      <div>
-                        <div style={{ color: "#fff", fontWeight: 800 }}>
-                          {match.status} · {match.id.slice(0, 8)}
-                        </div>
-                        <div style={{ color: "#94a3b8", fontSize: "0.82rem" }}>
-                          {match.players
-                            .map(
-                              (player) =>
-                                player.user?.username ??
-                                player.botName ??
-                                player.userId?.slice(0, 6) ??
-                                "Bot",
-                            )
-                            .join(" · ")}
-                        </div>
+                      {user.avatar && !avatarLoadError ? (
+                        <img src={user.avatar} alt={user.username} onError={() => setAvatarLoadError(true)} style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+                      ) : (
+                        user.username.slice(0, 2).toUpperCase()
+                      )}
+                    </div>
+                    <div style={{ minWidth: 0, textAlign: "center" }}>
+                      <div style={{ color: "#fff", fontFamily: "var(--font-display)", fontWeight: 900, fontSize: "1rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                        {user.username}
                       </div>
-                      <div
-                        style={{
-                          color: "#cbd5e1",
-                          fontSize: "0.82rem",
-                          textAlign: "right",
-                        }}
-                      >
-                        {match.status === "ACCEPTING"
-                          ? `Aceptaron ${accepted}/${humanPlayers.length} humanos`
-                          : match.selectedMap
-                            ? `Mapa: ${match.selectedMap}`
-                            : "Sin mapa todavía"}
+                      <div style={{ color: "rgba(232,244,255,0.40)", fontSize: "0.72rem", marginTop: "0.1rem" }}>
+                        Lvl {level} · {user.mmr} MMR
                       </div>
                     </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        gap: "0.6rem",
-                        justifyContent: "flex-end",
-                      }}
-                    >
-                      <button
-                        onClick={() => handleAdminCancelMatch(match.id)}
-                        disabled={adminActionMatchId === match.id}
-                        style={{
-                          border: "1px solid rgba(251,191,36,0.35)",
-                          background: "rgba(251,191,36,0.10)",
-                          color: "#fde68a",
-                          padding: "0.65rem 0.9rem",
-                          fontWeight: 800,
-                          cursor:
-                            adminActionMatchId === match.id
-                              ? "not-allowed"
-                              : "pointer",
-                        }}
-                      >
-                        Cancelar
-                      </button>
-                      <button
-                        onClick={() => handleAdminDeleteMatch(match.id)}
-                        disabled={adminActionMatchId === match.id}
-                        style={{
-                          border: "1px solid rgba(248,113,113,0.35)",
-                          background: "rgba(248,113,113,0.10)",
-                          color: "#fecaca",
-                          padding: "0.65rem 0.9rem",
-                          fontWeight: 800,
-                          cursor:
-                            adminActionMatchId === match.id
-                              ? "not-allowed"
-                              : "pointer",
-                        }}
-                      >
-                        Borrar
-                      </button>
+                    <div style={{ display: "flex", gap: "0.35rem", flexWrap: "wrap", justifyContent: "center" }}>
+                      {profileRoles.length > 0 ? profileRoles.map((role) => <RolePill key={role} role={role} />) : <RolePill role="Sin rol" muted />}
+                    </div>
+                  </div>
+                ) : (
+                  <div key={idx} style={slotBaseStyle}>
+                    <div style={{ width: "42px", height: "42px", border: "1px dashed rgba(232,244,255,0.13)", display: "grid", placeItems: "center", color: "rgba(232,244,255,0.22)" }}>
+                      <Plus size={18} />
+                    </div>
+                    <div style={{ color: "rgba(232,244,255,0.26)", fontFamily: "var(--font-display)", fontWeight: 900, fontSize: "0.7rem", letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                      Slot aliado
                     </div>
                   </div>
                 );
               })}
             </div>
-          )}
+
+            <div
+              style={{
+                border: "1px solid rgba(0,200,255,0.13)",
+                background: "rgba(0,200,255,0.04)",
+                padding: "0.85rem 1rem",
+                display: "grid",
+                gap: "0.55rem",
+              }}
+            >
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+                <div>
+                  <div style={{ color: "#7dd3fc", fontSize: "0.68rem", letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 900 }}>
+                    Flujo manual HOTS
+                  </div>
+                  <div style={{ color: "rgba(232,244,255,0.76)", fontSize: "0.9rem", marginTop: "0.2rem" }}>
+                    El sistema arma sala, define capitanes, ejecuta veto y registra resultado por votación.
+                  </div>
+                </div>
+                <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+                  {profileRoles.length === 0 ? (
+                    <RolePill role="Configura tus roles en Perfil" muted />
+                  ) : (
+                    profileRoles.map((role) => <RolePill key={role} role={role} />)
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div
+            style={{
+              border: "1px solid rgba(0,200,255,0.14)",
+              background: "linear-gradient(180deg, rgba(0,200,255,0.08), rgba(17,25,39,0.78))",
+              padding: "1rem",
+              display: "grid",
+              gap: "1rem",
+              alignContent: "space-between",
+            }}
+          >
+            <PanelTitle eyebrow="Queue console" title="Entrada a partida" />
+
+            <div style={{ display: "grid", gap: "0.55rem" }}>
+              <ModeButton active label="Competitivo" desc="5v5 · Draft · MMR activo" />
+              <ModeButton label="Torneos" desc="Próximamente" disabled />
+              <ModeButton label="Equipos" desc="Próximamente" disabled />
+            </div>
+
+            <button
+              onClick={handleFindMatch}
+              disabled={findMatchDisabled}
+              style={{
+                width: "100%",
+                minHeight: "58px",
+                border: findMatchDisabled
+                  ? "1px solid rgba(148,163,184,0.26)"
+                  : isSearching
+                    ? "1px solid rgba(0,200,255,0.75)"
+                    : "1px solid rgba(0,200,255,0.88)",
+                background: findMatchDisabled
+                  ? "rgba(148,163,184,0.14)"
+                  : isSearching
+                    ? "rgba(0,200,255,0.06)"
+                    : "linear-gradient(90deg, #00c8ff, #7dd3fc)",
+                color: findMatchDisabled ? "#cbd5e1" : isSearching ? "#7dd3fc" : "#020617",
+                fontFamily: "var(--font-display)",
+                fontWeight: 900,
+                fontSize: "1rem",
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+                cursor: findMatchDisabled ? "not-allowed" : "pointer",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: "0.7rem",
+                boxShadow: findMatchDisabled ? "none" : "0 0 28px rgba(0,200,255,0.12)",
+              }}
+            >
+              {findMatchDisabled ? (
+                "Partida activa en curso"
+              ) : isSearching ? (
+                <>
+                  <span style={{ width: 10, height: 10, background: "#00c8ff", animation: "blink 1s infinite" }} />
+                  Buscando {formatElapsed(elapsed)} · Cancelar
+                </>
+              ) : (
+                <>
+                  <Search size={18} />
+                  Buscar partida
+                </>
+              )}
+            </button>
+
+            {hasActiveMatch && <Notice tone="warn" text="No podés buscar otra partida hasta cerrar la actual." />}
+          </div>
         </section>
-      )}
+
+        {isSearching && (
+          <section style={panelStyle}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
+              <PanelTitle eyebrow="Live queue" title="Jugadores buscando partida" />
+              <div style={{ color: "#7dd3fc", fontFamily: "var(--font-display)", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                Posición {queuePosition ?? "—"} · ETA {queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "calculando"}
+              </div>
+            </div>
+
+            <div style={{ display: "grid", gap: "0.55rem" }}>
+              {queuePreviewForDisplay.length === 0 ? (
+                <Notice text="Todavía no hay jugadores visibles en la cola." />
+              ) : (
+                queuePreviewForDisplay.map((entry, index) => (
+                  <div key={entry.userId} style={queueRowStyle}>
+                    <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}>
+                      <div style={queueAvatarStyle}>{entry.username.slice(0, 2).toUpperCase()}</div>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: "#fff", fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {entry.username} {entry.userId === user.id ? "(vos)" : ""}
+                        </div>
+                        <div style={{ color: "rgba(232,244,255,0.34)", fontSize: "0.78rem" }}>
+                          #{index + 1} preview · {entry.mmr} MMR · {entry.isBot ? "bot testing" : "usuario real"}
+                        </div>
+                      </div>
+                    </div>
+                    <div style={{ color: "rgba(232,244,255,0.48)", fontSize: "0.8rem", textAlign: "right" }}>
+                      {entry.isBot ? "Sistema" : entry.joinedAt ? `${Math.max(0, Math.floor((Date.now() - entry.joinedAt) / 1000))}s` : "Esperando"}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </section>
+        )}
+
+        {hiddenActiveMatchId && (
+          <section style={{ ...panelStyle, borderColor: "rgba(251,191,36,0.25)", background: "rgba(251,191,36,0.07)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
+              <div>
+                <PanelTitle eyebrow="Match activo oculto" title="La partida sigue viva" />
+                <div style={{ color: "rgba(232,244,255,0.68)", marginTop: "0.25rem" }}>
+                  Saliste del matchroom, pero podés volver cuando quieras.
+                </div>
+              </div>
+              <button
+                onClick={() => {
+                  window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
+                  setDismissedActiveMatchId(null);
+                  navigate({ to: "/match/$matchId", params: { matchId: hiddenActiveMatchId } });
+                }}
+                style={goldButtonStyle}
+              >
+                Reabrir match
+              </button>
+            </div>
+          </section>
+        )}
+
+        <section
+          style={{
+            display: "grid",
+            gridTemplateColumns: "repeat(3, 1fr)",
+            gap: "0.8rem",
+          }}
+        >
+          <StatPanel label="Winrate" value={user.wins + user.losses > 0 ? `${Math.round((user.wins / (user.wins + user.losses)) * 100)}%` : "—"} sub={`${user.wins}W / ${user.losses}L`} tone="#4ade80" />
+          <StatPanel label="MMR actual" value={user.mmr.toLocaleString()} sub="Rating global" tone="#38bdf8" />
+          <StatPanel label="Partidas" value={(user.wins + user.losses).toString()} sub="Temporada actual" tone="#facc15" />
+        </section>
+
+        {user.role === "ADMIN" && (
+          <section style={{ ...panelStyle, borderColor: "rgba(248,113,113,0.20)", background: "rgba(127,29,29,0.08)" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+              <PanelTitle eyebrow="Admin · Rescue panel" title="Control rápido de testing" />
+              <button onClick={handleAdminFillBots} disabled={adminFillingBots} style={blueGhostButtonStyle}>
+                {adminFillingBots ? "Completando…" : "Completar cola a 10 con bots"}
+              </button>
+            </div>
+
+            {adminError && <Notice tone="danger" text={adminError} />}
+
+            {adminMatches.length === 0 ? (
+              <Notice text={adminLoading ? "Actualizando matches…" : "No hay matches activos o colgados ahora mismo."} />
+            ) : (
+              <div style={{ display: "grid", gap: "0.7rem" }}>
+                {adminMatches.map((match) => {
+                  const humanPlayers = match.players.filter((player) => !player.isBot);
+                  const accepted = humanPlayers.filter((player) => player.accepted === true).length;
+                  return (
+                    <div key={match.id} style={adminMatchStyle}>
+                      <div style={{ minWidth: 0 }}>
+                        <div style={{ color: "#fff", fontWeight: 900 }}>{match.status} · {match.id.slice(0, 8)}</div>
+                        <div style={{ color: "rgba(232,244,255,0.42)", fontSize: "0.82rem", whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>
+                          {match.players.map((player) => player.user?.username ?? player.botName ?? player.userId?.slice(0, 6) ?? "Bot").join(" · ")}
+                        </div>
+                      </div>
+                      <div style={{ color: "rgba(232,244,255,0.62)", fontSize: "0.82rem", textAlign: "right" }}>
+                        {match.status === "ACCEPTING" ? `Aceptaron ${accepted}/${humanPlayers.length}` : match.selectedMap ? `Mapa: ${match.selectedMap}` : "Sin mapa"}
+                      </div>
+                      <div style={{ display: "flex", gap: "0.5rem", justifyContent: "flex-end" }}>
+                        <button onClick={() => handleAdminCancelMatch(match.id)} disabled={adminActionMatchId === match.id} style={amberGhostButtonStyle}>Cancelar</button>
+                        <button onClick={() => handleAdminDeleteMatch(match.id)} disabled={adminActionMatchId === match.id} style={redGhostButtonStyle}>Borrar</button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </section>
+        )}
+      </section>
     </>
   );
+
 }
+
+type Tone = "default" | "warn" | "danger";
+
+function PanelTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
+  return (
+    <div>
+      <div style={{ color: "rgba(232,244,255,0.30)", fontSize: "0.68rem", letterSpacing: "0.2em", textTransform: "uppercase", fontWeight: 900 }}>
+        {eyebrow}
+      </div>
+      <div style={{ color: "#fff", fontFamily: "var(--font-display)", fontSize: "1.2rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", marginTop: "0.12rem" }}>
+        {title}
+      </div>
+    </div>
+  );
+}
+
+function HeroMetric({ label, value, tone }: { label: string; value: string | number; tone: string }) {
+  return (
+    <div style={{ border: "1px solid rgba(232,244,255,0.08)", background: "rgba(2,6,14,0.58)", padding: "0.8rem 0.9rem" }}>
+      <div style={{ color: "rgba(232,244,255,0.34)", fontSize: "0.64rem", textTransform: "uppercase", letterSpacing: "0.16em", fontWeight: 900 }}>{label}</div>
+      <div style={{ color: tone, fontFamily: "var(--font-display)", fontSize: "1.35rem", fontWeight: 900, lineHeight: 1.05, marginTop: "0.25rem" }}>{value}</div>
+    </div>
+  );
+}
+
+function RolePill({ role, muted }: { role: string; muted?: boolean }) {
+  const colors: Record<string, string> = {
+    TANK: "#38bdf8",
+    DPS: "#fb7185",
+    BRUISER: "#f97316",
+    SUPPORT: "#a78bfa",
+    HEALER: "#4ade80",
+  };
+  const labels: Record<string, string> = {
+    TANK: "Tank",
+    DPS: "DPS",
+    BRUISER: "Offlane",
+    SUPPORT: "Support",
+    HEALER: "Healer",
+  };
+  const color = colors[role] ?? "rgba(232,244,255,0.34)";
+  return (
+    <span style={{ border: `1px solid ${muted ? "rgba(232,244,255,0.12)" : `${color}66`}`, background: muted ? "rgba(255,255,255,0.03)" : `${color}16`, color: muted ? "rgba(232,244,255,0.42)" : color, padding: "0.28rem 0.45rem", fontFamily: "var(--font-display)", fontSize: "0.62rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
+      {labels[role] ?? role}
+    </span>
+  );
+}
+
+function ModeButton({ label, desc, active, disabled }: { label: string; desc: string; active?: boolean; disabled?: boolean }) {
+  return (
+    <div style={{ border: active ? "1px solid rgba(0,200,255,0.42)" : "1px solid rgba(232,244,255,0.07)", background: active ? "rgba(0,200,255,0.08)" : "rgba(255,255,255,0.025)", opacity: disabled ? 0.55 : 1, padding: "0.8rem 0.9rem", display: "flex", justifyContent: "space-between", gap: "1rem" }}>
+      <div>
+        <div style={{ color: active ? "#7dd3fc" : "rgba(232,244,255,0.72)", fontFamily: "var(--font-display)", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
+        <div style={{ color: "rgba(232,244,255,0.34)", fontSize: "0.78rem", marginTop: "0.12rem" }}>{desc}</div>
+      </div>
+      <div style={{ color: active ? "#4ade80" : "rgba(232,244,255,0.22)", fontSize: "0.72rem", fontWeight: 900, textTransform: "uppercase" }}>{active ? "Activo" : "Soon"}</div>
+    </div>
+  );
+}
+
+function Notice({ text, tone = "default" }: { text: string; tone?: Tone }) {
+  const palette = tone === "danger"
+    ? { border: "rgba(248,113,113,0.28)", bg: "rgba(127,29,29,0.13)", color: "#fecaca" }
+    : tone === "warn"
+      ? { border: "rgba(251,191,36,0.28)", bg: "rgba(251,191,36,0.10)", color: "#fde68a" }
+      : { border: "rgba(232,244,255,0.09)", bg: "rgba(255,255,255,0.025)", color: "rgba(232,244,255,0.54)" };
+  return <div style={{ border: `1px solid ${palette.border}`, background: palette.bg, color: palette.color, padding: "0.8rem 0.9rem", fontSize: "0.86rem" }}>{text}</div>;
+}
+
+function StatPanel({ label, value, sub, tone }: { label: string; value: string; sub: string; tone: string }) {
+  return (
+    <div style={panelStyle}>
+      <div style={{ color: "rgba(232,244,255,0.30)", fontSize: "0.68rem", textTransform: "uppercase", letterSpacing: "0.16em", fontWeight: 900 }}>{label}</div>
+      <div style={{ color: tone, fontFamily: "var(--font-display)", fontSize: "2rem", lineHeight: 1, fontWeight: 900, marginTop: "0.35rem" }}>{value}</div>
+      <div style={{ color: "rgba(232,244,255,0.36)", fontSize: "0.8rem", marginTop: "0.25rem" }}>{sub}</div>
+    </div>
+  );
+}
+
+const panelStyle: React.CSSProperties = {
+  border: "1px solid rgba(232,244,255,0.07)",
+  background: "linear-gradient(180deg, rgba(17,25,39,0.76), rgba(8,12,20,0.66))",
+  padding: "1rem",
+};
+
+const slotBaseStyle: React.CSSProperties = {
+  minHeight: "210px",
+  border: "1px dashed rgba(232,244,255,0.10)",
+  background: "rgba(255,255,255,0.025)",
+  display: "flex",
+  flexDirection: "column",
+  alignItems: "center",
+  justifyContent: "center",
+  gap: "0.7rem",
+  padding: "1rem",
+};
+
+const queueRowStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "0.9rem",
+  border: "1px solid rgba(232,244,255,0.07)",
+  background: "rgba(2,6,14,0.42)",
+  padding: "0.75rem 0.85rem",
+};
+
+const queueAvatarStyle: React.CSSProperties = {
+  width: "34px",
+  height: "34px",
+  borderRadius: "999px",
+  border: "1px solid rgba(0,200,255,0.25)",
+  display: "grid",
+  placeItems: "center",
+  color: "#7dd3fc",
+  fontFamily: "var(--font-display)",
+  fontWeight: 900,
+  background: "rgba(0,200,255,0.08)",
+  flexShrink: 0,
+};
+
+const goldButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(251,191,36,0.55)",
+  background: "#fbbf24",
+  color: "#111827",
+  padding: "0.8rem 1rem",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const blueGhostButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(125,211,252,0.4)",
+  background: "rgba(14,116,144,0.25)",
+  color: "#bae6fd",
+  padding: "0.65rem 0.9rem",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const amberGhostButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(251,191,36,0.35)",
+  background: "rgba(251,191,36,0.10)",
+  color: "#fde68a",
+  padding: "0.6rem 0.8rem",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const redGhostButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(248,113,113,0.35)",
+  background: "rgba(248,113,113,0.10)",
+  color: "#fecaca",
+  padding: "0.6rem 0.8rem",
+  fontWeight: 900,
+  cursor: "pointer",
+};
+
+const adminMatchStyle: React.CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(0, 1fr) auto auto",
+  alignItems: "center",
+  gap: "0.9rem",
+  border: "1px solid rgba(232,244,255,0.07)",
+  background: "rgba(15,23,42,0.72)",
+  padding: "0.85rem",
+};
