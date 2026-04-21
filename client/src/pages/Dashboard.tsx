@@ -455,7 +455,7 @@ export function Dashboard() {
             overflow: "hidden",
             border: "1px solid rgba(0,200,255,0.14)",
             background:
-              "linear-gradient(135deg, rgba(0,200,255,0.10), rgba(124,77,255,0.06) 42%, rgba(2,6,14,0.92)), url('/images/ranked.webp') center/cover",
+              "linear-gradient(135deg, rgba(0,200,255,0.10), rgba(124,77,255,0.06) 42%, rgba(2,6,14,0.92)), url('/images/BC-2018-1_1920x1200.jpg') center/cover",
             minHeight: "230px",
             padding: "1.4rem",
             display: "grid",
@@ -503,7 +503,7 @@ export function Dashboard() {
                     marginBottom: "0.45rem",
                   }}
                 >
-                  South America · Custom lobby queue
+                  South America · Matchmaking competitivo
                 </div>
                 <h1
                   style={{
@@ -549,7 +549,7 @@ export function Dashboard() {
               <HeroMetric label="Modo" value={MODES.find((m) => m.key === selectedMode)?.label ?? "Competitivo"} tone="#38bdf8" />
               <HeroMetric label="Cola" value={`${queueSize ?? 0}/10`} tone="#a78bfa" />
               <HeroMetric label="Posición" value={queuePosition ?? "—"} tone="#facc15" />
-              <HeroMetric label="ETA" value={queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "—"} tone="#4ade80" />
+              <HeroMetric label="Espera" value={queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "—"} tone="#4ade80" />
             </div>
           </div>
         </header>
@@ -557,7 +557,7 @@ export function Dashboard() {
         <section
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(0, 1.2fr) minmax(310px, 0.8fr)",
+            gridTemplateColumns: "minmax(0, 1.65fr) minmax(260px, 0.55fr)",
             gap: "1rem",
             alignItems: "stretch",
           }}
@@ -572,9 +572,9 @@ export function Dashboard() {
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
-              <PanelTitle eyebrow="Party setup" title="Escuadra previa" />
+              <PanelTitle eyebrow="Centro de preparación" title="Escuadra previa" />
               <div style={{ color: "rgba(232,244,255,0.40)", fontSize: "0.8rem", fontWeight: 700 }}>
-                Roles desde tu perfil competitivo
+                Tu identidad antes de entrar a cola
               </div>
             </div>
 
@@ -676,12 +676,15 @@ export function Dashboard() {
               alignContent: "space-between",
             }}
           >
-            <PanelTitle eyebrow="Queue console" title="Entrada a partida" />
+            <PanelTitle eyebrow="Matchmaking" title="Competitivo aleatorio" />
 
-            <div style={{ display: "grid", gap: "0.55rem" }}>
-              <ModeButton active label="Competitivo" desc="5v5 · Draft · MMR activo" />
-              <ModeButton label="Torneos" desc="Próximamente" disabled />
-              <ModeButton label="Equipos" desc="Próximamente" disabled />
+            <div style={{ border: "1px solid rgba(232,244,255,0.07)", background: "rgba(2,6,14,0.36)", padding: "0.9rem", display: "grid", gap: "0.6rem" }}>
+              <div style={{ color: "#7dd3fc", fontFamily: "var(--font-display)", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>
+                5v5 · Draft · MMR activo
+              </div>
+              <div style={{ color: "rgba(232,244,255,0.58)", fontSize: "0.86rem", lineHeight: 1.45 }}>
+                Entrás solo o con party chica. El sistema completa jugadores, arma equipos y abre una sala con capitanes y veto de mapas.
+              </div>
             </div>
 
             <button
@@ -738,7 +741,7 @@ export function Dashboard() {
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
               <PanelTitle eyebrow="Live queue" title="Jugadores buscando partida" />
               <div style={{ color: "#7dd3fc", fontFamily: "var(--font-display)", fontWeight: 900, letterSpacing: "0.12em", textTransform: "uppercase" }}>
-                Posición {queuePosition ?? "—"} · ETA {queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "calculando"}
+                Posición {queuePosition ?? "—"} · Espera estimada {queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "calculando"}
               </div>
             </div>
 
@@ -897,18 +900,6 @@ function RolePill({ role, muted }: { role: string; muted?: boolean }) {
   );
 }
 
-function ModeButton({ label, desc, active, disabled }: { label: string; desc: string; active?: boolean; disabled?: boolean }) {
-  return (
-    <div style={{ border: active ? "1px solid rgba(0,200,255,0.42)" : "1px solid rgba(232,244,255,0.07)", background: active ? "rgba(0,200,255,0.08)" : "rgba(255,255,255,0.025)", opacity: disabled ? 0.55 : 1, padding: "0.8rem 0.9rem", display: "flex", justifyContent: "space-between", gap: "1rem" }}>
-      <div>
-        <div style={{ color: active ? "#7dd3fc" : "rgba(232,244,255,0.72)", fontFamily: "var(--font-display)", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" }}>{label}</div>
-        <div style={{ color: "rgba(232,244,255,0.34)", fontSize: "0.78rem", marginTop: "0.12rem" }}>{desc}</div>
-      </div>
-      <div style={{ color: active ? "#4ade80" : "rgba(232,244,255,0.22)", fontSize: "0.72rem", fontWeight: 900, textTransform: "uppercase" }}>{active ? "Activo" : "Soon"}</div>
-    </div>
-  );
-}
-
 function Notice({ text, tone = "default" }: { text: string; tone?: Tone }) {
   const palette = tone === "danger"
     ? { border: "rgba(248,113,113,0.28)", bg: "rgba(127,29,29,0.13)", color: "#fecaca" }
@@ -935,7 +926,7 @@ const panelStyle: React.CSSProperties = {
 };
 
 const slotBaseStyle: React.CSSProperties = {
-  minHeight: "210px",
+  minHeight: "250px",
   border: "1px dashed rgba(232,244,255,0.10)",
   background: "rgba(255,255,255,0.025)",
   display: "flex",
