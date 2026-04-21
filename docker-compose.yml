@@ -1,0 +1,22 @@
+version: '3.9'
+
+# Nota: PostgreSQL usa Neon (cloud). Solo Redis corre local.
+# Para la DB: crear proyecto en https://neon.tech y copiar las URLs al .env
+
+services:
+  redis:
+    image: redis:7-alpine
+    container_name: nexusgg_redis
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  redis_data:

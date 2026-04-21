@@ -1,0 +1,203 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")      // Pooled — para queries (PgBouncer de Neon)
+  directUrl = env("DIRECT_URL")        // Directo — para migrations
+}
+
+// ─── Enums ───────────────────────────────────────────────
+
+enum Role {
+  USER
+  MODERATOR
+  ADMIN
+  BANNED
+}
+
+enum MatchStatus {
+  PENDING    // Esperando que los 10 acepten
+  ACCEPTING  // Accept screen abierta
+  VETOING    // Veto de mapas en curso
+  PLAYING    // Partida en curso
+  VOTING     // Votación de ganador abierta
+  COMPLETED  // Partida finalizada
+  CANCELLED  // Cancelada (alguien rechazó / timeout)
+}
+
+enum GameMode {
+  COMPETITIVE
+  UNRANKED
+  TEAM
+}
+
+enum PlayerRole {
+  TANK
+  DPS
+  BRUISER
+  SUPPORT
+  HEALER
+}
+
+// ─── Models ───────────────────────────────────────────────
+
+model User {
+  id       String @id @default(cuid())
+  username String @unique
+  email    String @unique
+  password String? // null si solo tiene OAuth
+
+  avatar   String?
+  role     Role    @default(USER)
+
+  // MMR / ELO
+  mmr   Int    @default(1200)
+  rank  String @default("LVL_7")
+  wins  Int    @default(0)
+  losses Int   @default(0)
+  mainRole      PlayerRole?
+  secondaryRole PlayerRole?
+
+  // OAuth IDs
+  discordId String? @unique
+  bnetId    String? @unique
+  googleId  String? @unique
+
+  // Metadata OAuth (para anti-smurfing)
+  discordCreatedAt DateTime?
+  discordUsername  String?
+  bnetBattletag    String?
+
+  // Anti-smurfing
+  isBanned   Boolean  @default(false)
+  isSuspect  Boolean  @default(false)
+  banReason  String?
+  bannedAt   DateTime?
+
+  // Relations
+  refreshTokens RefreshToken[]
+  matchPlayers  MatchPlayer[]
+  chatMessages  ChatMessage[]
+  votes         Vote[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([mmr])
+  @@index([rank])
+  @@index([mainRole])
+  @@index([secondaryRole])
+}
+
+model RefreshToken {
+  id        String   @id @default(cuid())
+  jti       String   @unique
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  isRevoked Boolean  @default(false)
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@index([jti])
+}
+
+model Match {
+  id     String      @id @default(cuid())
+  status MatchStatus @default(PENDING)
+  mode   GameMode    @default(COMPETITIVE)
+  region String      @default("SA")
+
+  // Post-veto
+  selectedMap String?
+
+  // Post-votación
+  winner    Int? // 1 o 2 (team number)
+  duration  Int? // segundos estimados
+
+  // Relations
+  players  MatchPlayer[]
+  vetoes   MapVeto[]
+  messages ChatMessage[]
+  votes    Vote[]
+
+  createdAt DateTime  @default(now())
+  startedAt DateTime?
+  endedAt   DateTime?
+
+  @@index([status])
+  @@index([createdAt])
+}
+
+model MatchPlayer {
+  id      String @id @default(cuid())
+  matchId String
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId  String?
+  user    User?  @relation(fields: [userId], references: [id])
+  isBot   Boolean @default(false)
+  botName String?
+
+  team      Int     // 1 o 2
+  isCaptain Boolean @default(false)
+
+  // ELO snapshot
+  mmrBefore Int
+  mmrAfter  Int?
+  mmrDelta  Int?
+
+  // Accept flow
+  accepted Boolean? // null=pendiente, true=aceptó, false=rechazó
+
+  @@unique([matchId, userId])
+  @@index([matchId])
+  @@index([userId])
+  @@index([isBot])
+}
+
+model MapVeto {
+  id      String @id @default(cuid())
+  matchId String
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  mapId   String
+  mapName String
+  team    Int    // 1 o 2 — qué equipo vetó
+  auto    Boolean @default(false) // true = auto-veto por timeout
+  order   Int    // índice en la secuencia de vetos
+
+  createdAt DateTime @default(now())
+
+  @@index([matchId])
+}
+
+model Vote {
+  id      String @id @default(cuid())
+  matchId String
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation(fields: [userId], references: [id])
+
+  winner Int // 1 o 2
+
+  createdAt DateTime @default(now())
+
+  @@unique([matchId, userId])
+  @@index([matchId])
+}
+
+model ChatMessage {
+  id      String @id @default(cuid())
+  matchId String
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation(fields: [userId], references: [id])
+
+  content String @db.VarChar(500)
+
+  createdAt DateTime @default(now())
+
+  @@index([matchId, createdAt])
+}

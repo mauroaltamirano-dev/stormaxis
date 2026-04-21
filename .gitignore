@@ -1,0 +1,31 @@
+node_modules/
+dist/
+build/
+.env
+.env.local
+.env.production
+
+# Prisma
+server/prisma/migrations/*_test
+*.db
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+*.suo
+*.user
+
+# Logs
+*.log
+npm-debug.log*
+
+# Coverage
+coverage/
+
+# Local agent/tooling scratch
+.codex
+.wolf/
+.tmp-*

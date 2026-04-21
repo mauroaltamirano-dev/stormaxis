@@ -1,0 +1,1292 @@
+<!doctype html>
+<html>
+  <head>
+    <style>
+      @import url("https://fonts.googleapis.com/css2?family=Rajdhani:wght@400;500;600;700&family=Exo+2:wght@300;400;500;600&display=swap");
+
+      *,
+      *::before,
+      *::after {
+        box-sizing: border-box;
+        margin: 0;
+        padding: 0;
+      }
+
+      :root {
+        --nexus-bg: #080c14;
+        --nexus-surface: #0d1422;
+        --nexus-card: #111927;
+        --nexus-border: rgba(100, 200, 255, 0.08);
+        --nexus-border-active: rgba(100, 200, 255, 0.25);
+        --nexus-accent: #00c8ff;
+        --nexus-accent-dim: rgba(0, 200, 255, 0.12);
+        --nexus-gold: #f0a500;
+        --nexus-gold-dim: rgba(240, 165, 0, 0.12);
+        --nexus-green: #00e676;
+        --nexus-red: #ff4757;
+        --nexus-purple: #7c4dff;
+        --nexus-text: #e8f4ff;
+        --nexus-muted: rgba(200, 220, 255, 0.45);
+        --nexus-faint: rgba(200, 220, 255, 0.15);
+        --font-display: "Rajdhani", sans-serif;
+        --font-body: "Exo 2", sans-serif;
+      }
+
+      body {
+        background: var(--nexus-bg);
+        color: var(--nexus-text);
+        font-family: var(--font-body);
+        font-size: 13px;
+        min-height: 100vh;
+        overflow-x: hidden;
+      }
+
+      /* Animated bg grid */
+      body::before {
+        content: "";
+        position: fixed;
+        inset: 0;
+        background-image:
+          linear-gradient(rgba(0, 200, 255, 0.03) 1px, transparent 1px),
+          linear-gradient(90deg, rgba(0, 200, 255, 0.03) 1px, transparent 1px);
+        background-size: 40px 40px;
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      /* Top glow */
+      body::after {
+        content: "";
+        position: fixed;
+        top: -60px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 800px;
+        height: 120px;
+        background: radial-gradient(
+          ellipse,
+          rgba(0, 200, 255, 0.08) 0%,
+          transparent 70%
+        );
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .app {
+        position: relative;
+        z-index: 1;
+        display: flex;
+        flex-direction: column;
+        min-height: 100vh;
+      }
+
+      /* NAV */
+      nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 24px;
+        height: 56px;
+        border-bottom: 1px solid var(--nexus-border);
+        background: rgba(8, 12, 20, 0.85);
+        backdrop-filter: blur(12px);
+        position: sticky;
+        top: 0;
+        z-index: 100;
+      }
+
+      .nav-logo {
+        font-family: var(--font-display);
+        font-size: 20px;
+        font-weight: 700;
+        letter-spacing: 3px;
+        color: var(--nexus-accent);
+        text-transform: uppercase;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+      .logo-icon {
+        width: 28px;
+        height: 28px;
+        background: var(--nexus-accent);
+        clip-path: polygon(
+          50% 0%,
+          100% 25%,
+          100% 75%,
+          50% 100%,
+          0% 75%,
+          0% 25%
+        );
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        animation: pulse-logo 3s ease-in-out infinite;
+      }
+      @keyframes pulse-logo {
+        0%,
+        100% {
+          box-shadow: 0 0 0 0 rgba(0, 200, 255, 0.4);
+          opacity: 1;
+        }
+        50% {
+          box-shadow: 0 0 12px 4px rgba(0, 200, 255, 0.15);
+          opacity: 0.9;
+        }
+      }
+
+      .nav-tabs {
+        display: flex;
+        gap: 4px;
+      }
+      .nav-tab {
+        padding: 6px 14px;
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 600;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--nexus-muted);
+        border: none;
+        background: none;
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        transition: all 0.2s;
+      }
+      .nav-tab:hover {
+        color: var(--nexus-text);
+      }
+      .nav-tab.active {
+        color: var(--nexus-accent);
+        border-bottom-color: var(--nexus-accent);
+      }
+
+      .nav-right {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+      .player-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--nexus-card);
+        border: 1px solid var(--nexus-border);
+        border-radius: 6px;
+        padding: 5px 10px 5px 6px;
+        cursor: pointer;
+        transition: border-color 0.2s;
+      }
+      .player-badge:hover {
+        border-color: var(--nexus-border-active);
+      }
+      .avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #1a3a5c, #0d2040);
+        border: 1.5px solid var(--nexus-accent);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--nexus-accent);
+        flex-shrink: 0;
+      }
+      .player-info {
+        display: flex;
+        flex-direction: column;
+      }
+      .player-name {
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 600;
+        color: var(--nexus-text);
+        line-height: 1;
+      }
+      .player-rank-label {
+        font-size: 10px;
+        color: var(--nexus-gold);
+        font-weight: 500;
+        line-height: 1.4;
+      }
+
+      /* MAIN LAYOUT */
+      .main {
+        display: grid;
+        grid-template-columns: 220px 1fr 240px;
+        gap: 0;
+        flex: 1;
+      }
+
+      /* LEFT SIDEBAR */
+      .sidebar-left {
+        border-right: 1px solid var(--nexus-border);
+        padding: 20px 0;
+        background: rgba(13, 20, 34, 0.5);
+      }
+      .sidebar-section {
+        margin-bottom: 28px;
+      }
+      .sidebar-label {
+        font-family: var(--font-display);
+        font-size: 10px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        color: var(--nexus-faint);
+        padding: 0 16px 8px;
+      }
+      .sidebar-item {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 8px 16px;
+        cursor: pointer;
+        color: var(--nexus-muted);
+        font-weight: 500;
+        border-left: 2px solid transparent;
+        transition: all 0.15s;
+      }
+      .sidebar-item:hover {
+        color: var(--nexus-text);
+        background: rgba(0, 200, 255, 0.04);
+      }
+      .sidebar-item.active {
+        color: var(--nexus-accent);
+        border-left-color: var(--nexus-accent);
+        background: var(--nexus-accent-dim);
+      }
+      .sidebar-icon {
+        font-size: 15px;
+        width: 18px;
+        text-align: center;
+      }
+      .badge-count {
+        margin-left: auto;
+        background: var(--nexus-accent);
+        color: var(--nexus-bg);
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 8px;
+      }
+
+      /* MMR Card */
+      .mmr-card {
+        margin: 0 12px 20px;
+        background: var(--nexus-card);
+        border: 1px solid var(--nexus-border);
+        border-radius: 10px;
+        padding: 14px;
+      }
+      .mmr-rank-row {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        margin-bottom: 10px;
+      }
+      .rank-gem {
+        width: 36px;
+        height: 36px;
+        clip-path: polygon(
+          50% 0%,
+          100% 25%,
+          100% 75%,
+          50% 100%,
+          0% 75%,
+          0% 25%
+        );
+        background: linear-gradient(135deg, #f0a500, #ff6b35);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+      .mmr-info {
+        flex: 1;
+      }
+      .mmr-tier {
+        font-family: var(--font-display);
+        font-size: 16px;
+        font-weight: 700;
+        color: var(--nexus-gold);
+        line-height: 1;
+      }
+      .mmr-points {
+        font-size: 11px;
+        color: var(--nexus-muted);
+      }
+      .mmr-bar-wrap {
+        background: rgba(255, 255, 255, 0.06);
+        border-radius: 3px;
+        height: 5px;
+        margin-bottom: 6px;
+      }
+      .mmr-bar {
+        height: 5px;
+        border-radius: 3px;
+        background: linear-gradient(90deg, var(--nexus-gold), #ff6b35);
+        width: 72%;
+      }
+      .mmr-sub {
+        font-size: 10px;
+        color: var(--nexus-faint);
+        text-align: right;
+      }
+
+      /* CONTENT */
+      .content {
+        padding: 20px 24px;
+      }
+
+      /* Match queue section */
+      .queue-hero {
+        background: var(--nexus-card);
+        border: 1px solid var(--nexus-border);
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin-bottom: 16px;
+        position: relative;
+        overflow: hidden;
+      }
+      .queue-hero::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background: linear-gradient(
+          90deg,
+          transparent,
+          var(--nexus-accent),
+          transparent
+        );
+      }
+      .queue-top {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 16px;
+      }
+      .section-title {
+        font-family: var(--font-display);
+        font-size: 18px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+      }
+      .queue-status {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+      }
+      .dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .dot.green {
+        background: var(--nexus-green);
+        box-shadow: 0 0 6px var(--nexus-green);
+        animation: blink 1.5s infinite;
+      }
+      .dot.orange {
+        background: #ff9100;
+      }
+      @keyframes blink {
+        0%,
+        100% {
+          opacity: 1;
+        }
+        50% {
+          opacity: 0.4;
+        }
+      }
+
+      /* Mode selector */
+      .mode-grid {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .mode-card {
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--nexus-border);
+        border-radius: 8px;
+        padding: 12px 10px;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.2s;
+      }
+      .mode-card:hover {
+        border-color: var(--nexus-border-active);
+        background: rgba(0, 200, 255, 0.05);
+      }
+      .mode-card.selected {
+        border-color: var(--nexus-accent);
+        background: var(--nexus-accent-dim);
+      }
+      .mode-icon {
+        font-size: 20px;
+        margin-bottom: 4px;
+      }
+      .mode-name {
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.5px;
+        color: var(--nexus-text);
+        text-transform: uppercase;
+      }
+      .mode-desc {
+        font-size: 10px;
+        color: var(--nexus-muted);
+      }
+      .mode-card.selected .mode-name {
+        color: var(--nexus-accent);
+      }
+
+      /* Role selector */
+      .role-row {
+        display: flex;
+        gap: 8px;
+        margin-bottom: 16px;
+      }
+      .role-btn {
+        flex: 1;
+        padding: 8px 4px;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px solid var(--nexus-border);
+        border-radius: 7px;
+        cursor: pointer;
+        text-align: center;
+        transition: all 0.2s;
+        font-size: 10px;
+        font-weight: 600;
+        letter-spacing: 0.5px;
+        color: var(--nexus-muted);
+        text-transform: uppercase;
+      }
+      .role-btn:hover {
+        border-color: var(--nexus-border-active);
+        color: var(--nexus-text);
+      }
+      .role-btn.active {
+        background: rgba(124, 77, 255, 0.15);
+        border-color: var(--nexus-purple);
+        color: var(--nexus-purple);
+      }
+      .role-icon {
+        font-size: 16px;
+        display: block;
+        margin-bottom: 2px;
+      }
+
+      /* Find match btn */
+      .find-match-btn {
+        width: 100%;
+        padding: 13px;
+        font-family: var(--font-display);
+        font-size: 16px;
+        font-weight: 700;
+        letter-spacing: 2px;
+        text-transform: uppercase;
+        background: var(--nexus-accent);
+        color: var(--nexus-bg);
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: all 0.2s;
+        position: relative;
+        overflow: hidden;
+      }
+      .find-match-btn::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(
+          90deg,
+          transparent 0%,
+          rgba(255, 255, 255, 0.15) 50%,
+          transparent 100%
+        );
+        transform: translateX(-100%);
+        transition: transform 0.4s;
+      }
+      .find-match-btn:hover {
+        background: #00e0ff;
+        transform: translateY(-1px);
+        box-shadow: 0 4px 20px rgba(0, 200, 255, 0.35);
+      }
+      .find-match-btn:hover::after {
+        transform: translateX(100%);
+      }
+      .find-match-btn:active {
+        transform: translateY(0);
+      }
+
+      /* Stats row */
+      .stats-row {
+        display: grid;
+        grid-template-columns: repeat(3, 1fr);
+        gap: 10px;
+        margin-bottom: 16px;
+      }
+      .stat-card {
+        background: var(--nexus-card);
+        border: 1px solid var(--nexus-border);
+        border-radius: 8px;
+        padding: 12px 14px;
+      }
+      .stat-label {
+        font-size: 10px;
+        color: var(--nexus-muted);
+        text-transform: uppercase;
+        letter-spacing: 0.8px;
+        margin-bottom: 4px;
+      }
+      .stat-value {
+        font-family: var(--font-display);
+        font-size: 22px;
+        font-weight: 700;
+        line-height: 1;
+      }
+      .stat-value.green {
+        color: var(--nexus-green);
+      }
+      .stat-value.gold {
+        color: var(--nexus-gold);
+      }
+      .stat-value.accent {
+        color: var(--nexus-accent);
+      }
+      .stat-sub {
+        font-size: 10px;
+        color: var(--nexus-faint);
+        margin-top: 2px;
+      }
+
+      /* Match history */
+      .section-header {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        margin-bottom: 10px;
+      }
+      .section-header-title {
+        font-family: var(--font-display);
+        font-size: 14px;
+        font-weight: 700;
+        letter-spacing: 1px;
+        text-transform: uppercase;
+        color: var(--nexus-muted);
+      }
+      .view-all {
+        font-size: 11px;
+        color: var(--nexus-accent);
+        cursor: pointer;
+      }
+
+      .match-list {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .match-item {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        background: var(--nexus-card);
+        border: 1px solid var(--nexus-border);
+        border-radius: 8px;
+        padding: 10px 14px;
+        border-left: 3px solid transparent;
+        transition: border-color 0.15s;
+        cursor: pointer;
+      }
+      .match-item:hover {
+        border-color: var(--nexus-border-active);
+        border-left-color: inherit;
+      }
+      .match-item.win {
+        border-left-color: var(--nexus-green);
+      }
+      .match-item.loss {
+        border-left-color: var(--nexus-red);
+      }
+      .match-result {
+        font-family: var(--font-display);
+        font-size: 14px;
+        font-weight: 700;
+        width: 32px;
+        flex-shrink: 0;
+      }
+      .match-result.win {
+        color: var(--nexus-green);
+      }
+      .match-result.loss {
+        color: var(--nexus-red);
+      }
+      .hero-portrait {
+        width: 32px;
+        height: 32px;
+        border-radius: 6px;
+        background: linear-gradient(135deg, #1a2a3a, #0d1c2a);
+        border: 1px solid var(--nexus-border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 16px;
+        flex-shrink: 0;
+      }
+      .match-details {
+        flex: 1;
+      }
+      .match-hero-name {
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .match-map {
+        font-size: 10px;
+        color: var(--nexus-muted);
+      }
+      .match-stats {
+        text-align: right;
+      }
+      .match-kda {
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 600;
+      }
+      .match-time {
+        font-size: 10px;
+        color: var(--nexus-faint);
+      }
+      .mmr-delta {
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 700;
+        width: 44px;
+        text-align: right;
+      }
+      .mmr-delta.pos {
+        color: var(--nexus-green);
+      }
+      .mmr-delta.neg {
+        color: var(--nexus-red);
+      }
+
+      /* RIGHT SIDEBAR */
+      .sidebar-right {
+        border-left: 1px solid var(--nexus-border);
+        padding: 20px 14px;
+        background: rgba(13, 20, 34, 0.5);
+        display: flex;
+        flex-direction: column;
+        gap: 16px;
+      }
+
+      .panel-title {
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 1.5px;
+        text-transform: uppercase;
+        color: var(--nexus-muted);
+        margin-bottom: 10px;
+      }
+
+      /* Players online */
+      .online-panel {
+      }
+      .online-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        border-bottom: 1px solid var(--nexus-border);
+      }
+      .online-item:last-child {
+        border-bottom: none;
+      }
+      .online-avatar {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        background: var(--nexus-card);
+        border: 1px solid var(--nexus-border);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 11px;
+        font-weight: 700;
+        font-family: var(--font-display);
+        flex-shrink: 0;
+      }
+      .online-info {
+        flex: 1;
+      }
+      .online-name {
+        font-size: 12px;
+        font-weight: 500;
+        line-height: 1;
+      }
+      .online-status {
+        font-size: 10px;
+        color: var(--nexus-muted);
+      }
+      .online-rank-badge {
+        font-size: 9px;
+        font-weight: 700;
+        padding: 1px 5px;
+        border-radius: 4px;
+      }
+      .badge-gold {
+        background: var(--nexus-gold-dim);
+        color: var(--nexus-gold);
+        border: 1px solid rgba(240, 165, 0, 0.2);
+      }
+      .badge-plat {
+        background: rgba(0, 200, 255, 0.1);
+        color: var(--nexus-accent);
+        border: 1px solid rgba(0, 200, 255, 0.2);
+      }
+      .badge-dia {
+        background: rgba(124, 77, 255, 0.1);
+        color: var(--nexus-purple);
+        border: 1px solid rgba(124, 77, 255, 0.2);
+      }
+
+      /* Leaderboard */
+      .lb-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 5px 0;
+        border-bottom: 1px solid var(--nexus-border);
+      }
+      .lb-item:last-child {
+        border-bottom: none;
+      }
+      .lb-rank {
+        font-family: var(--font-display);
+        font-size: 13px;
+        font-weight: 700;
+        width: 20px;
+        color: var(--nexus-faint);
+        flex-shrink: 0;
+      }
+      .lb-rank.top {
+        color: var(--nexus-gold);
+      }
+      .lb-name {
+        flex: 1;
+        font-size: 12px;
+        font-weight: 500;
+      }
+      .lb-mmr {
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--nexus-accent);
+      }
+
+      /* Server status */
+      .server-panel {
+      }
+      .server-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 5px 0;
+      }
+      .server-name {
+        font-size: 11px;
+        color: var(--nexus-muted);
+      }
+      .server-ping {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        font-size: 11px;
+        font-weight: 600;
+      }
+      .ping-dot {
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+      }
+      .ping-good {
+        color: var(--nexus-green);
+      }
+      .ping-good .ping-dot {
+        background: var(--nexus-green);
+      }
+      .ping-med {
+        color: var(--nexus-gold);
+      }
+      .ping-med .ping-dot {
+        background: var(--nexus-gold);
+      }
+
+      /* Tabs in content */
+      .content-tabs {
+        display: flex;
+        gap: 0;
+        margin-bottom: 16px;
+        border-bottom: 1px solid var(--nexus-border);
+      }
+      .content-tab {
+        padding: 8px 16px;
+        font-family: var(--font-display);
+        font-size: 12px;
+        font-weight: 700;
+        letter-spacing: 0.8px;
+        text-transform: uppercase;
+        color: var(--nexus-muted);
+        cursor: pointer;
+        border-bottom: 2px solid transparent;
+        margin-bottom: -1px;
+        transition: all 0.15s;
+      }
+      .content-tab:hover {
+        color: var(--nexus-text);
+      }
+      .content-tab.active {
+        color: var(--nexus-accent);
+        border-bottom-color: var(--nexus-accent);
+      }
+
+      @keyframes fadeIn {
+        from {
+          opacity: 0;
+          transform: translateY(4px);
+        }
+        to {
+          opacity: 1;
+          transform: none;
+        }
+      }
+      .content > * {
+        animation: fadeIn 0.3s ease both;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="app">
+      <!-- NAV -->
+      <nav>
+        <div class="nav-logo">
+          <div class="logo-icon"></div>
+          NexusGG
+        </div>
+        <div class="nav-tabs">
+          <button class="nav-tab active">Jugar</button>
+          <button class="nav-tab">Héroes</button>
+          <button class="nav-tab">Estadísticsas</button>
+          <button class="nav-tab">Torneos</button>
+          <button class="nav-tab">Comunidad</button>
+        </div>
+        <div class="nav-right">
+          <div class="player-badge">
+            <div class="avatar">ZX</div>
+            <div class="player-info">
+              <span class="player-name">ZeroX</span>
+              <span class="player-rank-label">⬡ ORO II</span>
+            </div>
+          </div>
+        </div>
+      </nav>
+
+      <!-- MAIN -->
+      <div class="main">
+        <!-- LEFT SIDEBAR -->
+        <aside class="sidebar-left">
+          <!-- MMR Card -->
+          <div class="mmr-card">
+            <div class="mmr-rank-row">
+              <div class="rank-gem">⬡</div>
+              <div class="mmr-info">
+                <div class="mmr-tier">ORO II</div>
+                <div class="mmr-points">2.340 MMR</div>
+              </div>
+            </div>
+            <div class="mmr-bar-wrap"><div class="mmr-bar"></div></div>
+            <div class="mmr-sub">72 / 100 pts → Oro I</div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-label">Principal</div>
+            <div class="sidebar-item active">
+              <span class="sidebar-icon">⚔</span>Buscar Partida
+            </div>
+            <div class="sidebar-item">
+              <span class="sidebar-icon">👥</span>Mi Equipo
+              <span class="badge-count">3</span>
+            </div>
+            <div class="sidebar-item">
+              <span class="sidebar-icon">🏆</span>Torneos
+            </div>
+            <div class="sidebar-item">
+              <span class="sidebar-icon">📊</span>Estadísticas
+            </div>
+          </div>
+
+          <div class="sidebar-section">
+            <div class="sidebar-label">Social</div>
+            <div class="sidebar-item">
+              <span class="sidebar-icon">💬</span>Chat
+            </div>
+            <div class="sidebar-item">
+              <span class="sidebar-icon">👤</span>Perfil
+            </div>
+            <div class="sidebar-item">
+              <span class="sidebar-icon">⚙</span>Configuración
+            </div>
+          </div>
+        </aside>
+
+        <!-- CONTENT -->
+        <main class="content">
+          <!-- Content tabs -->
+          <div class="content-tabs">
+            <div class="content-tab active">Cola Competitiva</div>
+            <div class="content-tab">Unranked Draft</div>
+            <div class="content-tab">Historial</div>
+            <div class="content-tab">Mi Perfil</div>
+          </div>
+
+          <!-- Queue hero -->
+          <div class="queue-hero">
+            <div class="queue-top">
+              <div class="section-title">Buscar Partida</div>
+              <div class="queue-status">
+                <div class="dot green"></div>
+                <span style="color: var(--nexus-muted)"
+                  >8.240 jugadores en línea</span
+                >
+              </div>
+            </div>
+
+            <!-- Mode selector -->
+            <div class="mode-grid">
+              <div class="mode-card selected">
+                <div class="mode-icon">🏆</div>
+                <div class="mode-name">Competitivo</div>
+                <div class="mode-desc">Draft · MMR activo</div>
+              </div>
+              <div class="mode-card">
+                <div class="mode-icon">⚔</div>
+                <div class="mode-name">Unranked</div>
+                <div class="mode-desc">Draft · Sin MMR</div>
+              </div>
+              <div class="mode-card">
+                <div class="mode-icon">👥</div>
+                <div class="mode-name">Equipo</div>
+                <div class="mode-desc">5-Stack · Clan</div>
+              </div>
+            </div>
+
+            <!-- Role selector -->
+            <div class="role-row">
+              <button class="role-btn">
+                <span class="role-icon">🛡</span>Tank
+              </button>
+              <button class="role-btn active">
+                <span class="role-icon">⚔</span>DPS
+              </button>
+              <button class="role-btn">
+                <span class="role-icon">💪</span>Bruiser
+              </button>
+              <button class="role-btn">
+                <span class="role-icon">✨</span>Support
+              </button>
+              <button class="role-btn">
+                <span class="role-icon">💚</span>Healer
+              </button>
+            </div>
+
+            <button class="find-match-btn">⚡ Buscar Partida</button>
+          </div>
+
+          <!-- Stats row -->
+          <div class="stats-row">
+            <div class="stat-card">
+              <div class="stat-label">Winrate (30d)</div>
+              <div class="stat-value green">58.3%</div>
+              <div class="stat-sub">↑ +3.2% vs mes pasado</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Racha actual</div>
+              <div class="stat-value gold">W4</div>
+              <div class="stat-sub">Mejor: W7</div>
+            </div>
+            <div class="stat-card">
+              <div class="stat-label">Partidas jugadas</div>
+              <div class="stat-value accent">142</div>
+              <div class="stat-sub">Esta temporada</div>
+            </div>
+          </div>
+
+          <!-- Match history -->
+          <div class="section-header">
+            <div class="section-header-title">Últimas Partidas</div>
+            <div class="view-all">Ver todas →</div>
+          </div>
+          <div class="match-list">
+            <div class="match-item win">
+              <div class="match-result win">V</div>
+              <div class="hero-portrait">🦁</div>
+              <div class="match-details">
+                <div class="match-hero-name">Varian</div>
+                <div class="match-map">Jardín del Terror · 24m</div>
+              </div>
+              <div class="match-stats">
+                <div class="match-kda">14 / 3 / 22</div>
+                <div class="match-time">hace 2h</div>
+              </div>
+              <div class="mmr-delta pos">+24</div>
+            </div>
+            <div class="match-item win">
+              <div class="match-result win">V</div>
+              <div class="hero-portrait">🔥</div>
+              <div class="match-details">
+                <div class="match-hero-name">Kael'thas</div>
+                <div class="match-map">Minas Encantadas · 18m</div>
+              </div>
+              <div class="match-stats">
+                <div class="match-kda">21 / 5 / 11</div>
+                <div class="match-time">hace 5h</div>
+              </div>
+              <div class="mmr-delta pos">+22</div>
+            </div>
+            <div class="match-item loss">
+              <div class="match-result loss">D</div>
+              <div class="hero-portrait">🌿</div>
+              <div class="match-details">
+                <div class="match-hero-name">Lunara</div>
+                <div class="match-map">Baños del Rey · 31m</div>
+              </div>
+              <div class="match-stats">
+                <div class="match-kda">8 / 9 / 14</div>
+                <div class="match-time">hace 7h</div>
+              </div>
+              <div class="mmr-delta neg">−18</div>
+            </div>
+            <div class="match-item win">
+              <div class="match-result win">V</div>
+              <div class="hero-portrait">❄</div>
+              <div class="match-details">
+                <div class="match-hero-name">Jaina</div>
+                <div class="match-map">Eje del Tiempo · 22m</div>
+              </div>
+              <div class="match-stats">
+                <div class="match-kda">19 / 4 / 16</div>
+                <div class="match-time">ayer</div>
+              </div>
+              <div class="mmr-delta pos">+23</div>
+            </div>
+          </div>
+        </main>
+
+        <!-- RIGHT SIDEBAR -->
+        <aside class="sidebar-right">
+          <!-- Online players -->
+          <div class="online-panel">
+            <div class="panel-title">👥 Amigos Online (4)</div>
+            <div class="online-item">
+              <div
+                class="online-avatar"
+                style="color: #00c8ff; border-color: rgba(0, 200, 255, 0.3)"
+              >
+                MK
+              </div>
+              <div class="online-info">
+                <div class="online-name">MakoX</div>
+                <div class="online-status">En lobby</div>
+              </div>
+              <span class="online-rank-badge badge-dia">DIAMANTE</span>
+            </div>
+            <div class="online-item">
+              <div
+                class="online-avatar"
+                style="color: #f0a500; border-color: rgba(240, 165, 0, 0.3)"
+              >
+                SV
+              </div>
+              <div class="online-info">
+                <div class="online-name">SilverVex</div>
+                <div class="online-status">En partida · 12m</div>
+              </div>
+              <span class="online-rank-badge badge-gold">ORO</span>
+            </div>
+            <div class="online-item">
+              <div
+                class="online-avatar"
+                style="color: #7c4dff; border-color: rgba(124, 77, 255, 0.3)"
+              >
+                NK
+              </div>
+              <div class="online-info">
+                <div class="online-name">NekroS</div>
+                <div class="online-status">Buscando...</div>
+              </div>
+              <span class="online-rank-badge badge-plat">PLATINO</span>
+            </div>
+            <div class="online-item">
+              <div
+                class="online-avatar"
+                style="color: #00e676; border-color: rgba(0, 230, 118, 0.3)"
+              >
+                TR
+              </div>
+              <div class="online-info">
+                <div class="online-name">TrixR</div>
+                <div class="online-status">En lobby</div>
+              </div>
+              <span class="online-rank-badge badge-plat">PLATINO</span>
+            </div>
+          </div>
+
+          <!-- Leaderboard -->
+          <div>
+            <div class="panel-title">🏆 Top Nexo — Temporada 4</div>
+            <div class="lb-item">
+              <div class="lb-rank top">1</div>
+              <div class="lb-name">StormKing</div>
+              <div class="lb-mmr">3.842</div>
+            </div>
+            <div class="lb-item">
+              <div class="lb-rank top">2</div>
+              <div class="lb-name">VoidWalker</div>
+              <div class="lb-mmr">3.790</div>
+            </div>
+            <div class="lb-item">
+              <div class="lb-rank top">3</div>
+              <div class="lb-name">ArcaneX</div>
+              <div class="lb-mmr">3.715</div>
+            </div>
+            <div class="lb-item">
+              <div class="lb-rank">4</div>
+              <div class="lb-name">MakoX</div>
+              <div class="lb-mmr">3.680</div>
+            </div>
+            <div class="lb-item">
+              <div class="lb-rank">5</div>
+              <div class="lb-name">ShadowPyre</div>
+              <div class="lb-mmr">3.621</div>
+            </div>
+          </div>
+
+          <!-- Servers -->
+          <div class="server-panel">
+            <div class="panel-title">🌐 Servidores</div>
+            <div class="server-row">
+              <div class="server-name">SA — Sao Paulo</div>
+              <div class="server-ping ping-good">
+                <div class="ping-dot"></div>
+                24ms
+              </div>
+            </div>
+            <div class="server-row">
+              <div class="server-name">NA — Chicago</div>
+              <div class="server-ping ping-med">
+                <div class="ping-dot"></div>
+                148ms
+              </div>
+            </div>
+            <div class="server-row">
+              <div class="server-name">EU — Frankfurt</div>
+              <div class="server-ping ping-med">
+                <div class="ping-dot"></div>
+                220ms
+              </div>
+            </div>
+          </div>
+        </aside>
+      </div>
+    </div>
+
+    <script>
+      // Mode selector
+      document.querySelectorAll(".mode-card").forEach((card) => {
+        card.addEventListener("click", () => {
+          document
+            .querySelectorAll(".mode-card")
+            .forEach((c) => c.classList.remove("selected"));
+          card.classList.add("selected");
+        });
+      });
+
+      // Role selector
+      document.querySelectorAll(".role-btn").forEach((btn) => {
+        btn.addEventListener("click", () => {
+          btn.classList.toggle("active");
+        });
+      });
+
+      // Nav tabs
+      document.querySelectorAll(".nav-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document
+            .querySelectorAll(".nav-tab")
+            .forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+        });
+      });
+
+      // Content tabs
+      document.querySelectorAll(".content-tab").forEach((tab) => {
+        tab.addEventListener("click", () => {
+          document
+            .querySelectorAll(".content-tab")
+            .forEach((t) => t.classList.remove("active"));
+          tab.classList.add("active");
+        });
+      });
+
+      // Sidebar items
+      document.querySelectorAll(".sidebar-item").forEach((item) => {
+        item.addEventListener("click", () => {
+          document
+            .querySelectorAll(".sidebar-item")
+            .forEach((i) => i.classList.remove("active"));
+          item.classList.add("active");
+        });
+      });
+
+      // Find match btn
+      document
+        .querySelector(".find-match-btn")
+        .addEventListener("click", function () {
+          const original = this.innerHTML;
+          this.innerHTML = "⏳ Buscando partida... 0:03";
+          this.style.background = "#1a3a4a";
+          this.style.color = "var(--nexus-accent)";
+          this.style.border = "1px solid var(--nexus-accent)";
+          let secs = 3;
+          const iv = setInterval(() => {
+            secs++;
+            this.innerHTML = `⏳ Buscando partida... 0:${String(secs).padStart(2, "0")}`;
+          }, 1000);
+          setTimeout(() => {
+            clearInterval(iv);
+            this.innerHTML = original;
+            this.style.background = "";
+            this.style.color = "";
+            this.style.border = "";
+          }, 8000);
+        });
+    </script>
+  </body>
+</html>

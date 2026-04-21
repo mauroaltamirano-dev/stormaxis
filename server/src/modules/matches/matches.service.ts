@@ -1,0 +1,431 @@
+import { db } from '../../infrastructure/database/client'
+import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
+import { getIO } from '../../infrastructure/socket/server'
+import { Errors } from '../../shared/errors/AppError'
+import { calculateRank } from '../users/player-progression'
+
+const VOTING_TIMEOUT_MS = 2 * 60_000
+const READY_STATE_TTL_SECONDS = 60 * 60
+
+type ReadyState = {
+  readyBy: string[]
+  totalPlayers: number
+}
+
+type VotingState = {
+  expiresAt: number
+  totalPlayers: number
+  scheduledAt: number
+}
+
+type VetoState = {
+  remainingMaps: string[]
+  currentTurn: number
+  vetoOrder: number[]
+  vetoIndex: number
+  timeoutAt?: number
+  captains: Record<number, string>
+}
+
+type CancelState = {
+  captainIds: string[]
+  requestedBy: string[]
+}
+
+type FinishState = {
+  captainIds: string[]
+  requestedBy: string[]
+}
+
+type VoteCounts = {
+  team1Votes: number
+  team2Votes: number
+  total: number
+}
+
+export async function markPlayerReady(matchId: string, userId: string) {
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { players: true },
+  })
+  if (!match) throw Errors.NOT_FOUND('Match')
+  if (match.status !== 'PLAYING') throw Errors.CONFLICT('Match is not ready for connect confirmation')
+
+  const player = match.players.find((entry) => entry.userId === userId)
+  if (!player || player.isBot) throw Errors.FORBIDDEN()
+  const humanPlayers = match.players.filter((entry) => !entry.isBot && entry.userId)
+
+  const rawState = await redis.get(REDIS_KEYS.matchReadyState(matchId))
+  const state: ReadyState = rawState
+    ? JSON.parse(rawState)
+    : { readyBy: [], totalPlayers: humanPlayers.length }
+
+  if (!state.readyBy.includes(userId)) {
+    state.readyBy.push(userId)
+    await redis.setex(REDIS_KEYS.matchReadyState(matchId), READY_STATE_TTL_SECONDS, JSON.stringify(state))
+  }
+
+  const io = getIO()
+  io.to(`match:${matchId}`).emit('match:ready_update', {
+    readyBy: state.readyBy,
+    totalPlayers: state.totalPlayers,
+  })
+
+  // All connected — frontend will show "Finalizar partida" button.
+  // Voting opens only when a player explicitly calls finishMatch().
+}
+
+export async function finishMatch(matchId: string, userId: string) {
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { players: true },
+  })
+  if (!match) throw Errors.NOT_FOUND('Match')
+  if (match.status !== 'PLAYING') throw Errors.CONFLICT('Match is not in PLAYING state')
+
+  const player = match.players.find((entry) => entry.userId === userId)
+  if (!player || player.isBot || !player.isCaptain) throw Errors.FORBIDDEN()
+  const humanPlayers = match.players.filter((entry) => !entry.isBot && entry.userId)
+  const captainIds = match.players
+    .filter((entry) => entry.isCaptain && !entry.isBot && entry.userId)
+    .map((entry) => entry.userId as string)
+  if (captainIds.length < 2) throw Errors.CONFLICT('No hay dos capitanes humanos para cerrar la partida')
+
+  // Validate all players are already connected (all ready)
+  const rawState = await redis.get(REDIS_KEYS.matchReadyState(matchId))
+  const state: ReadyState = rawState
+    ? JSON.parse(rawState)
+    : { readyBy: [], totalPlayers: humanPlayers.length }
+
+  if (state.readyBy.length < state.totalPlayers) {
+    throw Errors.CONFLICT('Not all players have connected yet')
+  }
+
+  const rawFinish = await redis.get(REDIS_KEYS.matchFinishState(matchId))
+  const finishState: FinishState = rawFinish
+    ? JSON.parse(rawFinish)
+    : { captainIds, requestedBy: [] }
+
+  if (!finishState.requestedBy.includes(userId)) {
+    finishState.requestedBy.push(userId)
+    await redis.setex(REDIS_KEYS.matchFinishState(matchId), READY_STATE_TTL_SECONDS, JSON.stringify(finishState))
+  }
+
+  const io = getIO()
+  io.to(`match:${matchId}`).emit('match:finish:update', finishState)
+
+  if (finishState.requestedBy.length === finishState.captainIds.length) {
+    await openVoting(matchId, humanPlayers.length)
+  }
+}
+
+
+export async function castVote(matchId: string, userId: string, winner: 1 | 2) {
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { players: true },
+  })
+  if (!match) throw Errors.NOT_FOUND('Match')
+  if (match.status !== 'VOTING') throw Errors.CONFLICT('Voting is not open')
+
+  const player = match.players.find((entry) => entry.userId === userId)
+  if (!player || player.isBot) throw Errors.FORBIDDEN()
+  const totalPlayers = match.players.filter((entry) => !entry.isBot).length
+
+  await db.vote.upsert({
+    where: { matchId_userId: { matchId, userId } },
+    create: { matchId, userId, winner },
+    update: { winner },
+  })
+
+  const voteCounts = await getVoteCounts(matchId)
+  const io = getIO()
+
+  io.to(`match:${matchId}`).emit('vote:update', voteCounts)
+
+  const majority = Math.floor(totalPlayers / 2) + 1
+
+  const winnerTeam =
+    voteCounts.team1Votes >= majority
+      ? 1
+      : voteCounts.team2Votes >= majority
+        ? 2
+        : voteCounts.total === totalPlayers && voteCounts.team1Votes !== voteCounts.team2Votes
+          ? (voteCounts.team1Votes > voteCounts.team2Votes ? 1 : 2)
+          : null
+
+  if (winnerTeam) {
+    await finalizeMatch(matchId, winnerTeam, 'votes')
+  }
+}
+
+export async function getRealtimeMatchMeta(matchId: string) {
+  const [readyRaw, votingRaw, vetoRaw, cancelRaw, finishRaw, voteCounts] = await Promise.all([
+    redis.get(REDIS_KEYS.matchReadyState(matchId)),
+    redis.get(REDIS_KEYS.matchVotingState(matchId)),
+    redis.get(REDIS_KEYS.matchVetoState(matchId)),
+    redis.get(REDIS_KEYS.matchCancelState(matchId)),
+    redis.get(REDIS_KEYS.matchFinishState(matchId)),
+    getVoteCounts(matchId),
+  ])
+
+  return {
+    ready: readyRaw ? (JSON.parse(readyRaw) as ReadyState) : null,
+    voting: votingRaw ? (JSON.parse(votingRaw) as VotingState) : null,
+    veto: vetoRaw ? (JSON.parse(vetoRaw) as VetoState) : null,
+    cancel: cancelRaw ? (JSON.parse(cancelRaw) as CancelState) : null,
+    finish: finishRaw ? (JSON.parse(finishRaw) as FinishState) : null,
+    voteCounts,
+  }
+}
+
+export async function requestMatchCancellation(matchId: string, userId: string) {
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { players: true },
+  })
+  if (!match) throw Errors.NOT_FOUND('Match')
+  if (!['VETOING', 'PLAYING', 'VOTING'].includes(match.status)) {
+    throw Errors.CONFLICT('Match cannot be cancelled right now')
+  }
+
+  const player = match.players.find((entry) => entry.userId === userId)
+  if (!player?.isCaptain) throw Errors.FORBIDDEN()
+
+  const captainIds = match.players
+    .filter((entry) => entry.isCaptain && !entry.isBot && entry.userId)
+    .map((entry) => entry.userId as string)
+  const rawState = await redis.get(REDIS_KEYS.matchCancelState(matchId))
+  const state: CancelState = rawState
+    ? JSON.parse(rawState)
+    : { captainIds, requestedBy: [] }
+
+  if (!state.requestedBy.includes(userId)) {
+    state.requestedBy.push(userId)
+    await redis.setex(REDIS_KEYS.matchCancelState(matchId), READY_STATE_TTL_SECONDS, JSON.stringify(state))
+  }
+
+  const io = getIO()
+  io.to(`match:${matchId}`).emit('match:cancel:update', state)
+
+  if (state.requestedBy.length === state.captainIds.length) {
+    await db.match.update({
+      where: { id: matchId },
+      data: { status: 'CANCELLED', endedAt: new Date() },
+    })
+
+    await Promise.all([
+      redis.del(REDIS_KEYS.matchReadyState(matchId)),
+      redis.del(REDIS_KEYS.matchVotingState(matchId)),
+      redis.del(REDIS_KEYS.matchVetoState(matchId)),
+      redis.del(REDIS_KEYS.matchCancelState(matchId)),
+      redis.del(REDIS_KEYS.matchFinishState(matchId)),
+    ])
+
+    io.to(`match:${matchId}`).emit('match:cancelled', {
+      reason: 'captains_cancelled',
+      requestedBy: state.requestedBy,
+    })
+  }
+}
+
+async function openVoting(matchId: string, totalPlayers: number) {
+  const current = await db.match.findUnique({ where: { id: matchId }, select: { status: true } })
+  if (!current) throw Errors.NOT_FOUND('Match')
+  if (current.status === 'VOTING' || current.status === 'COMPLETED') return
+  if (current.status !== 'PLAYING') throw Errors.CONFLICT('Match is not in playing state')
+
+  const votingState: VotingState = {
+    expiresAt: Date.now() + VOTING_TIMEOUT_MS,
+    totalPlayers,
+    scheduledAt: Date.now(),
+  }
+
+  await db.match.update({
+    where: { id: matchId },
+    data: { status: 'VOTING' },
+  })
+
+  await redis.setex(
+    REDIS_KEYS.matchVotingState(matchId),
+    Math.ceil(VOTING_TIMEOUT_MS / 1000) + 30,
+    JSON.stringify(votingState),
+  )
+  await redis.del(REDIS_KEYS.matchFinishState(matchId))
+
+  const io = getIO()
+  io.to(`match:${matchId}`).emit('vote:start', {
+    expiresAt: votingState.expiresAt,
+    totalPlayers,
+    ...await getVoteCounts(matchId),
+  })
+
+  scheduleVotingTimeout(matchId, votingState.scheduledAt)
+}
+
+function scheduleVotingTimeout(matchId: string, scheduledAt: number) {
+  setTimeout(async () => {
+    const votingRaw = await redis.get(REDIS_KEYS.matchVotingState(matchId))
+    if (!votingRaw) return
+
+    const votingState = JSON.parse(votingRaw) as VotingState
+    if (votingState.scheduledAt !== scheduledAt) return
+
+    const match = await db.match.findUnique({
+      where: { id: matchId },
+      include: { players: true },
+    })
+    if (!match || match.status !== 'VOTING') return
+
+    const voteCounts = await getVoteCounts(matchId)
+    const winnerTeam = await resolveWinnerOnTimeout(match.players, voteCounts)
+    await finalizeMatch(matchId, winnerTeam, 'timeout')
+  }, VOTING_TIMEOUT_MS + 500)
+}
+
+async function resolveWinnerOnTimeout(
+  players: Array<{ team: number; mmrBefore: number; isCaptain: boolean }>,
+  voteCounts: VoteCounts,
+): Promise<1 | 2> {
+  if (voteCounts.team1Votes > voteCounts.team2Votes) return 1
+  if (voteCounts.team2Votes > voteCounts.team1Votes) return 2
+
+  const team1 = players.filter((player) => player.team === 1)
+  const team2 = players.filter((player) => player.team === 2)
+
+  const team1Avg = team1.reduce((sum, player) => sum + player.mmrBefore, 0) / Math.max(1, team1.length)
+  const team2Avg = team2.reduce((sum, player) => sum + player.mmrBefore, 0) / Math.max(1, team2.length)
+
+  if (team1Avg === team2Avg) {
+    return team1.some((player) => player.isCaptain) ? 1 : 2
+  }
+
+  return team1Avg > team2Avg ? 1 : 2
+}
+
+async function finalizeMatch(matchId: string, winnerTeam: 1 | 2, resolution: 'votes' | 'timeout') {
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { players: true },
+  })
+  if (!match) return
+  if (match.status === 'COMPLETED') return
+
+  const team1 = match.players.filter((player) => player.team === 1)
+  const team2 = match.players.filter((player) => player.team === 2)
+
+  const team1AvgMMR = team1.reduce((sum, player) => sum + player.mmrBefore, 0) / team1.length
+  const team2AvgMMR = team2.reduce((sum, player) => sum + player.mmrBefore, 0) / team2.length
+
+  const eloDeltas: Record<string, number> = {}
+  const humanPlayers = match.players.filter((entry) => !entry.isBot && entry.userId)
+
+  for (const player of humanPlayers) {
+    const isWinner = player.team === winnerTeam
+    const opponentAvgMMR = player.team === 1 ? team2AvgMMR : team1AvgMMR
+    const k = getKFactor(player.mmrBefore)
+    const expected = 1 / (1 + Math.pow(10, (opponentAvgMMR - player.mmrBefore) / 400))
+    const score = isWinner ? 1 : 0
+    const delta = Math.round(k * (score - expected))
+
+    eloDeltas[player.userId as string] = delta
+
+    await db.matchPlayer.update({
+      where: { matchId_userId: { matchId, userId: player.userId as string } },
+      data: { mmrAfter: player.mmrBefore + delta, mmrDelta: delta },
+    })
+
+    const newMMR = Math.max(0, player.mmrBefore + delta)
+    const newRank = calculateRank(newMMR)
+
+    await db.user.update({
+      where: { id: player.userId as string },
+      data: {
+        mmr: newMMR,
+        rank: newRank,
+        wins: isWinner ? { increment: 1 } : undefined,
+        losses: !isWinner ? { increment: 1 } : undefined,
+      },
+    })
+  }
+
+  const endedAt = new Date()
+  const durationSeconds = match.startedAt
+    ? Math.max(1, Math.round((endedAt.getTime() - match.startedAt.getTime()) / 1000))
+    : null
+
+  await db.match.update({
+    where: { id: matchId },
+    data: {
+      status: 'COMPLETED',
+      winner: winnerTeam,
+      duration: durationSeconds,
+      endedAt,
+    },
+  })
+
+  await Promise.all([
+    redis.del(REDIS_KEYS.matchReadyState(matchId)),
+    redis.del(REDIS_KEYS.matchVotingState(matchId)),
+    redis.del(REDIS_KEYS.matchCancelState(matchId)),
+    redis.del(REDIS_KEYS.matchFinishState(matchId)),
+  ])
+
+  const io = getIO()
+  const voteCounts = await getVoteCounts(matchId)
+
+  io.to(`match:${matchId}`).emit('vote:result', {
+    winner: winnerTeam,
+    resolution,
+    ...voteCounts,
+    eloDeltas,
+  })
+  io.to(`match:${matchId}`).emit('match:complete', {
+    winner: winnerTeam,
+    resolution,
+    duration: durationSeconds,
+    eloDeltas,
+  })
+
+  for (const player of humanPlayers) {
+    const delta = eloDeltas[player.userId as string]
+    const newMMR = Math.max(0, player.mmrBefore + delta)
+    const newRank = calculateRank(newMMR)
+
+    io.to(`user:${player.userId}`).emit('user:elo_update', {
+      newMMR,
+      delta,
+      newRank,
+      oldRank: calculateRank(player.mmrBefore),
+    })
+  }
+}
+
+async function getVoteCounts(matchId: string): Promise<VoteCounts> {
+  const votes = await db.vote.groupBy({
+    by: ['winner'],
+    where: { matchId },
+    _count: { winner: true },
+  })
+
+  const team1Votes = votes.find((vote) => vote.winner === 1)?._count.winner ?? 0
+  const team2Votes = votes.find((vote) => vote.winner === 2)?._count.winner ?? 0
+
+  return {
+    team1Votes,
+    team2Votes,
+    total: team1Votes + team2Votes,
+  }
+}
+
+function getKFactor(mmr: number): number {
+  if (mmr < 800) return 40
+  if (mmr < 1200) return 35
+  if (mmr < 1600) return 30
+  if (mmr < 2000) return 25
+  if (mmr < 2400) return 20
+  if (mmr < 2800) return 16
+  return 12
+}
+
+export { calculateRank }
