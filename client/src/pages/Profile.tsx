@@ -13,6 +13,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuthStore } from "../stores/auth.store";
+import { getRoleMeta } from "../lib/roles";
 
 type PlayerRole = "TANK" | "DPS" | "BRUISER" | "SUPPORT" | "HEALER";
 type LinkedAccountProvider = "discord" | "google" | "bnet";
@@ -1343,6 +1344,8 @@ function RoleBadge({
   label: string;
   role?: PlayerRole | null;
 }) {
+  const meta = getRoleMeta(role);
+  const accent = meta?.accent ?? "rgba(255,255,255,0.18)";
   return (
     <div
       style={{
@@ -1351,8 +1354,8 @@ function RoleBadge({
         alignItems: "center",
         gap: "12px",
         padding: "10px 12px",
-        border: "1px solid rgba(255,255,255,0.06)",
-        background: "rgba(255,255,255,0.02)",
+        border: `1px solid ${meta ? `${accent}55` : "rgba(255,255,255,0.06)"}`,
+        background: meta ? `${accent}12` : "rgba(255,255,255,0.02)",
       }}
     >
       <span
@@ -1366,7 +1369,19 @@ function RoleBadge({
       >
         {label}
       </span>
-      <span style={{ color: "var(--nexus-text)", fontWeight: 700, fontSize: "13px" }}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: "7px", color: meta ? accent : "var(--nexus-text)", fontWeight: 800, fontSize: "13px" }}>
+        {meta && (
+          <img
+            src={meta.icon}
+            alt=""
+            style={{
+              width: "18px",
+              height: "18px",
+              objectFit: "contain",
+              filter: `drop-shadow(0 0 5px ${accent}66)`,
+            }}
+          />
+        )}
         {getRoleLabel(role)}
       </span>
     </div>

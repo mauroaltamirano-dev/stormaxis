@@ -27,6 +27,7 @@ import { useAuthStore } from "../stores/auth.store";
 import { api } from "../lib/api";
 import { useSocketStore } from "../stores/socket.store";
 import { useMatchmakingStore } from "../stores/matchmaking.store";
+import { getRoleMeta } from "../lib/roles";
 
 const LEVEL_COLORS: Record<number, string> = {
   1: "#6b7280",
@@ -102,22 +103,6 @@ const accountNav: NavItem[] = [
   { label: "Mi perfil", icon: User, to: "/profile" },
   { label: "Configuración", icon: Settings, disabled: true, badge: "soon" },
 ];
-
-const ROLE_LABELS: Record<PlayerRole, string> = {
-  TANK: "Tank",
-  DPS: "DPS",
-  BRUISER: "Offlane",
-  SUPPORT: "Support",
-  HEALER: "Healer",
-};
-
-const roleAccents: Record<PlayerRole, string> = {
-  TANK: "#38bdf8",
-  DPS: "#fb7185",
-  BRUISER: "#f97316",
-  SUPPORT: "#a78bfa",
-  HEALER: "#4ade80",
-};
 
 function getLevelMeta(rawMmr: number) {
   const mmr = Math.max(0, rawMmr);
@@ -583,7 +568,8 @@ function RoleBadge({
   fallback: string;
   muted?: boolean;
 }) {
-  const color = role ? roleAccents[role] : "rgba(232,244,255,0.25)";
+  const meta = getRoleMeta(role);
+  const color = meta?.accent ?? "rgba(232,244,255,0.25)";
   return (
     <span
       style={{
@@ -593,7 +579,19 @@ function RoleBadge({
         background: role ? `${color}18` : "rgba(255,255,255,0.03)",
       }}
     >
-      {role ? ROLE_LABELS[role] : fallback}
+      {meta && (
+        <img
+          src={meta.icon}
+          alt=""
+          style={{
+            width: "15px",
+            height: "15px",
+            objectFit: "contain",
+            filter: `drop-shadow(0 0 5px ${color}66)`,
+          }}
+        />
+      )}
+      {meta ? meta.label : fallback}
     </span>
   );
 }
@@ -1043,6 +1041,9 @@ const styles: Record<string, React.CSSProperties> = {
   },
   roleRow: { marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "6px" },
   roleBadge: {
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "5px",
     padding: "4px 7px",
     border: "1px solid",
     fontFamily: "var(--font-display)",

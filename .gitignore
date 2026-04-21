@@ -29,3 +29,6 @@ coverage/
 .codex
 .wolf/
 .tmp-*
+
+# Windows alternate data stream metadata copied from downloads
+*:Zone.Identifier

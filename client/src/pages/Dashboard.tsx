@@ -7,6 +7,7 @@ import { getSocket } from "../lib/socket";
 import { reportClientError } from "../lib/monitoring";
 import { MatchFoundModal } from "../components/matchmaking/MatchFoundModal";
 import { Plus, Search } from "lucide-react";
+import { getRoleMeta } from "../lib/roles";
 
 const LEVEL_COLORS: Record<number, string> = {
   1: "#6b7280", // Hierro       — gris apagado, sin glamour
@@ -1350,24 +1351,14 @@ function HeroMetric({
 }
 
 function RolePill({ role, muted }: { role: string; muted?: boolean }) {
-  const colors: Record<string, string> = {
-    TANK: "#38bdf8",
-    DPS: "#fb7185",
-    BRUISER: "#f97316",
-    SUPPORT: "#a78bfa",
-    HEALER: "#4ade80",
-  };
-  const labels: Record<string, string> = {
-    TANK: "Tank",
-    DPS: "DPS",
-    BRUISER: "Offlane",
-    SUPPORT: "Support",
-    HEALER: "Healer",
-  };
-  const color = colors[role] ?? "rgba(232,244,255,0.34)";
+  const meta = getRoleMeta(role);
+  const color = meta?.accent ?? "rgba(232,244,255,0.34)";
   return (
     <span
       style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.32rem",
         border: `1px solid ${muted ? "rgba(232,244,255,0.12)" : `${color}66`}`,
         background: muted ? "rgba(255,255,255,0.03)" : `${color}16`,
         color: muted ? "rgba(232,244,255,0.42)" : color,
@@ -1379,7 +1370,19 @@ function RolePill({ role, muted }: { role: string; muted?: boolean }) {
         textTransform: "uppercase",
       }}
     >
-      {labels[role] ?? role}
+      {meta && (
+        <img
+          src={meta.icon}
+          alt=""
+          style={{
+            width: "15px",
+            height: "15px",
+            objectFit: "contain",
+            filter: `drop-shadow(0 0 5px ${color}66)`,
+          }}
+        />
+      )}
+      {meta?.label ?? role}
     </span>
   );
 }
@@ -1433,12 +1436,6 @@ function PlayerRankPlate({
             fill={`url(#rank-seal-${level})`}
             stroke={color}
             strokeWidth="1.4"
-          />
-          <path
-            d="M13 23.5h16M16 17h10M18 29h6"
-            stroke="rgba(255,255,255,0.55)"
-            strokeWidth="1.4"
-            strokeLinecap="round"
           />
         </svg>
         <span style={rankSealNumberStyle}>{level}</span>
