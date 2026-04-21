@@ -660,12 +660,12 @@ export function Dashboard() {
                 >
                   <LayoutToggleButton
                     active={matchmakingLayout === "split"}
-                    label="Dividido"
+                    label="Compacto"
                     onClick={() => setMatchmakingLayout("split")}
                   />
                   <LayoutToggleButton
                     active={matchmakingLayout === "stack"}
-                    label="Columna"
+                    label="Extendido"
                     onClick={() => setMatchmakingLayout("stack")}
                   />
                 </div>
@@ -775,7 +775,11 @@ export function Dashboard() {
                         {user.username}
                       </div>
                     </div>
-                    <PlayerRankPlate level={level} mmr={user.mmr} color={rankColor} />
+                    <PlayerRankPlate
+                      level={level}
+                      mmr={user.mmr}
+                      color={rankColor}
+                    />
                     <div
                       style={{
                         display: "flex",
@@ -1391,6 +1395,21 @@ function PlayerRankPlate({
 }) {
   return (
     <div style={rankPlateStyle(color)}>
+      <svg
+        aria-hidden="true"
+        viewBox="0 0 190 62"
+        preserveAspectRatio="none"
+        style={rankPlateBorderSvgStyle}
+      >
+        <polygon
+          points="15,1 189,1 189,47 173,61 1,61 1,15"
+          fill="none"
+          stroke={color}
+          strokeOpacity="0.72"
+          strokeWidth="1.4"
+          vectorEffect="non-scaling-stroke"
+        />
+      </svg>
       <div style={rankPlateTopLineStyle(color)} />
       <div style={rankPlateChevronStyle("left", color)} />
       <div style={rankPlateChevronStyle("right", color)} />
@@ -1398,7 +1417,13 @@ function PlayerRankPlate({
       <div style={rankSealStyle(color)}>
         <svg width="42" height="42" viewBox="0 0 42 42" aria-hidden="true">
           <defs>
-            <linearGradient id={`rank-seal-${level}`} x1="0" y1="0" x2="1" y2="1">
+            <linearGradient
+              id={`rank-seal-${level}`}
+              x1="0"
+              y1="0"
+              x2="1"
+              y2="1"
+            >
               <stop offset="0%" stopColor={color} stopOpacity="0.95" />
               <stop offset="100%" stopColor="#020617" stopOpacity="0.35" />
             </linearGradient>
@@ -1419,12 +1444,12 @@ function PlayerRankPlate({
         <span style={rankSealNumberStyle}>{level}</span>
       </div>
 
-      <div style={{ minWidth: 0 }}>
+      <div style={{ minWidth: 0, position: "relative", zIndex: 1 }}>
         <div style={rankPlateLabelStyle}>Nexus Rating</div>
         <div style={rankPlateMmrStyle(color)}>
           {mmr.toLocaleString("es-AR")}
-          <span style={rankPlateUnitStyle}>MMR</span>
         </div>
+        <div style={rankPlateUnitStyle}>ELO</div>
       </div>
     </div>
   );
@@ -1446,7 +1471,7 @@ function LayoutToggleButton({
       style={{
         border: "none",
         borderRight:
-          label === "Dividido" ? "1px solid rgba(232,244,255,0.08)" : "none",
+          label === "Compacto" ? "1px solid rgba(232,244,255,0.08)" : "none",
         background: active ? "rgba(0,200,255,0.14)" : "transparent",
         color: active ? "#7dd3fc" : "rgba(232,244,255,0.42)",
         padding: "0.45rem 0.65rem",
@@ -1574,13 +1599,22 @@ function rankPlateStyle(color: string): React.CSSProperties {
     gridTemplateColumns: "52px minmax(0, 1fr)",
     alignItems: "center",
     gap: "0.55rem",
-    padding: "0.55rem 0.7rem",
-    border: `1px solid ${color}55`,
+    padding: "0.55rem 0.82rem",
     background: `linear-gradient(135deg, rgba(2,6,14,0.96), ${color}14 52%, rgba(2,6,14,0.86))`,
     boxShadow: `0 0 30px ${color}18, inset 0 0 24px rgba(255,255,255,0.025)`,
     clipPath: "polygon(8% 0, 100% 0, 100% 76%, 91% 100%, 0 100%, 0 24%)",
   };
 }
+
+const rankPlateBorderSvgStyle: React.CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  pointerEvents: "none",
+  overflow: "visible",
+  filter: "drop-shadow(0 0 7px currentColor)",
+};
 
 function rankPlateTopLineStyle(color: string): React.CSSProperties {
   return {
@@ -1594,7 +1628,10 @@ function rankPlateTopLineStyle(color: string): React.CSSProperties {
   };
 }
 
-function rankPlateChevronStyle(side: "left" | "right", color: string): React.CSSProperties {
+function rankPlateChevronStyle(
+  side: "left" | "right",
+  color: string,
+): React.CSSProperties {
   return {
     position: "absolute",
     top: "50%",
@@ -1645,19 +1682,20 @@ function rankPlateMmrStyle(color: string): React.CSSProperties {
     gap: "0.32rem",
     color,
     fontFamily: "var(--font-display)",
-    fontSize: "1.85rem",
+    fontSize: "clamp(1rem, 1.25vw, 1.25rem)",
     fontWeight: 900,
     lineHeight: 0.95,
-    letterSpacing: "0.02em",
+    letterSpacing: "0",
     textShadow: `0 0 16px ${color}55`,
   };
 }
 
 const rankPlateUnitStyle: React.CSSProperties = {
   color: "rgba(232,244,255,0.52)",
-  fontSize: "0.62rem",
+  fontSize: "0.55rem",
   fontWeight: 900,
-  letterSpacing: "0.12em",
+  letterSpacing: "0.18em",
+  marginTop: "0.18rem",
 };
 
 const queueRowStyle: React.CSSProperties = {
