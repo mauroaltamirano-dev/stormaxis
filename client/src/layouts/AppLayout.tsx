@@ -721,6 +721,7 @@ const styles: Record<string, React.CSSProperties> = {
     minHeight: "40px",
     padding: "0 11px",
     border: "1px solid rgba(232,244,255,0.055)",
+    borderLeft: "2px solid transparent",
     background: "rgba(255,255,255,0.025)",
     color: "rgba(232,244,255,0.62)",
     fontFamily: "var(--font-display)",
@@ -728,13 +729,13 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 800,
     letterSpacing: "1px",
     textTransform: "uppercase",
-    clipPath: "polygon(0 0, 100% 0, 100% 76%, 94% 100%, 0 100%)",
   },
   railItemActive: {
     borderColor: "rgba(0,200,255,0.42)",
+    borderLeftColor: "var(--nexus-accent)",
     background: "linear-gradient(90deg, rgba(0,200,255,0.18), rgba(0,200,255,0.035))",
     color: "#e0f7ff",
-    boxShadow: "inset 3px 0 0 var(--nexus-accent)",
+    boxShadow: "0 0 22px rgba(0,200,255,0.08)",
   },
   railItemDisabled: { opacity: 0.56, cursor: "not-allowed" },
   railBadge: {
