@@ -1,5 +1,3 @@
-version: '3.9'
-
 # Nota: PostgreSQL usa Neon (cloud). Solo Redis corre local.
 # Para la DB: crear proyecto en https://neon.tech y copiar las URLs al .env
 

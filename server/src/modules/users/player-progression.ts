@@ -25,6 +25,19 @@ const LEVEL_BANDS: LevelBand[] = [
   { level: 10, min: 1900, max: null },
 ]
 
+const LEVEL_LABELS: Record<LevelInfo['level'], string> = {
+  1: 'Recruit',
+  2: 'Mercenary',
+  3: 'Gladiator',
+  4: 'Veteran',
+  5: 'Champion',
+  6: 'Elite',
+  7: 'Warlord',
+  8: 'Mythic',
+  9: 'Legend',
+  10: 'Immortal',
+}
+
 export function getLevelInfo(rawMmr: number): LevelInfo {
   const mmr = Math.max(0, rawMmr)
   const band = LEVEL_BANDS.find((candidate) => {
@@ -38,7 +51,7 @@ export function getLevelInfo(rawMmr: number): LevelInfo {
       currentFloor: band.min,
       nextLevelAt: null,
       progressPct: 100,
-      displayLevel: `Lvl ${band.level}`,
+      displayLevel: LEVEL_LABELS[band.level],
     }
   }
 
@@ -50,7 +63,7 @@ export function getLevelInfo(rawMmr: number): LevelInfo {
     currentFloor: band.min,
     nextLevelAt: band.max + 1,
     progressPct,
-    displayLevel: `Lvl ${band.level}`,
+    displayLevel: LEVEL_LABELS[band.level],
   }
 }
 

@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { initSocket, disconnectSocket, setSocketAuthToken } from '../lib/socket'
+import { useMatchmakingStore } from './matchmaking.store'
 
 interface AuthUser {
   id: string
@@ -65,6 +66,7 @@ export const useAuthStore = create<AuthState>((set, get) => ({
 
   logout: () => {
     disconnectSocket()
+    useMatchmakingStore.getState().resetMatchmaking()
     set({ user: null, accessToken: null, isLoading: false })
   },
 }))

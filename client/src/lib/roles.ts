@@ -3,8 +3,8 @@ export type PlayerRoleKey = 'RANGED' | 'HEALER' | 'OFFLANE' | 'FLEX' | 'TANK'
 export const ROLE_META: Record<PlayerRoleKey, { label: string; accent: string; icon: string }> = {
   RANGED: {
     label: 'Ranged',
-    accent: '#fb7185',
-    icon: '/roles/ranged.svg',
+    accent: '#facc15',
+    icon: '/roles/ranged.png',
   },
   HEALER: {
     label: 'Healer',
@@ -13,7 +13,7 @@ export const ROLE_META: Record<PlayerRoleKey, { label: string; accent: string; i
   },
   OFFLANE: {
     label: 'Offlane',
-    accent: '#f97316',
+    accent: '#ef4444',
     icon: '/roles/offlane.svg',
   },
   FLEX: {
@@ -31,4 +31,24 @@ export const ROLE_META: Record<PlayerRoleKey, { label: string; accent: string; i
 export function getRoleMeta(role?: string | null) {
   if (!role || !(role in ROLE_META)) return null
   return ROLE_META[role as PlayerRoleKey]
+}
+
+function roleIconBase(icon: string) {
+  return icon.replace(/\.(png|svg)$/i, '')
+}
+
+export function getRoleIconSources(role?: string | null) {
+  const meta = getRoleMeta(role)
+  if (!meta) return null
+  const hasExt = /\.(png|svg)$/i.test(meta.icon)
+  const base = roleIconBase(meta.icon)
+  if (hasExt) {
+    const primary = meta.icon
+    const fallback = /\.png$/i.test(meta.icon) ? `${base}.svg` : `${base}.png`
+    return { primary, fallback }
+  }
+  return {
+    primary: `${base}.png`,
+    fallback: `${base}.svg`,
+  }
 }

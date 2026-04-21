@@ -25,22 +25,17 @@ import {
 } from "lucide-react";
 import { useAuthStore } from "../stores/auth.store";
 import { api } from "../lib/api";
+import { getSocket } from "../lib/socket";
 import { useSocketStore } from "../stores/socket.store";
 import { useMatchmakingStore } from "../stores/matchmaking.store";
-import { getRoleMeta } from "../lib/roles";
-
-const LEVEL_COLORS: Record<number, string> = {
-  1: "#6b7280",
-  2: "#a16207",
-  3: "#94a3b8",
-  4: "#eab308",
-  5: "#06b6d4",
-  6: "#3b82f6",
-  7: "#8b5cf6",
-  8: "#d946ef",
-  9: "#f97316",
-  10: "#fb2424",
-};
+import { RankBadge } from "../components/RankBadge";
+import { getRoleIconSources, getRoleMeta } from "../lib/roles";
+import { getRankMeta } from "../lib/ranks";
+import {
+  getMatchLifecycleMeta,
+  getQueueLifecycleMeta,
+  type MatchLifecycleStatus,
+} from "../lib/competitiveStatus";
 
 const LEVEL_BANDS = [
   { level: 1, min: 0, max: 199 },
@@ -151,13 +146,15 @@ function winrate(wins: number, losses: number) {
 }
 
 export function AppLayout() {
-  const { user, logout } = useAuthStore();
+  const { user, accessToken, logout, updateUser } = useAuthStore();
   const { status: socketStatus, reconnectAttempts, lastError } = useSocketStore();
   const {
     status: matchmakingStatus,
     searchStartedAt,
+    pendingMatch,
     queuePosition,
     queueEtaSeconds,
+    resetMatchmaking,
   } = useMatchmakingStore();
   const navigate = useNavigate();
   const pathname = useRouterState({
@@ -170,10 +167,19 @@ export function AppLayout() {
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
   const [queueElapsed, setQueueElapsed] = useState(0);
+  const [activeMatchSnapshot, setActiveMatchSnapshot] = useState<{
+    id: string;
+    status: MatchLifecycleStatus;
+    readyCount: number;
+    totalPlayers: number;
+  } | null>(null);
+  const [adminMmrBusy, setAdminMmrBusy] = useState<number | null>(null);
+  const [adminMmrError, setAdminMmrError] = useState<string | null>(null);
 
   const levelMeta = useMemo(() => getLevelMeta(user?.mmr ?? 0), [user?.mmr]);
   const level = levelMeta.level;
-  const rankColor = LEVEL_COLORS[level] || "var(--nexus-accent)";
+  const rankMeta = getRankMeta(level);
+  const rankColor = rankMeta.color;
   const pointsToNextLevel =
     !user || levelMeta.nextLevelAt == null
       ? 0
@@ -181,6 +187,12 @@ export function AppLayout() {
   const socketMeta = getSocketMeta(socketStatus);
   const isSearchingMatch = matchmakingStatus === "searching";
   const isMatchFound = matchmakingStatus === "found" || matchmakingStatus === "accepting";
+  const hasTrackedActiveMatch = Boolean(
+    activeMatchSnapshot &&
+      ["VETOING", "PLAYING", "VOTING", "COMPLETED", "CANCELLED"].includes(
+        activeMatchSnapshot.status,
+      ),
+  );
 
   useEffect(() => {
     if (!isSearchingMatch || !searchStartedAt) {
@@ -204,6 +216,160 @@ export function AppLayout() {
       .then(({ data }) => setRecentMatches(data.slice(0, 6)))
       .catch(() => setRecentMatches([]));
   }, [user?.username]);
+
+  useEffect(() => {
+    const socket = getSocket();
+    const onCancelled = () => {
+      resetMatchmaking();
+    };
+
+    socket.on("matchmaking:cancelled", onCancelled);
+    return () => {
+      socket.off("matchmaking:cancelled", onCancelled);
+    };
+  }, [resetMatchmaking]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    async function loadActiveMatchSnapshot() {
+      try {
+        const { data } = await api.get<{ match: any | null }>("/matchmaking/active");
+        if (cancelled) return;
+
+        const match = data.match;
+        if (!match) {
+          setActiveMatchSnapshot(null);
+          return;
+        }
+
+        const readyCount = match.runtime?.ready?.readyBy?.length ?? 0;
+        const totalPlayers =
+          match.runtime?.ready?.totalPlayers ??
+          match.players?.filter((player: any) => !player?.isBot).length ??
+          10;
+
+        setActiveMatchSnapshot({
+          id: match.id,
+          status: match.status,
+          readyCount,
+          totalPlayers,
+        });
+      } catch {
+        if (!cancelled) setActiveMatchSnapshot(null);
+      }
+    }
+
+    loadActiveMatchSnapshot();
+    const interval = window.setInterval(loadActiveMatchSnapshot, 5000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [pathname, user]);
+
+  useEffect(() => {
+    if (!user) return;
+
+    let cancelled = false;
+
+    api
+      .get<{
+        inQueue: boolean;
+        joinedAt?: number;
+        queueSize?: number;
+      }>("/matchmaking/queue/status")
+      .then(({ data }) => {
+        if (cancelled) return;
+
+        if (!data.inQueue) {
+          const hasPendingAccept =
+            Boolean(pendingMatch) ||
+            activeMatchSnapshot?.status === "ACCEPTING";
+          const hasTransientQueueState =
+            matchmakingStatus === "searching" ||
+            matchmakingStatus === "found" ||
+            matchmakingStatus === "accepting";
+
+          if (!hasPendingAccept && hasTransientQueueState) {
+            resetMatchmaking();
+          }
+          return;
+        }
+
+        if (data.queueSize != null) {
+          useMatchmakingStore.getState().setQueueSize(data.queueSize);
+        }
+
+        if (matchmakingStatus === "idle") {
+          useMatchmakingStore
+            .getState()
+            .startSearching(data.joinedAt ?? Date.now());
+        }
+      })
+      .catch(() => {});
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    activeMatchSnapshot?.status,
+    matchmakingStatus,
+    pathname,
+    pendingMatch,
+    resetMatchmaking,
+    user,
+  ]);
+
+  const railStatusMeta = activeMatchSnapshot
+    ? getMatchLifecycleMeta(
+        activeMatchSnapshot.status,
+        activeMatchSnapshot.readyCount === activeMatchSnapshot.totalPlayers,
+      )
+    : getQueueLifecycleMeta({
+        hasActiveMatch: false,
+        isAccepting: isMatchFound,
+        isSearching: isSearchingMatch,
+        queueEtaSeconds,
+        queuePosition,
+        acceptedCount: pendingMatch?.acceptedBy?.length ?? 0,
+        totalPlayers:
+          pendingMatch?.totalPlayers ??
+          (pendingMatch?.teams.team1.length ?? 0) +
+            (pendingMatch?.teams.team2.length ?? 0),
+      });
+
+  useEffect(() => {
+    if (!accessToken) return;
+
+    const shouldCleanup =
+      matchmakingStatus === "searching" ||
+      matchmakingStatus === "found" ||
+      matchmakingStatus === "accepting";
+
+    if (!shouldCleanup) return;
+
+    const handleLifecycleExit = () => {
+      void fetch("/api/matchmaking/session/cleanup", {
+        method: "POST",
+        keepalive: true,
+        credentials: "include",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+        },
+      }).catch(() => {});
+    };
+
+    window.addEventListener("pagehide", handleLifecycleExit);
+    window.addEventListener("beforeunload", handleLifecycleExit);
+
+    return () => {
+      window.removeEventListener("pagehide", handleLifecycleExit);
+      window.removeEventListener("beforeunload", handleLifecycleExit);
+    };
+  }, [accessToken, matchmakingStatus]);
 
   useEffect(() => {
     const term = searchTerm.trim();
@@ -242,10 +408,42 @@ export function AppLayout() {
     navigate({ to: "/" });
   }
 
+  async function handleAdminMmrDelta(delta: number) {
+    if (!user || user.role !== "ADMIN") return;
+
+    const nextMmr = Math.max(0, Math.min(5000, user.mmr + delta));
+    if (nextMmr === user.mmr) return;
+
+    try {
+      setAdminMmrBusy(delta);
+      setAdminMmrError(null);
+
+      const { data } = await api.patch<{ mmr: number; rank: string }>(
+        `/admin/users/${user.id}/mmr`,
+        { mmr: nextMmr },
+      );
+
+      updateUser({
+        mmr: data.mmr,
+        rank: data.rank,
+      });
+    } catch (err: any) {
+      setAdminMmrError(
+        err.response?.data?.error?.message ?? "No pude ajustar el ELO.",
+      );
+    } finally {
+      setAdminMmrBusy(null);
+    }
+  }
+
   function openPlayer(username: string) {
     setSearchTerm("");
     setSearchResults([]);
     navigate({ to: "/profile/$username", params: { username } });
+  }
+
+  function openOwnProfile() {
+    navigate({ to: "/profile" });
   }
 
   if (!user) return null;
@@ -293,7 +491,7 @@ export function AppLayout() {
                     <div style={{ minWidth: 0, flex: 1 }}>
                       <div style={styles.searchResultName}>{player.username}</div>
                       <div style={styles.searchResultMeta}>
-                        Lvl {player.level ?? getLevelMeta(player.mmr).level} · {player.mmr} MMR
+                        {(player.displayLevel ?? getRankMeta(player.level ?? getLevelMeta(player.mmr).level).label)} · {player.mmr} MMR
                       </div>
                     </div>
                     <ChevronRight size={15} color="rgba(232,244,255,0.45)" />
@@ -311,9 +509,12 @@ export function AppLayout() {
               item={item}
               active={isNavActive(pathname, item)}
               queueState={
-                item.to === "/dashboard" && (isSearchingMatch || isMatchFound)
+                item.to === "/dashboard" &&
+                (isSearchingMatch || isMatchFound || hasTrackedActiveMatch)
                   ? {
-                      status: matchmakingStatus,
+                      status: railStatusMeta.phase,
+                      label: railStatusMeta.navLabel,
+                      detail: railStatusMeta.navDetail,
                       elapsed: queueElapsed,
                       position: queuePosition,
                       etaSeconds: queueEtaSeconds,
@@ -372,27 +573,36 @@ export function AppLayout() {
             </div>
           </div>
 
-          <div style={styles.identityBlock}>
-            <div style={{ ...styles.levelOrb, borderColor: rankColor, boxShadow: `0 0 34px ${rankColor}33` }}>
-              <Avatar username={user.username} avatar={user.avatar} size={72} />
-              <div style={{ ...styles.levelChip, color: rankColor, borderColor: `${rankColor}99` }}>
-                {level}
+          <button type="button" onClick={openOwnProfile} style={styles.identityButton}>
+            <div style={styles.identityBlock}>
+              <div style={styles.identityAvatarWrap}>
+                <Avatar username={user.username} avatar={user.avatar} size={72} />
+              </div>
+              <div style={{ minWidth: 0 }}>
+                <div style={styles.username}>{user.username}</div>
+                <div style={{ ...styles.rankLine, color: rankColor }}>
+                  {rankMeta.label} · {user.mmr.toLocaleString("es-AR")} MMR
+                </div>
+                <div style={{ marginTop: "0.6rem" }}>
+                  <RankBadge
+                    level={level}
+                    mmr={user.mmr}
+                    size="md"
+                    glow="medium"
+                  />
+                </div>
+                <div style={styles.roleRow}>
+                  <RoleBadge role={user.mainRole as PlayerRole | null | undefined} fallback="Main sin definir" />
+                  <RoleBadge role={user.secondaryRole as PlayerRole | null | undefined} fallback="Alt sin definir" muted />
+                </div>
               </div>
             </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={styles.username}>{user.username}</div>
-              <div style={styles.rankLine}>Lvl {level} · {user.mmr.toLocaleString("es-AR")} MMR</div>
-              <div style={styles.roleRow}>
-                <RoleBadge role={user.mainRole as PlayerRole | null | undefined} fallback="Main sin definir" />
-                <RoleBadge role={user.secondaryRole as PlayerRole | null | undefined} fallback="Alt sin definir" muted />
-              </div>
-            </div>
-          </div>
+          </button>
 
           <div style={styles.progressHeader}>
-            <span>Progreso al próximo nivel</span>
+            <span>Progreso al próximo rango</span>
             <strong style={{ color: rankColor }}>
-              {levelMeta.nextLevelAt == null ? "Nivel máximo" : `+${pointsToNextLevel}`}
+              {levelMeta.nextLevelAt == null ? "Rango máximo" : `+${pointsToNextLevel}`}
             </strong>
           </div>
           <div style={styles.progressTrack}>
@@ -411,6 +621,48 @@ export function AppLayout() {
             <SpineStat label="Losses" value={user.losses} tone="#fb7185" />
             <SpineStat label="WR" value={`${winrate(user.wins, user.losses)}%`} tone="#38bdf8" />
           </div>
+
+          {user.role === "ADMIN" && (
+            <div style={styles.adminMmrPanel}>
+              <div style={styles.adminMmrHeader}>
+                <span>Admin · ajuste manual</span>
+                <strong style={{ color: rankColor }}>
+                  {user.mmr.toLocaleString("es-AR")} MMR
+                </strong>
+              </div>
+              <div style={styles.adminMmrActions}>
+                {[
+                  { label: "-100", delta: -100 },
+                  { label: "-25", delta: -25 },
+                  { label: "+25", delta: 25 },
+                  { label: "+100", delta: 100 },
+                ].map((action) => (
+                  <button
+                    key={action.label}
+                    type="button"
+                    onClick={() => handleAdminMmrDelta(action.delta)}
+                    disabled={adminMmrBusy != null}
+                    style={{
+                      ...styles.adminMmrButton,
+                      borderColor:
+                        action.delta > 0
+                          ? "rgba(74,222,128,0.32)"
+                          : "rgba(248,113,113,0.28)",
+                      color: action.delta > 0 ? "#86efac" : "#fda4af",
+                      background:
+                        action.delta > 0
+                          ? "rgba(34,197,94,0.10)"
+                          : "rgba(239,68,68,0.10)",
+                      opacity: adminMmrBusy != null && adminMmrBusy !== action.delta ? 0.65 : 1,
+                    }}
+                  >
+                    {adminMmrBusy === action.delta ? "..." : action.label}
+                  </button>
+                ))}
+              </div>
+              {adminMmrError && <div style={styles.adminMmrError}>{adminMmrError}</div>}
+            </div>
+          )}
         </section>
 
         <section style={styles.spinePanel}>
@@ -502,6 +754,8 @@ function RailItem({
   active: boolean;
   queueState?: {
     status: string;
+    label: string;
+    detail: string;
     elapsed: number;
     position: number | null;
     etaSeconds: number | null;
@@ -523,17 +777,18 @@ function RailItem({
       {queueState && (
         <span style={styles.queueNavPulseWrap}>
           <span style={styles.queueNavPulse} />
-          {queueState.status === "searching" ? "Buscando" : "Match"}
+          {queueState.label}
         </span>
       )}
       {item.badge && <span style={styles.railBadge}>{item.badge}</span>}
       {queueState && (
         <div style={styles.queueNavMeta}>
-          <span>{formatQueueTime(queueState.elapsed)}</span>
           <span>
-            Pos. {queueState.position ?? "—"}
-            {queueState.etaSeconds != null ? ` · espera ~${queueState.etaSeconds}s` : ""}
+            {queueState.status === "EN COLA"
+              ? formatQueueTime(queueState.elapsed)
+              : queueState.label}
           </span>
+          <span>{queueState.detail}</span>
         </div>
       )}
     </div>
@@ -569,6 +824,7 @@ function RoleBadge({
   muted?: boolean;
 }) {
   const meta = getRoleMeta(role);
+  const iconSources = getRoleIconSources(role);
   const color = meta?.accent ?? "rgba(232,244,255,0.25)";
   return (
     <span
@@ -581,8 +837,13 @@ function RoleBadge({
     >
       {meta && (
         <img
-          src={meta.icon}
+          src={iconSources?.primary}
           alt=""
+          onError={(event) => {
+            if (!iconSources?.fallback || event.currentTarget.dataset.fallbackApplied === "1") return;
+            event.currentTarget.dataset.fallbackApplied = "1";
+            event.currentTarget.src = iconSources.fallback;
+          }}
           style={{
             width: "15px",
             height: "15px",
@@ -987,7 +1248,25 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: "0.8px",
   },
   connectionDot: { width: "7px", height: "7px", borderRadius: "999px" },
+  identityButton: {
+    border: "none",
+    padding: 0,
+    background: "transparent",
+    color: "inherit",
+    textAlign: "left",
+    cursor: "pointer",
+  },
   identityBlock: { display: "flex", alignItems: "center", gap: "14px" },
+  identityAvatarWrap: {
+    width: "78px",
+    height: "78px",
+    borderRadius: "999px",
+    border: "1px solid rgba(232,244,255,0.12)",
+    display: "grid",
+    placeItems: "center",
+    background: "linear-gradient(180deg, rgba(15,23,42,0.92), rgba(2,6,14,0.96))",
+    flexShrink: 0,
+  },
   levelOrb: {
     position: "relative",
     width: "86px",
@@ -1078,6 +1357,45 @@ const styles: Record<string, React.CSSProperties> = {
     backgroundSize: "14px 100%",
   },
   statsGrid: { marginTop: "14px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" },
+  adminMmrPanel: {
+    marginTop: "14px",
+    border: "1px solid rgba(192,132,252,0.18)",
+    background: "linear-gradient(180deg, rgba(76,29,149,0.10), rgba(2,6,14,0.56))",
+    padding: "10px",
+    display: "grid",
+    gap: "10px",
+  },
+  adminMmrHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+    color: "rgba(232,244,255,0.50)",
+    fontSize: "10px",
+    fontWeight: 900,
+    letterSpacing: "0.12em",
+    textTransform: "uppercase",
+  },
+  adminMmrActions: {
+    display: "grid",
+    gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+    gap: "6px",
+  },
+  adminMmrButton: {
+    minHeight: "34px",
+    border: "1px solid",
+    fontFamily: "var(--font-display)",
+    fontSize: "11px",
+    fontWeight: 900,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    cursor: "pointer",
+  },
+  adminMmrError: {
+    color: "#fecaca",
+    fontSize: "11px",
+    fontWeight: 700,
+  },
   spineStat: {
     padding: "10px 8px",
     textAlign: "center",

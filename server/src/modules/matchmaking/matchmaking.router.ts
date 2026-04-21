@@ -1,7 +1,15 @@
 import { Router } from 'express'
 import { z } from 'zod'
 import { authenticate, AuthRequest } from '../../shared/middlewares/authenticate'
-import { getActiveMatch, joinQueue, leaveQueue, getQueueSnapshot, getQueueStatus, scheduleTryFormMatch } from './matchmaking.service'
+import {
+  cleanupUserMatchmakingSession,
+  getActiveMatch,
+  joinQueue,
+  leaveQueue,
+  getQueueSnapshot,
+  getQueueStatus,
+  scheduleTryFormMatch,
+} from './matchmaking.service'
 
 export const matchmakingRouter = Router()
 
@@ -9,13 +17,12 @@ matchmakingRouter.use(authenticate)
 
 const JoinQueueSchema = z.object({
   mode: z.enum(['COMPETITIVE', 'UNRANKED', 'TEAM']).default('COMPETITIVE'),
-  roles: z.array(z.string()).default([]),
 })
 
 matchmakingRouter.post('/queue/join', async (req, res, next) => {
   try {
-    const { mode, roles } = JoinQueueSchema.parse(req.body)
-    const result = await joinQueue((req as AuthRequest).userId, mode, roles)
+    const { mode } = JoinQueueSchema.parse(req.body)
+    const result = await joinQueue((req as AuthRequest).userId, mode)
     await scheduleTryFormMatch()
     res.json({ ok: true, ...result })
   } catch (err) {
@@ -54,6 +61,18 @@ matchmakingRouter.get('/active', async (req, res, next) => {
   try {
     const match = await getActiveMatch((req as AuthRequest).userId)
     res.json({ match })
+  } catch (err) {
+    next(err)
+  }
+})
+
+matchmakingRouter.post('/session/cleanup', async (req, res, next) => {
+  try {
+    const result = await cleanupUserMatchmakingSession(
+      (req as AuthRequest).userId,
+      'Session closed during accept',
+    )
+    res.json({ ok: true, ...result })
   } catch (err) {
     next(err)
   }

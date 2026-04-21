@@ -1,11 +1,12 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useForm, type FieldPath } from 'react-hook-form'
 import { z } from 'zod/v4'
 import { api } from '../lib/api'
 import { useAuthStore } from '../stores/auth.store'
 import { ChevronRight } from 'lucide-react'
+import { requiresCompetitiveOnboarding } from '../lib/onboarding'
 
 const schema = z.object({
   email: z.string().email('Email inválido'),
@@ -14,11 +15,19 @@ const schema = z.object({
 type FormData = z.infer<typeof schema>
 
 export function Login() {
-  const { setAuth } = useAuthStore()
+  const { user, setAuth } = useAuthStore()
   const navigate = useNavigate()
   const [serverError, setServerError] = useState('')
 
   const { register, handleSubmit, setError, clearErrors, formState: { errors, isSubmitting } } = useForm<FormData>()
+
+  useEffect(() => {
+    if (!user) return
+    navigate({
+      to: requiresCompetitiveOnboarding(user) ? '/onboarding' : '/dashboard',
+      replace: true,
+    })
+  }, [navigate, user])
 
   async function onSubmit(data: FormData) {
     setServerError('')
@@ -34,7 +43,7 @@ export function Login() {
     try {
       const res = await api.post('/auth/login', parsed.data)
       setAuth(res.data.user, res.data.accessToken)
-      navigate({ to: '/dashboard' })
+      navigate({ to: requiresCompetitiveOnboarding(res.data.user) ? '/onboarding' : '/dashboard' })
     } catch (err: any) {
       setServerError(err.response?.data?.error?.message || 'Credenciales inválidas')
     }

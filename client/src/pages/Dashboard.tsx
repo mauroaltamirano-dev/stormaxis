@@ -5,29 +5,75 @@ import { useMatchmakingStore } from "../stores/matchmaking.store";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { reportClientError } from "../lib/monitoring";
+import { RankBadge } from "../components/RankBadge";
+import { PlayerSlotShell } from "../components/PlayerSlotShell";
 import { MatchFoundModal } from "../components/matchmaking/MatchFoundModal";
-import { Plus, Search } from "lucide-react";
-import { getRoleMeta } from "../lib/roles";
+import {
+  Activity,
+  Plus,
+  Radio,
+  Search,
+  ShieldCheck,
+  TimerReset,
+} from "lucide-react";
+import { getRoleIconSources, getRoleMeta } from "../lib/roles";
+import { getRankMeta, parseRankLevel } from "../lib/ranks";
+import { getQueueLifecycleMeta } from "../lib/competitiveStatus";
 
-const LEVEL_COLORS: Record<number, string> = {
-  1: "#6b7280", // Hierro       — gris apagado, sin glamour
-  2: "#a16207", // Bronce       — marrón terroso
-  3: "#94a3b8", // Plata        — gris plateado frío
-  4: "#eab308", // Oro          — amarillo dorado saturado
-  5: "#06b6d4", // Platino      — cian oscuro, premium
-  6: "#3b82f6", // Diamante     — azul brillante, escaso
-  7: "#8b5cf6", // Maestro      — violeta intenso
-  8: "#d946ef", // Gran Maestro — magenta vibrante, raro
-  9: "#f97316", // Apex         — naranja ardiente
-  10: "#ff0000", // Challenger  — dorado resplandeciente, élite máxima
-};
+function formatCompactRating(value: number) {
+  return value.toLocaleString("es-AR");
+}
 
-function parseLevel(user: { level?: number; rank: string }) {
-  if (user.level && user.level >= 1 && user.level <= 10) return user.level;
-  const rankLevel = Number(user.rank.replace("LVL_", ""));
-  if (!Number.isNaN(rankLevel) && rankLevel >= 1 && rankLevel <= 10)
-    return rankLevel;
-  return 1;
+function CardCorners({ color }: { color: string }) {
+  const common: React.CSSProperties = {
+    position: "absolute",
+    width: "18px",
+    height: "18px",
+    borderColor: color,
+    opacity: 0.7,
+    pointerEvents: "none",
+  };
+
+  return (
+    <>
+      <div
+        style={{
+          ...common,
+          top: "10px",
+          left: "10px",
+          borderTop: "2px solid",
+          borderLeft: "2px solid",
+        }}
+      />
+      <div
+        style={{
+          ...common,
+          top: "10px",
+          right: "10px",
+          borderTop: "2px solid",
+          borderRight: "2px solid",
+        }}
+      />
+      <div
+        style={{
+          ...common,
+          bottom: "10px",
+          left: "10px",
+          borderBottom: "2px solid",
+          borderLeft: "2px solid",
+        }}
+      />
+      <div
+        style={{
+          ...common,
+          bottom: "10px",
+          right: "10px",
+          borderBottom: "2px solid",
+          borderRight: "2px solid",
+        }}
+      />
+    </>
+  );
 }
 
 const MODES = [
@@ -54,6 +100,10 @@ type AdminMatchRow = {
   }>;
 };
 
+function formatCountdown(seconds: number) {
+  return `0:${String(Math.max(0, seconds)).padStart(2, "0")}`;
+}
+
 export function Dashboard() {
   const navigate = useNavigate();
   const { user, updateUser } = useAuthStore();
@@ -74,7 +124,7 @@ export function Dashboard() {
   } = useMatchmakingStore() as any;
 
   const [selectedMode, setSelectedMode] = useState("COMPETITIVE");
-  const [selectedRoles, setSelectedRoles] = useState<string[]>([]);
+  const [queueRoles, setQueueRoles] = useState<string[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [dismissedActiveMatchId, setDismissedActiveMatchId] = useState<
     string | null
@@ -90,6 +140,7 @@ export function Dashboard() {
       avatar: string | null;
       mmr: number;
       joinedAt: number | null;
+      roles?: string[];
       isBot?: boolean;
     }>
   >([]);
@@ -104,6 +155,8 @@ export function Dashboard() {
   const [matchmakingLayout, setMatchmakingLayout] = useState<"split" | "stack">(
     "split",
   );
+  const [hoveredEmptySlot, setHoveredEmptySlot] = useState<number | null>(null);
+  const [acceptCountdown, setAcceptCountdown] = useState<number | null>(null);
 
   useEffect(() => {
     if (status !== "searching" || !searchStartedAt) return;
@@ -113,6 +166,22 @@ export function Dashboard() {
     );
     return () => clearInterval(iv);
   }, [status, searchStartedAt]);
+
+  useEffect(() => {
+    if (!pendingMatch?.expiresAt) {
+      setAcceptCountdown(null);
+      return;
+    }
+
+    const syncCountdown = () =>
+      setAcceptCountdown(
+        Math.max(0, Math.round((pendingMatch.expiresAt - Date.now()) / 1000)),
+      );
+
+    syncCountdown();
+    const iv = window.setInterval(syncCountdown, 1000);
+    return () => window.clearInterval(iv);
+  }, [pendingMatch?.expiresAt]);
 
   useEffect(() => {
     const socket = getSocket();
@@ -187,15 +256,28 @@ export function Dashboard() {
         joinedAt?: number;
       }>("/matchmaking/queue/status")
       .then(({ data }) => {
-        if (!data.inQueue) return;
+        if (!data.inQueue) {
+          setQueueRoles([]);
+          if (!pendingMatch && !hasActiveMatch) {
+            resetMatchmaking();
+          }
+          return;
+        }
         if (data.mode) setSelectedMode(data.mode);
-        if (data.roles) setSelectedRoles(data.roles);
+        if (data.roles) setQueueRoles(data.roles);
         if (data.queueSize != null) setQueueSize(data.queueSize);
         setQueueProgress({ position: null, etaSeconds: null });
         startSearching(data.joinedAt);
       })
       .catch(() => {});
-  }, [setQueueProgress, setQueueSize, startSearching]);
+  }, [
+    hasActiveMatch,
+    pendingMatch,
+    resetMatchmaking,
+    setQueueProgress,
+    setQueueSize,
+    startSearching,
+  ]);
 
   useEffect(() => {
     let cancelled = false;
@@ -210,6 +292,8 @@ export function Dashboard() {
             avatar: string | null;
             mmr: number;
             joinedAt: number | null;
+            roles?: string[];
+            isBot?: boolean;
           }>;
         }>("/matchmaking/queue/snapshot");
 
@@ -349,14 +433,15 @@ export function Dashboard() {
 
     if (status === "searching") {
       await api.post("/matchmaking/queue/leave");
+      setQueueRoles([]);
       stopSearching();
       return;
     }
     try {
       await api.post("/matchmaking/queue/join", {
         mode: selectedMode,
-        roles: selectedRoles,
       });
+      setQueueRoles(profileRoles);
       startSearching();
     } catch (err: any) {
       console.error("Queue error:", err.response?.data);
@@ -423,7 +508,25 @@ export function Dashboard() {
     }
   }
 
+  async function handleAdminClearQueue() {
+    try {
+      setAdminFillingBots(true);
+      setAdminError(null);
+      await api.post("/admin/queue/clear");
+      setQueuePreview([]);
+      setQueueRoles([]);
+      resetMatchmaking();
+    } catch (err: any) {
+      setAdminError(
+        err.response?.data?.error?.message ?? "No pude limpiar la cola.",
+      );
+    } finally {
+      setAdminFillingBots(false);
+    }
+  }
+
   const isSearching = status === "searching";
+  const isAccepting = Boolean(pendingMatch);
   const findMatchDisabled = hasActiveMatch;
   const queuePreviewForDisplay = queuePreview;
 
@@ -437,17 +540,32 @@ export function Dashboard() {
 
   if (!user) return null;
 
-  const level = parseLevel(user);
-  const rankColor = LEVEL_COLORS[level] || "#00c8ff";
+  const level = user.level ?? parseRankLevel(user.rank);
+  const rankMeta = getRankMeta(level);
+  const rankColor = rankMeta.color;
 
   const profileRoles = [user.mainRole, user.secondaryRole].filter(
     Boolean,
   ) as string[];
-  const queuePhase = hasActiveMatch
-    ? "MATCH ACTIVO"
-    : isSearching
-      ? "EN COLA"
-      : "LISTO";
+  const activeQueueRoles = queueRoles.length > 0 ? queueRoles : profileRoles;
+  const acceptedCount = pendingMatch?.acceptedBy?.length ?? 0;
+  const currentUserAccepted = user
+    ? (pendingMatch?.acceptedBy ?? []).includes(user.id)
+    : false;
+  const totalPendingPlayers =
+    pendingMatch?.totalPlayers ??
+    (pendingMatch?.teams.team1.length ?? 0) +
+      (pendingMatch?.teams.team2.length ?? 0);
+  const queueStateMeta = getQueueLifecycleMeta({
+    hasActiveMatch,
+    isAccepting,
+    isSearching,
+    queueEtaSeconds,
+    queuePosition,
+    acceptedCount,
+    totalPlayers: totalPendingPlayers,
+  });
+  const queuePhase = queueStateMeta.phase;
 
   return (
     <>
@@ -536,7 +654,7 @@ export function Dashboard() {
               <div
                 style={{
                   minWidth: "160px",
-                  border: `1px solid ${rankColor}66`,
+                  border: `1px solid ${queueStateMeta.tone}66`,
                   background: "rgba(2,6,14,0.72)",
                   padding: "0.9rem 1rem",
                   textAlign: "right",
@@ -555,7 +673,7 @@ export function Dashboard() {
                 </div>
                 <div
                   style={{
-                    color: rankColor,
+                    color: queueStateMeta.tone,
                     fontFamily: "var(--font-display)",
                     fontSize: "1.35rem",
                     fontWeight: 900,
@@ -563,6 +681,18 @@ export function Dashboard() {
                   }}
                 >
                   {queuePhase}
+                </div>
+                <div
+                  style={{
+                    marginTop: "0.28rem",
+                    color: "rgba(232,244,255,0.46)",
+                    fontSize: "0.74rem",
+                    fontWeight: 700,
+                  }}
+                >
+                  {queueStateMeta.stage
+                    ? `${queueStateMeta.stage} · ${queueStateMeta.signal}`
+                    : queueStateMeta.signal}
                 </div>
               </div>
             </div>
@@ -583,19 +713,111 @@ export function Dashboard() {
                 tone="#38bdf8"
               />
               <HeroMetric
-                label="Cola"
-                value={`${queueSize ?? 0}/10`}
-                tone="#a78bfa"
+                label={isAccepting ? "Accept" : "Cola"}
+                value={
+                  isAccepting
+                    ? `${acceptedCount}/${totalPendingPlayers}`
+                    : `${queueSize ?? 0}/10`
+                }
+                tone={isAccepting ? queueStateMeta.tone : "#a78bfa"}
               />
               <HeroMetric
-                label="Posición"
-                value={queuePosition ?? "—"}
-                tone="#facc15"
+                label={isAccepting ? "Tu estado" : "Posición"}
+                value={
+                  isAccepting
+                    ? currentUserAccepted
+                      ? "OK"
+                      : "Pendiente"
+                    : (queuePosition ?? "—")
+                }
+                tone={
+                  isAccepting
+                    ? currentUserAccepted
+                      ? "#4ade80"
+                      : "#f8fafc"
+                    : "#facc15"
+                }
               />
               <HeroMetric
-                label="Espera"
-                value={queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "—"}
-                tone="#4ade80"
+                label={isAccepting ? "Ventana" : "Espera"}
+                value={
+                  isAccepting
+                    ? acceptCountdown != null
+                      ? formatCountdown(acceptCountdown)
+                      : "—"
+                    : queueEtaSeconds != null
+                      ? `~${queueEtaSeconds}s`
+                      : "—"
+                }
+                tone={isAccepting ? queueStateMeta.tone : "#4ade80"}
+              />
+            </div>
+
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                gap: "0.7rem",
+              }}
+            >
+              <QueueSignalCard
+                icon={<Activity size={16} />}
+                label="Estado operativo"
+                value={queueStateMeta.phase}
+                sub={
+                  queueStateMeta.stage
+                    ? `${queueStateMeta.stage} · ${queueStateMeta.detail}`
+                    : queueStateMeta.detail
+                }
+                tone={queueStateMeta.tone}
+              />
+              <QueueSignalCard
+                icon={<Radio size={16} />}
+                label="Roles activos"
+                value={
+                  activeQueueRoles.length > 0
+                    ? activeQueueRoles.join(" · ")
+                    : "Perfil sin roles"
+                }
+                sub="El matchmaking usa tu identidad competitiva real."
+                tone={rankColor}
+              />
+              <QueueSignalCard
+                icon={
+                  isAccepting ? (
+                    <ShieldCheck size={16} />
+                  ) : (
+                    <TimerReset size={16} />
+                  )
+                }
+                label="Próxima acción"
+                value={
+                  hasActiveMatch
+                    ? "Volver al room"
+                    : isAccepting
+                      ? "Confirmar"
+                      : isSearching
+                        ? `Elapsed ${formatElapsed(elapsed)}`
+                        : "Buscar partida"
+                }
+                sub={
+                  hasActiveMatch
+                    ? "Tenés una partida viva esperando continuidad."
+                    : isAccepting
+                      ? "Aceptá desde el modal antes de que cierre la ventana."
+                      : isSearching
+                        ? "Seguí en cola mientras balanceamos MMR y slots."
+                        : "Todo listo para entrar a la cola competitiva."
+                }
+                tone={
+                  hasActiveMatch
+                    ? "#22c55e"
+                    : isAccepting
+                      ? queueStateMeta.tone
+                      : isSearching
+                        ? "#38bdf8"
+                        : "#cbd5e1"
+                }
               />
             </div>
           </div>
@@ -650,7 +872,7 @@ export function Dashboard() {
                     fontWeight: 700,
                   }}
                 >
-                  Tu identidad antes de entrar a cola
+                  Identidad activa antes de entrar
                 </div>
                 <div
                   style={{
@@ -683,155 +905,216 @@ export function Dashboard() {
               {SLOT_ORDER.map((idx) => {
                 const isYou = idx === 2;
                 return isYou ? (
-                  <div
-                    key="you"
-                    style={{
-                      ...slotBaseStyle,
-                      position: "relative",
-                      overflow: "hidden",
-                      minHeight:
-                        matchmakingLayout === "stack"
-                          ? "290px"
-                          : slotBaseStyle.minHeight,
-                      borderColor: `${rankColor}66`,
-                      background: `radial-gradient(circle at 50% 8%, ${rankColor}24, transparent 36%), linear-gradient(180deg, ${rankColor}12, rgba(2,6,14,0.74))`,
-                    }}
-                  >
+                  <PlayerSlotShell key="you" color={rankColor} minHeight={320}>
                     <div
                       style={{
-                        position: "absolute",
-                        inset: "0 12%",
-                        height: "1px",
-                        top: 0,
-                        background: `linear-gradient(90deg, transparent, ${rankColor}, transparent)`,
-                        boxShadow: `0 0 18px ${rankColor}`,
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: "auto 0 0",
-                        height: "72px",
-                        background:
-                          "linear-gradient(0deg, rgba(0,0,0,0.42), transparent)",
-                        pointerEvents: "none",
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "relative",
-                        color: rankColor,
-                        fontSize: "0.62rem",
-                        letterSpacing: "0.18em",
-                        fontWeight: 900,
-                        textTransform: "uppercase",
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "0.5rem",
                       }}
                     >
-                      Tú
-                    </div>
-                    <div
-                      style={{
-                        width: "64px",
-                        height: "64px",
-                        borderRadius: "999px",
-                        overflow: "hidden",
-                        display: "grid",
-                        placeItems: "center",
-                        border: `1px solid ${rankColor}`,
-                        color: rankColor,
-                        fontFamily: "var(--font-display)",
-                        fontWeight: 900,
-                        fontSize: "1.25rem",
-                        background: "rgba(0,0,0,0.25)",
-                        boxShadow: `0 0 28px ${rankColor}33`,
-                      }}
-                    >
-                      {user.avatar && !avatarLoadError ? (
-                        <img
-                          src={user.avatar}
-                          alt={user.username}
-                          onError={() => setAvatarLoadError(true)}
-                          style={{
-                            width: "100%",
-                            height: "100%",
-                            objectFit: "cover",
-                          }}
-                        />
-                      ) : (
-                        user.username.slice(0, 2).toUpperCase()
-                      )}
-                    </div>
-                    <div style={{ minWidth: 0, textAlign: "center" }}>
+                      <div
+                        style={{
+                          border: `1px solid ${rankColor}55`,
+                          background: `${rankColor}12`,
+                          color: rankColor,
+                          padding: "2px 8px",
+                          fontSize: "10px",
+                          fontWeight: 900,
+                          letterSpacing: "0.18em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Tú
+                      </div>
+
+                      <div
+                        style={{
+                          width: "68px",
+                          height: "68px",
+                          borderRadius: "999px",
+                          overflow: "hidden",
+                          border: `2px solid ${rankColor}`,
+                          boxShadow: `0 0 16px ${rankColor}33`,
+                          display: "grid",
+                          placeItems: "center",
+                          color: rankColor,
+                          fontFamily: "var(--font-display)",
+                          fontWeight: 900,
+                          background: "rgba(255,255,255,0.05)",
+                        }}
+                      >
+                        {user.avatar && !avatarLoadError ? (
+                          <img
+                            src={user.avatar}
+                            alt={user.username}
+                            onError={() => setAvatarLoadError(true)}
+                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                          />
+                        ) : (
+                          user.username.slice(0, 2).toUpperCase()
+                        )}
+                      </div>
+
                       <div
                         style={{
                           color: "#fff",
-                          fontFamily: "var(--font-display)",
-                          fontWeight: 900,
-                          fontSize: "1rem",
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
+                          fontSize: "1.1rem",
+                          fontWeight: 800,
                         }}
                       >
                         {user.username}
                       </div>
                     </div>
-                    <PlayerRankPlate
-                      level={level}
-                      mmr={user.mmr}
-                      color={rankColor}
-                    />
+
                     <div
                       style={{
                         display: "flex",
-                        gap: "0.35rem",
-                        flexWrap: "wrap",
-                        justifyContent: "center",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "0.4rem",
                       }}
                     >
+                      <RankBadge
+                        level={level}
+                        size="lg"
+                        align="center"
+                        showLabel={false}
+                        showMmr={false}
+                        glow="medium"
+                      />
+
+                      <div
+                        style={{
+                          color: rankColor,
+                          fontWeight: 900,
+                          letterSpacing: "0.14em",
+                          textTransform: "uppercase",
+                          textShadow: `0 0 10px ${rankColor}33`,
+                        }}
+                      >
+                        {rankMeta.label}
+                      </div>
+
+                      <div
+                        style={{
+                          color: "rgba(255,255,255,0.85)",
+                          fontSize: "0.85rem",
+                          fontWeight: 700,
+                        }}
+                      >
+                        {user.mmr.toLocaleString("es-AR")} MMR
+                      </div>
+                    </div>
+
+                    <div style={{ display: "flex", gap: "0.5rem" }}>
                       {profileRoles.length > 0 ? (
                         profileRoles.map((role) => (
-                          <RolePill key={role} role={role} />
+                          <RolePill key={role} role={role} iconOnly />
                         ))
                       ) : (
                         <RolePill role="Sin rol" muted />
                       )}
                     </div>
-                  </div>
+                  </PlayerSlotShell>
                 ) : (
                   <div
                     key={idx}
+                    onMouseEnter={() => setHoveredEmptySlot(idx)}
+                    onMouseLeave={() => setHoveredEmptySlot((current) => (current === idx ? null : current))}
                     style={{
                       ...slotBaseStyle,
                       minHeight:
                         matchmakingLayout === "stack"
                           ? "290px"
                           : slotBaseStyle.minHeight,
+                      border:
+                        hoveredEmptySlot === idx
+                          ? "1px solid rgba(125, 211, 252, 0.22)"
+                          : "1px solid rgba(148,163,184,0.10)",
+                      background:
+                        "linear-gradient(180deg, rgba(8,12,22,0.9), rgba(3,6,14,0.92))",
+                      transform:
+                        hoveredEmptySlot === idx
+                          ? "translateY(-2px)"
+                          : "translateY(0)",
+                      boxShadow:
+                        hoveredEmptySlot === idx
+                          ? "0 0 18px rgba(56, 189, 248, 0.08)"
+                          : slotBaseStyle.boxShadow,
+                      transition:
+                        "border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease",
                     }}
                   >
+                    <CardCorners color="rgba(148,163,184,0.16)" />
+
                     <div
                       style={{
-                        width: "42px",
-                        height: "42px",
-                        border: "1px dashed rgba(232,244,255,0.13)",
+                        position: "absolute",
+                        inset: 0,
                         display: "grid",
                         placeItems: "center",
-                        color: "rgba(232,244,255,0.22)",
-                      }}
-                    >
-                      <Plus size={18} />
-                    </div>
-                    <div
-                      style={{
-                        color: "rgba(232,244,255,0.26)",
+                        opacity: 0.06,
+                        pointerEvents: "none",
+                        fontSize: "7rem",
                         fontFamily: "var(--font-display)",
                         fontWeight: 900,
-                        fontSize: "0.7rem",
-                        letterSpacing: "0.12em",
-                        textTransform: "uppercase",
+                        color: "#7dd3fc",
                       }}
                     >
-                      Slot aliado
+                      V
+                    </div>
+
+                    <div
+                      style={{
+                        width: "52px",
+                        height: "52px",
+                        border: "1px solid rgba(232,244,255,0.12)",
+                        background:
+                          "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
+                        display: "grid",
+                        placeItems: "center",
+                        color: "rgba(232,244,255,0.42)",
+                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                        transition: "all 180ms ease",
+                      }}
+                    >
+                      <Plus size={20} />
+                    </div>
+
+                    <div
+                      style={{
+                        display: "flex",
+                        flexDirection: "column",
+                        alignItems: "center",
+                        gap: "0.15rem",
+                      }}
+                    >
+                      <div
+                        style={{
+                          color: "rgba(232,244,255,0.28)",
+                          fontFamily: "var(--font-display)",
+                          fontWeight: 900,
+                          fontSize: "0.68rem",
+                          letterSpacing: "0.14em",
+                          textTransform: "uppercase",
+                          textAlign: "center",
+                        }}
+                      >
+                        Slot aliado
+                      </div>
+
+                      <div
+                        style={{
+                          color: "rgba(232,244,255,0.16)",
+                          fontSize: "0.62rem",
+                          letterSpacing: "0.06em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Invitar jugador
+                      </div>
                     </div>
                   </div>
                 );
@@ -907,8 +1190,54 @@ export function Dashboard() {
                   lineHeight: 1.45,
                 }}
               >
-                Entrás solo o con party chica. El sistema completa jugadores,
-                arma equipos y abre una sala con capitanes y veto de mapas.
+                Entrás solo o en party chica. El sistema completa la sala,
+                balancea MMR y abre veto en vivo.
+              </div>
+            </div>
+
+            <div
+              style={{
+                border: "1px solid rgba(232,244,255,0.07)",
+                background: "rgba(2,6,14,0.36)",
+                padding: "0.9rem",
+                display: "grid",
+                gap: "0.6rem",
+              }}
+            >
+              <div
+                style={{
+                  color: "rgba(232,244,255,0.38)",
+                  fontSize: "0.7rem",
+                  letterSpacing: "0.16em",
+                  textTransform: "uppercase",
+                  fontWeight: 900,
+                }}
+              >
+                Roles usados para entrar
+              </div>
+              <div
+                style={{
+                  color: "rgba(232,244,255,0.62)",
+                  fontSize: "0.84rem",
+                  lineHeight: 1.45,
+                }}
+              >
+                La cola usa tus roles guardados en perfil, sin selección manual.
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "0.45rem",
+                  flexWrap: "wrap",
+                }}
+              >
+                {activeQueueRoles.length > 0 ? (
+                  activeQueueRoles.map((role) => (
+                    <RolePill key={role} role={role} />
+                  ))
+                ) : (
+                  <RolePill role="Completa onboarding" muted />
+                )}
               </div>
             </div>
 
@@ -960,7 +1289,7 @@ export function Dashboard() {
                       animation: "blink 1s infinite",
                     }}
                   />
-                  Buscando {formatElapsed(elapsed)} · Cancelar
+                  Buscando {formatElapsed(elapsed)} · cancelar
                 </>
               ) : (
                 <>
@@ -1046,9 +1375,29 @@ export function Dashboard() {
                             fontSize: "0.78rem",
                           }}
                         >
-                          #{index + 1} preview · {entry.mmr} MMR ·{" "}
+                          #{index + 1} · {formatCompactRating(entry.mmr)} MMR ·{" "}
                           {entry.isBot ? "bot testing" : "usuario real"}
                         </div>
+                        {!entry.isBot &&
+                          entry.roles &&
+                          entry.roles.length > 0 && (
+                            <div
+                              style={{
+                                display: "flex",
+                                gap: "0.35rem",
+                                marginTop: "0.35rem",
+                                flexWrap: "wrap",
+                              }}
+                            >
+                              {entry.roles.map((role) => (
+                                <RolePill
+                                  key={`${entry.userId}-${role}`}
+                                  role={role}
+                                  iconOnly
+                                />
+                              ))}
+                            </div>
+                          )}
                       </div>
                     </div>
                     <div
@@ -1170,15 +1519,24 @@ export function Dashboard() {
                 eyebrow="Admin · Rescue panel"
                 title="Control rápido de testing"
               />
-              <button
-                onClick={handleAdminFillBots}
-                disabled={adminFillingBots}
-                style={blueGhostButtonStyle}
-              >
-                {adminFillingBots
-                  ? "Completando…"
-                  : "Completar cola a 10 con bots"}
-              </button>
+              <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
+                <button
+                  onClick={handleAdminClearQueue}
+                  disabled={adminFillingBots}
+                  style={amberGhostButtonStyle}
+                >
+                  Limpiar cola
+                </button>
+                <button
+                  onClick={handleAdminFillBots}
+                  disabled={adminFillingBots}
+                  style={blueGhostButtonStyle}
+                >
+                  {adminFillingBots
+                    ? "Completando…"
+                    : "Completar cola a 10 con bots"}
+                </button>
+              </div>
             </div>
 
             {adminError && <Notice tone="danger" text={adminError} />}
@@ -1350,8 +1708,90 @@ function HeroMetric({
   );
 }
 
-function RolePill({ role, muted }: { role: string; muted?: boolean }) {
+function QueueSignalCard({
+  icon,
+  label,
+  value,
+  sub,
+  tone,
+}: {
+  icon: React.ReactNode;
+  label: string;
+  value: string;
+  sub: string;
+  tone: string;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid rgba(232,244,255,0.08)",
+        background: "rgba(2,6,14,0.58)",
+        padding: "0.85rem 0.95rem",
+        display: "grid",
+        gap: "0.35rem",
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+          color: "rgba(232,244,255,0.34)",
+          fontSize: "0.64rem",
+          textTransform: "uppercase",
+          letterSpacing: "0.16em",
+          fontWeight: 900,
+        }}
+      >
+        <span>{label}</span>
+        <span
+          style={{ color: tone, display: "inline-grid", placeItems: "center" }}
+        >
+          {icon}
+        </span>
+      </div>
+      <div
+        style={{
+          color: tone,
+          fontFamily: "var(--font-display)",
+          fontSize: "1.05rem",
+          lineHeight: 1.05,
+          fontWeight: 900,
+          letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {value}
+      </div>
+      <div
+        style={{
+          color: "rgba(232,244,255,0.48)",
+          fontSize: "0.79rem",
+          lineHeight: 1.45,
+        }}
+      >
+        {sub}
+      </div>
+    </div>
+  );
+}
+
+function RolePill({
+  role,
+  muted,
+  iconOnly,
+}: {
+  role: string;
+  muted?: boolean;
+  iconOnly?: boolean;
+}) {
   const meta = getRoleMeta(role);
+  const iconSources = getRoleIconSources(role);
   const color = meta?.accent ?? "rgba(232,244,255,0.34)";
   return (
     <span
@@ -1362,7 +1802,7 @@ function RolePill({ role, muted }: { role: string; muted?: boolean }) {
         border: `1px solid ${muted ? "rgba(232,244,255,0.12)" : `${color}66`}`,
         background: muted ? "rgba(255,255,255,0.03)" : `${color}16`,
         color: muted ? "rgba(232,244,255,0.42)" : color,
-        padding: "0.28rem 0.45rem",
+        padding: iconOnly ? "0.22rem" : "0.28rem 0.45rem",
         fontFamily: "var(--font-display)",
         fontSize: "0.62rem",
         fontWeight: 900,
@@ -1372,83 +1812,27 @@ function RolePill({ role, muted }: { role: string; muted?: boolean }) {
     >
       {meta && (
         <img
-          src={meta.icon}
+          src={iconSources?.primary}
           alt=""
+          onError={(event) => {
+            if (
+              !iconSources?.fallback ||
+              event.currentTarget.dataset.fallbackApplied === "1"
+            )
+              return;
+            event.currentTarget.dataset.fallbackApplied = "1";
+            event.currentTarget.src = iconSources.fallback;
+          }}
           style={{
-            width: "15px",
-            height: "15px",
+            width: iconOnly ? "17px" : "15px",
+            height: iconOnly ? "17px" : "15px",
             objectFit: "contain",
             filter: `drop-shadow(0 0 5px ${color}66)`,
           }}
         />
       )}
-      {meta?.label ?? role}
+      {iconOnly ? null : (meta?.label ?? role)}
     </span>
-  );
-}
-
-function PlayerRankPlate({
-  level,
-  mmr,
-  color,
-}: {
-  level: number;
-  mmr: number;
-  color: string;
-}) {
-  return (
-    <div style={rankPlateStyle(color)}>
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 190 62"
-        preserveAspectRatio="none"
-        style={rankPlateBorderSvgStyle}
-      >
-        <polygon
-          points="15,1 189,1 189,47 173,61 1,61 1,15"
-          fill="none"
-          stroke={color}
-          strokeOpacity="0.72"
-          strokeWidth="1.4"
-          vectorEffect="non-scaling-stroke"
-        />
-      </svg>
-      <div style={rankPlateTopLineStyle(color)} />
-      <div style={rankPlateChevronStyle("left", color)} />
-      <div style={rankPlateChevronStyle("right", color)} />
-
-      <div style={rankSealStyle(color)}>
-        <svg width="42" height="42" viewBox="0 0 42 42" aria-hidden="true">
-          <defs>
-            <linearGradient
-              id={`rank-seal-${level}`}
-              x1="0"
-              y1="0"
-              x2="1"
-              y2="1"
-            >
-              <stop offset="0%" stopColor={color} stopOpacity="0.95" />
-              <stop offset="100%" stopColor="#020617" stopOpacity="0.35" />
-            </linearGradient>
-          </defs>
-          <path
-            d="M21 3.5 35.7 9.8v12.7C35.7 31.2 29.2 37 21 39 12.8 37 6.3 31.2 6.3 22.5V9.8L21 3.5Z"
-            fill={`url(#rank-seal-${level})`}
-            stroke={color}
-            strokeWidth="1.4"
-          />
-        </svg>
-        <span style={rankSealNumberStyle}>{level}</span>
-      </div>
-
-      <div style={{ minWidth: 0, position: "relative", zIndex: 1 }}>
-        <div style={rankPlateLabelStyle}>Nexus Rating</div>
-        <div style={rankPlateMmrStyle(color)}>
-          {mmr.toLocaleString("es-AR")}
-        </div>
-        <div style={rankPlateUnitStyle}>ELO</div>
-      </div>
-    </div>
   );
 }
 
@@ -1577,122 +1961,17 @@ const panelStyle: React.CSSProperties = {
 
 const slotBaseStyle: React.CSSProperties = {
   minHeight: "250px",
-  border: "1px dashed rgba(232,244,255,0.10)",
-  background: "rgba(255,255,255,0.025)",
+  position: "relative",
+  overflow: "hidden",
+  border: "1px solid rgba(148,163,184,0.12)",
+  background: "linear-gradient(180deg, rgba(10,16,28,0.94), rgba(4,8,18,0.92))",
   display: "flex",
   flexDirection: "column",
   alignItems: "center",
   justifyContent: "center",
-  gap: "0.7rem",
+  gap: "0.75rem",
   padding: "1rem",
-};
-
-function rankPlateStyle(color: string): React.CSSProperties {
-  return {
-    position: "relative",
-    width: "min(100%, 190px)",
-    minHeight: "62px",
-    display: "grid",
-    gridTemplateColumns: "52px minmax(0, 1fr)",
-    alignItems: "center",
-    gap: "0.55rem",
-    padding: "0.55rem 0.82rem",
-    background: `linear-gradient(135deg, rgba(2,6,14,0.96), ${color}14 52%, rgba(2,6,14,0.86))`,
-    boxShadow: `0 0 30px ${color}18, inset 0 0 24px rgba(255,255,255,0.025)`,
-    clipPath: "polygon(8% 0, 100% 0, 100% 76%, 91% 100%, 0 100%, 0 24%)",
-  };
-}
-
-const rankPlateBorderSvgStyle: React.CSSProperties = {
-  position: "absolute",
-  inset: 0,
-  width: "100%",
-  height: "100%",
-  pointerEvents: "none",
-  overflow: "visible",
-  filter: "drop-shadow(0 0 7px currentColor)",
-};
-
-function rankPlateTopLineStyle(color: string): React.CSSProperties {
-  return {
-    position: "absolute",
-    top: 0,
-    left: "18%",
-    right: "10%",
-    height: "2px",
-    background: `linear-gradient(90deg, transparent, ${color}, transparent)`,
-    boxShadow: `0 0 14px ${color}`,
-  };
-}
-
-function rankPlateChevronStyle(
-  side: "left" | "right",
-  color: string,
-): React.CSSProperties {
-  return {
-    position: "absolute",
-    top: "50%",
-    [side]: "0.42rem",
-    width: "18px",
-    height: "28px",
-    borderTop: `1px solid ${color}44`,
-    borderBottom: `1px solid ${color}44`,
-    transform: `translateY(-50%) skewX(${side === "left" ? "-24deg" : "24deg"})`,
-    opacity: 0.75,
-  };
-}
-
-function rankSealStyle(color: string): React.CSSProperties {
-  return {
-    position: "relative",
-    width: "46px",
-    height: "46px",
-    display: "grid",
-    placeItems: "center",
-    filter: `drop-shadow(0 0 10px ${color}66)`,
-  };
-}
-
-const rankSealNumberStyle: React.CSSProperties = {
-  position: "absolute",
-  color: "#fff",
-  fontFamily: "var(--font-display)",
-  fontSize: "1rem",
-  fontWeight: 900,
-  lineHeight: 1,
-  textShadow: "0 1px 8px rgba(0,0,0,0.75)",
-};
-
-const rankPlateLabelStyle: React.CSSProperties = {
-  color: "rgba(232,244,255,0.42)",
-  fontSize: "0.56rem",
-  fontWeight: 900,
-  letterSpacing: "0.16em",
-  textTransform: "uppercase",
-};
-
-function rankPlateMmrStyle(color: string): React.CSSProperties {
-  return {
-    marginTop: "0.1rem",
-    display: "flex",
-    alignItems: "baseline",
-    gap: "0.32rem",
-    color,
-    fontFamily: "var(--font-display)",
-    fontSize: "clamp(1rem, 1.25vw, 1.25rem)",
-    fontWeight: 900,
-    lineHeight: 0.95,
-    letterSpacing: "0",
-    textShadow: `0 0 16px ${color}55`,
-  };
-}
-
-const rankPlateUnitStyle: React.CSSProperties = {
-  color: "rgba(232,244,255,0.52)",
-  fontSize: "0.55rem",
-  fontWeight: 900,
-  letterSpacing: "0.18em",
-  marginTop: "0.18rem",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
 };
 
 const queueRowStyle: React.CSSProperties = {

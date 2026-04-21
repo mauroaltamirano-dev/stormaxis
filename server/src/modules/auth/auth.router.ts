@@ -23,7 +23,9 @@ import {
 import { Errors } from '../../shared/errors/AppError'
 import { authenticate, AuthRequest } from '../../shared/middlewares/authenticate'
 import { calculateRank } from '../users/player-progression'
+import { getInitialMmrFromRank, INITIAL_RANK_OPTIONS } from '../users/player-calibration'
 import { authUserSelect, presentUser } from '../users/user.presenter'
+import { cleanupUserMatchmakingSession } from '../matchmaking/matchmaking.service'
 
 export const authRouter = Router()
 
@@ -111,17 +113,8 @@ const RegisterSchema = z.object({
   username: z.string().min(3).max(20).regex(/^[a-zA-Z0-9_-]+$/),
   email: z.string().email(),
   password: z.string().min(8).max(72),
-  initialRank: z.enum(['BRONCE', 'PLATA', 'ORO', 'PLATINO', 'DIAMANTE', 'MASTER']).optional(),
+  initialRank: z.enum(INITIAL_RANK_OPTIONS).optional(),
 })
-
-const RANK_MMR: Record<string, number> = {
-  BRONCE: 400,
-  PLATA: 1000,
-  ORO: 1400,
-  PLATINO: 1800,
-  DIAMANTE: 2200,
-  MASTER: 2600,
-}
 
 authRouter.post('/register', authLimiter, async (req, res, next) => {
   try {
@@ -132,7 +125,7 @@ authRouter.post('/register', authLimiter, async (req, res, next) => {
     })
     if (existing) throw Errors.CONFLICT('Email or username already taken')
 
-    const initialMmr = body.initialRank ? RANK_MMR[body.initialRank] : 1200
+    const initialMmr = getInitialMmrFromRank(body.initialRank)
 
     const user = await db.user.create({
       data: {
@@ -223,6 +216,11 @@ authRouter.post('/refresh', async (req, res, next) => {
 
 authRouter.post('/logout', authenticate, async (req, res, next) => {
   try {
+    await cleanupUserMatchmakingSession(
+      (req as AuthRequest).userId,
+      'Player logged out during accept',
+    )
+
     const token = req.cookies?.refreshToken as string | undefined
     if (token) {
       const payload = verifyRefreshToken(token)

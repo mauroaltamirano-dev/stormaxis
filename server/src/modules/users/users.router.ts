@@ -3,6 +3,8 @@ import { z } from 'zod'
 import { authenticate, AuthRequest } from '../../shared/middlewares/authenticate'
 import { db } from '../../infrastructure/database/client'
 import { Errors } from '../../shared/errors/AppError'
+import { calculateRank } from './player-progression'
+import { getInitialMmrFromRank, INITIAL_RANK_OPTIONS } from './player-calibration'
 import { authUserSelect, presentPublicUser, presentUser, publicUserSelect } from './user.presenter'
 
 export const usersRouter = Router()
@@ -59,6 +61,24 @@ const UpdateProfileSchema = z
     },
   )
 
+const CompleteOnboardingSchema = z
+  .object({
+    username: z
+      .string()
+      .trim()
+      .min(3)
+      .max(20)
+      .regex(USERNAME_REGEX)
+      .optional(),
+    initialRank: z.enum(INITIAL_RANK_OPTIONS),
+    mainRole: z.enum(PLAYER_ROLES),
+    secondaryRole: z.enum(PLAYER_ROLES),
+  })
+  .refine((value) => value.mainRole !== value.secondaryRole, {
+    message: 'Main y secundario no pueden ser el mismo rol',
+    path: ['secondaryRole'],
+  })
+
 usersRouter.get('/me', authenticate, async (req, res, next) => {
   try {
     const user = await db.user.findUnique({
@@ -67,6 +87,47 @@ usersRouter.get('/me', authenticate, async (req, res, next) => {
     })
     if (!user) throw Errors.NOT_FOUND('User')
     res.json(presentUser(user))
+  } catch (err) {
+    next(err)
+  }
+})
+
+usersRouter.post('/me/onboarding', authenticate, async (req, res, next) => {
+  try {
+    const body = CompleteOnboardingSchema.parse(req.body ?? {})
+    const userId = (req as AuthRequest).userId
+
+    const currentUser = await db.user.findUnique({
+      where: { id: userId },
+      select: authUserSelect,
+    })
+    if (!currentUser) throw Errors.NOT_FOUND('User')
+
+    if (body.username && body.username !== currentUser.username) {
+      const existing = await db.user.findUnique({
+        where: { username: body.username },
+        select: { id: true },
+      })
+      if (existing && existing.id !== userId) {
+        throw Errors.CONFLICT('Ese username ya está tomado')
+      }
+    }
+
+    const nextMmr = getInitialMmrFromRank(body.initialRank)
+
+    const updated = await db.user.update({
+      where: { id: userId },
+      data: {
+        ...(body.username !== undefined ? { username: body.username } : {}),
+        mmr: nextMmr,
+        rank: calculateRank(nextMmr),
+        mainRole: body.mainRole as any,
+        secondaryRole: body.secondaryRole as any,
+      },
+      select: authUserSelect,
+    })
+
+    res.json(presentUser(updated))
   } catch (err) {
     next(err)
   }

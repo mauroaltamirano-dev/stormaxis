@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { useAuthStore } from '../stores/auth.store'
+import { requiresCompetitiveOnboarding } from '../lib/onboarding'
 
 export function AuthCallback() {
   const navigate = useNavigate()
@@ -23,16 +24,26 @@ export function AuthCallback() {
     api
       .get('/auth/me')
       .then((response) => {
+        const nextUser = response.data
         if (user && accessToken) {
-          setAuth(response.data, accessToken)
-          return
+          setAuth(nextUser, accessToken)
+        } else {
+          updateUser(nextUser)
         }
-
-        updateUser(response.data)
       })
       .catch(() => {})
       .finally(() => {
-        navigate({ to: user ? (mode === 'link' ? '/profile' : '/dashboard') : '/login' })
+        const currentUser = useAuthStore.getState().user
+        const nextTarget =
+          currentUser
+            ? mode === 'link'
+              ? '/profile'
+              : requiresCompetitiveOnboarding(currentUser)
+                ? '/onboarding'
+                : '/dashboard'
+            : '/login'
+
+        navigate({ to: nextTarget })
       })
   }, [accessToken, error, isLoading, mode, navigate, setAuth, updateUser, user])
 

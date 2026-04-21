@@ -1,39 +1,34 @@
 import type { CSSProperties, ReactNode } from 'react'
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Link, useNavigate } from '@tanstack/react-router'
 import { useForm, type FieldPath } from 'react-hook-form'
 import { z } from 'zod/v4'
 import { api } from '../lib/api'
 import { useAuthStore } from '../stores/auth.store'
 import { ChevronRight } from 'lucide-react'
-
-const RANKS = [
-  { value: 'BRONCE', label: 'Bronce', color: '#8B6914' },
-  { value: 'PLATA', label: 'Plata', color: '#C0C0C0' },
-  { value: 'ORO', label: 'Oro', color: '#F0A500' },
-  { value: 'PLATINO', label: 'Platino', color: '#00C8FF' },
-  { value: 'DIAMANTE', label: 'Diamante', color: '#7C4DFF' },
-  { value: 'MASTER', label: 'Master', color: '#FF4757' },
-]
+import { requiresCompetitiveOnboarding } from '../lib/onboarding'
 
 const schema = z.object({
   username: z.string().min(3, 'Mínimo 3 caracteres').max(20, 'Máximo 20').regex(/^[a-zA-Z0-9_-]+$/, 'Solo letras, números, _ y -'),
   email: z.string().email('Email inválido'),
   password: z.string().min(8, 'Mínimo 8 caracteres'),
-  initialRank: z.string().min(1, 'Seleccioná tu rango'),
 })
 type FormData = z.infer<typeof schema>
 
 export function Register() {
-  const { setAuth } = useAuthStore()
+  const { user, setAuth } = useAuthStore()
   const navigate = useNavigate()
   const [serverError, setServerError] = useState('')
 
-  const { register, handleSubmit, watch, setError, clearErrors, formState: { errors, isSubmitting } } = useForm<FormData>({
-    defaultValues: { initialRank: '' },
-  })
+  const { register, handleSubmit, setError, clearErrors, formState: { errors, isSubmitting } } = useForm<FormData>()
 
-  const selectedRank = watch('initialRank')
+  useEffect(() => {
+    if (!user) return
+    navigate({
+      to: requiresCompetitiveOnboarding(user) ? '/onboarding' : '/dashboard',
+      replace: true,
+    })
+  }, [navigate, user])
 
   async function onSubmit(data: FormData) {
     setServerError('')
@@ -49,7 +44,7 @@ export function Register() {
     try {
       const res = await api.post('/auth/register', parsed.data)
       setAuth(res.data.user, res.data.accessToken)
-      navigate({ to: '/dashboard' })
+      navigate({ to: requiresCompetitiveOnboarding(res.data.user) ? '/onboarding' : '/dashboard' })
     } catch (err: any) {
       setServerError(err.response?.data?.error?.message || 'Error al crear la cuenta')
     }
@@ -80,7 +75,7 @@ export function Register() {
             Entrá al<br /><span style={{ background: 'linear-gradient(90deg, #7c4dff, #00c8ff)', WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent', backgroundClip: 'text' }}>sistema</span>
           </h1>
           <p style={{ color: '#94a3b8', fontSize: '1rem', lineHeight: 1.75, borderLeft: '3px solid rgba(124,77,255,0.5)', paddingLeft: '1.25rem', marginBottom: '2.5rem' }}>
-            Creá tu perfil, vinculá tu cuenta de Battle.net y empezá a competir en partidas rankeadas con matchmaking real.
+            Creá tu acceso. La calibración competitiva y tus roles los terminás en el onboarding inmediatamente después.
           </p>
 
           {/* Feature list */}
@@ -142,29 +137,6 @@ export function Register() {
             </Field>
             <Field label="Contraseña" error={errors.password?.message}>
               <input {...register('password')} type="password" placeholder="Mínimo 8 caracteres" style={inputStyle} />
-            </Field>
-
-            {/* Rank selector */}
-            <Field label="¿En qué rango jugás en HotS? (solo para calibrar tu Elo inicial)" error={errors.initialRank?.message}>
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.5rem', marginTop: '0.25rem' }}>
-                {RANKS.map((rank) => (
-                  <label key={rank.value} style={{
-                    display: 'flex', alignItems: 'center', justifyContent: 'center',
-                    padding: '0.7rem 0.5rem',
-                    background: selectedRank === rank.value ? `${rank.color}18` : 'rgba(255,255,255,0.03)',
-                    border: `1px solid ${selectedRank === rank.value ? rank.color + '55' : 'rgba(255,255,255,0.08)'}`,
-                    cursor: 'pointer',
-                    fontSize: '0.75rem', fontWeight: 700, fontFamily: 'var(--font-display)',
-                    letterSpacing: '0.08em', textTransform: 'uppercase',
-                    color: selectedRank === rank.value ? rank.color : '#64748b',
-                    transition: 'all 0.15s',
-                  }}>
-                    <input {...register('initialRank')} type="radio" value={rank.value} style={{ display: 'none' }} />
-                    <div style={{ width: '6px', height: '6px', background: rank.color, marginRight: '0.5rem', flexShrink: 0 }} />
-                    {rank.label}
-                  </label>
-                ))}
-              </div>
             </Field>
 
             {serverError && (

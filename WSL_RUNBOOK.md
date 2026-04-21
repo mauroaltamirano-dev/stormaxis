@@ -27,6 +27,8 @@ El `docker-compose.yml` del proyecto levanta Redis local en `6379`:
 
 ```bash
 cd /home/tuki/projects/hots
+npm run redis:up
+# o directo:
 docker compose up -d redis
 ```
 
@@ -46,7 +48,9 @@ Ese script descarga paquetes `.deb` de Redis a `/tmp/hots-redis`, los extrae sin
 El frontend Vite queda en `http://localhost:5173/`. Para exponerlo:
 
 ```bash
-cloudflared tunnel --url http://localhost:5173
+npm run tunnel
+# o directo:
+./bin/cloudflared tunnel --url http://localhost:5173
 ```
 
 El `server/.env` ya incluye `CLIENT_URLS` con:
@@ -64,7 +68,7 @@ Si se usa un quick tunnel nuevo, Cloudflare suele generar otra URL; agregarla ta
 - npm validado: `10.9.7`.
 - `npm install` completó correctamente.
 - Vite client arranca en `5173`.
-- Docker no está disponible dentro de esta distro WSL todavía.
-- `cloudflared` no está disponible en PATH dentro de WSL todavía.
+- Docker Desktop está disponible desde WSL y `docker compose` funciona; Redis fue verificado healthy en Docker.
+- `cloudflared` está instalado localmente en `./bin/cloudflared` (`2026.3.0`).
 - Resuelto el bloqueo de Prisma: con Node `v24.14.1`, `prisma generate` salía con código 0 pero no generaba el cliente; con Node LTS `v22.22.2`, genera correctamente `@prisma/client`. Usar `nvm use` antes de trabajar en el repo.
 - TypeScript ya reporta errores estrictos en client/server; se dejaron sin modificar para no cambiar comportamiento durante la migración.

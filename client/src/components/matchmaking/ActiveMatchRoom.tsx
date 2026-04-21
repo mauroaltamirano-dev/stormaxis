@@ -1,6 +1,8 @@
 import type { CSSProperties, FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HOTS_MAPS, MAP_ID_BY_NAME, MAP_NAME_BY_ID } from "@nexusgg/shared";
+import { RankBadge } from "../RankBadge";
+import { getMatchLifecycleMeta } from "../../lib/competitiveStatus";
 
 type MatchStatus =
   | "ACCEPTING"
@@ -99,19 +101,6 @@ const TEAM_COLORS = {
   },
 } as const;
 
-const LEVEL_COLORS: Record<number, string> = {
-  1: "#6b7280",
-  2: "#a16207",
-  3: "#94a3b8",
-  4: "#eab308",
-  5: "#06b6d4",
-  6: "#3b82f6",
-  7: "#8b5cf6",
-  8: "#d946ef",
-  9: "#f97316",
-  10: "#fbbf24",
-};
-
 const MAP_BACKDROPS: Record<string, string> = {
   "Alterac Pass":
     "linear-gradient(135deg, rgba(131,189,255,0.35), rgba(15,23,42,0.95))",
@@ -161,10 +150,19 @@ export function ActiveMatchRoom({
 }: Props) {
   const [now, setNow] = useState(Date.now());
   const [chatInput, setChatInput] = useState("");
+  const [viewportWidth, setViewportWidth] = useState(
+    typeof window === "undefined" ? 1440 : window.innerWidth,
+  );
 
   useEffect(() => {
     const interval = setInterval(() => setNow(Date.now()), 1000);
     return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    const handleResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   const teams = useMemo(() => {
@@ -189,6 +187,9 @@ export function ActiveMatchRoom({
     match.votes?.find((vote) => vote.userId === currentUserId)?.winner ?? null;
   const readyBy = match.runtime?.ready?.readyBy ?? [];
   const isReady = readyBy.includes(currentUserId);
+  const totalReadyPlayers =
+    match.runtime?.ready?.totalPlayers ?? humanPlayersCount;
+  const allConnected = readyBy.length === totalReadyPlayers;
   const voteCounts = match.runtime?.voteCounts ?? {
     team1Votes: 0,
     team2Votes: 0,
@@ -220,6 +221,24 @@ export function ActiveMatchRoom({
     cancelState?.requestedBy.includes(currentUserId) ?? false;
   const canSendChat = match.status !== "CANCELLED";
   const chatRemainingChars = 500 - chatInput.length;
+  const statusMeta = getMatchLifecycleMeta(match.status, allConnected);
+  const isTablet = viewportWidth < 1320;
+  const isMobile = viewportWidth < 940;
+  const isNarrow = viewportWidth < 720;
+  const mapCards = useMemo(() => {
+    return HOTS_MAPS.map((map) => {
+      const veto = match.vetoes.find(
+        (entry) => entry.mapId === map.id || entry.mapName === map.name,
+      );
+      return { mapId: map.id, mapName: map.name, veto };
+    });
+  }, [match.vetoes]);
+  const stageTimer =
+    match.status === "VETOING"
+      ? vetoSeconds
+      : match.status === "VOTING"
+        ? votingSeconds
+        : null;
 
   function handleSendChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -230,25 +249,371 @@ export function ActiveMatchRoom({
     setChatInput("");
   }
 
+  const centerColumn = (
+    <div style={{ display: "grid", gap: "1rem" }}>
+      {match.status === "VETOING" && (
+        <StageCard
+          title="Veto de mapas"
+          subtitle={
+            vetoTurn
+              ? `Turno del ${vetoTurn.team === 1 ? teams.left.name : teams.right.name}`
+              : "Esperando turno"
+          }
+          tone={vetoTurn ? TEAM_COLORS[vetoTurn.team].accent : "#7dd3fc"}
+        >
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              gap: "0.75rem",
+              border: "1px solid rgba(148,163,184,0.2)",
+              background: "rgba(2,6,23,0.36)",
+              padding: "0.55rem 0.65rem",
+            }}
+          >
+            <span
+              style={{
+                color: "#cbd5e1",
+                fontSize: "0.82rem",
+                fontWeight: 700,
+              }}
+            >
+              {isCaptainTurn
+                ? "Te toca vetar"
+                : "Esperando acción del capitán"}
+            </span>
+            <div style={timerBadgeStyle(vetoSeconds != null && vetoSeconds <= 10)}>
+              {vetoSeconds != null
+                ? `00:${String(vetoSeconds).padStart(2, "0")}`
+                : "—"}
+            </div>
+          </div>
+          <div style={mapGridStyle(isNarrow)}>
+            {mapCards.map(({ mapId, mapName, veto }) => (
+              <MapVetoCard
+                key={mapId}
+                mapName={mapName}
+                active={isCaptainTurn && !veto}
+                bannedBy={
+                  veto
+                    ? veto.team === 1
+                      ? teams.left.name
+                      : teams.right.name
+                    : null
+                }
+                bannedByTone={veto ? TEAM_COLORS[veto.team].accent : undefined}
+                onBan={() => onBanMap(mapId)}
+              />
+            ))}
+          </div>
+          <small style={{ color: "#94a3b8" }}>
+            {isCaptainTurn
+              ? "Te toca vetar. Si expira el timer, el sistema banea un mapa al azar."
+              : "Solo el capitán del turno puede vetar."}
+          </small>
+        </StageCard>
+      )}
+
+      {match.status === "PLAYING" &&
+        (() => {
+          const totalPlayers =
+            match.runtime?.ready?.totalPlayers ?? humanPlayersCount;
+          const connectedCount = readyBy.length;
+          const allConnected = connectedCount === totalPlayers;
+          const isCaptain = Boolean(currentPlayer?.isCaptain);
+          const alreadyRequestedFinish = Boolean(
+            isCaptain && finishState?.requestedBy.includes(currentUserId),
+          );
+
+          return (
+            <StageCard
+              title={allConnected ? "Todos conectados" : "Mapa confirmado"}
+              subtitle={
+                allConnected
+                  ? "La partida terminó. Cerrá el cliente y finalizá aquí."
+                  : "Conectate a la lobby en Heroes of the Storm"
+              }
+              tone={allConnected ? "#4ade80" : "#38bdf8"}
+            >
+              <StageCallout
+                tone={allConnected ? "#4ade80" : "#38bdf8"}
+                label={allConnected ? "Fase de cierre" : "Briefing operativo"}
+                title={
+                  allConnected
+                    ? "Todos los jugadores reportaron presencia"
+                    : "Entrá a la lobby y marcá tu conexión"
+                }
+                description={
+                  allConnected
+                    ? "La partida ya puede cerrarse desde acá. Hace falta la confirmación de ambos capitanes para consolidar el resultado."
+                    : "Usá este panel como checklist rápido: mapa definido, jugadores entrando, capitanes monitoreando progreso."
+                }
+              />
+              <MapSelectedCard mapName={selectedMap} compact={isNarrow} />
+              <ProgressRail
+                label="Operatividad de lobby"
+                value={connectedCount}
+                total={totalPlayers}
+                color={allConnected ? "#4ade80" : "#38bdf8"}
+              />
+
+              {!allConnected && (
+                <button
+                  onClick={onReady}
+                  disabled={isReady}
+                  style={primaryButtonStyle}
+                >
+                  {isReady ? "Esperando al resto…" : "Conectarse a la partida"}
+                </button>
+              )}
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: isNarrow
+                    ? "1fr"
+                    : "repeat(3, minmax(0, 1fr))",
+                  gap: "0.65rem",
+                }}
+              >
+                <StatusTile
+                  label="Conectados"
+                  value={`${connectedCount}/${totalPlayers}`}
+                  tone={allConnected ? "#4ade80" : "#38bdf8"}
+                />
+                <StatusTile
+                  label="Tu estado"
+                  value={isReady ? "Reportado" : "Pendiente"}
+                  tone={isReady ? "#4ade80" : "#fbbf24"}
+                />
+                <StatusTile
+                  label="Confirmación capitanes"
+                  value={`${finishApprovals}/${finishNeeded}`}
+                  tone="#fbbf24"
+                />
+              </div>
+
+              {allConnected && (
+                <>
+                  <button
+                    onClick={onFinishMatch}
+                    disabled={!isCaptain || alreadyRequestedFinish}
+                    style={finishButtonStyle(!isCaptain || alreadyRequestedFinish)}
+                  >
+                    ✓ Finalizar partida
+                  </button>
+                  <div style={{ color: "#94a3b8", fontSize: "0.86rem" }}>
+                    {alreadyRequestedFinish
+                      ? "Ya marcaste tu confirmación. Falta el otro capitán."
+                      : isCaptain
+                        ? `Requiere confirmación de ambos capitanes: ${finishApprovals}/${finishNeeded}`
+                        : "Esperando confirmación de ambos capitanes para cerrar."}
+                  </div>
+                </>
+              )}
+            </StageCard>
+          );
+        })()}
+
+      {match.status === "VOTING" && (
+        <StageCard
+          title="Votación de ganador"
+          subtitle="Votan todos los jugadores reales del test"
+          tone="#c084fc"
+        >
+          <StageCallout
+            tone="#c084fc"
+            label={currentVote ? "Voto registrado" : "Decisión pendiente"}
+            title={
+              currentVote
+                ? `Marcaste ganador para ${currentVote === 1 ? teams.left.name : teams.right.name}`
+                : "Todavía no emitiste tu voto"
+            }
+            description="Cada voto cuenta para cerrar el match. El objetivo es validar rápido y evitar ambigüedad en el resultado."
+            rightSlot={
+              <div
+                style={timerBadgeStyle(votingSeconds != null && votingSeconds <= 20)}
+              >
+                {votingSeconds != null
+                  ? `${Math.floor(votingSeconds / 60)}:${String(votingSeconds % 60).padStart(2, "0")}`
+                  : "—"}
+              </div>
+            }
+          />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isNarrow ? "1fr" : "repeat(3, minmax(0, 1fr))",
+              gap: "0.65rem",
+            }}
+          >
+            <StatusTile
+              label="Mi voto"
+              value={
+                currentVote
+                  ? currentVote === 1
+                    ? teams.left.name
+                    : teams.right.name
+                  : "Pendiente"
+              }
+              tone={currentVote ? "#c084fc" : "#fbbf24"}
+            />
+            <StatusTile
+              label="Emitidos"
+              value={`${voteCounts.total}/${match.runtime?.voting?.totalPlayers ?? humanPlayersCount}`}
+              tone="#7dd3fc"
+            />
+            <StatusTile
+              label="Sin votar"
+              value={`${Math.max(0, (match.runtime?.voting?.totalPlayers ?? humanPlayersCount) - voteCounts.total)}`}
+              tone="#e2e8f0"
+            />
+          </div>
+          <ProgressRail
+            label="Participación de voto"
+            value={voteCounts.total}
+            total={match.runtime?.voting?.totalPlayers ?? humanPlayersCount}
+            color="#c084fc"
+          />
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+              gap: "0.75rem",
+            }}
+          >
+            <button
+              onClick={() => onVote(1)}
+              style={voteButtonStyle(1, currentVote === 1)}
+            >
+              Gana {teams.left.name}
+            </button>
+            <button
+              onClick={() => onVote(2)}
+              style={voteButtonStyle(2, currentVote === 2)}
+            >
+              Gana {teams.right.name}
+            </button>
+          </div>
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+              gap: "0.75rem",
+            }}
+          >
+            <VotePill
+              label={teams.left.name}
+              votes={voteCounts.team1Votes}
+              color={TEAM_COLORS[1].accent}
+            />
+            <VotePill
+              label={teams.right.name}
+              votes={voteCounts.team2Votes}
+              color={TEAM_COLORS[2].accent}
+            />
+          </div>
+        </StageCard>
+      )}
+
+      {match.status === "COMPLETED" && (
+        <StageCard
+          title="Resultado final"
+          subtitle={
+            match.duration
+              ? `Duración estimada ${formatDuration(match.duration)}`
+              : "Match finalizado"
+          }
+          tone={match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent}
+        >
+          <StageCallout
+            tone={match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent}
+            label="Resultado consolidado"
+            title={`Victoria ${match.winner === 1 ? teams.left.name : teams.right.name}`}
+            description="El resultado quedó cerrado y las variaciones de MMR ya pueden revisarse jugador por jugador."
+          />
+          <div
+            style={winnerBannerStyle(
+              match.winner === 1
+                ? TEAM_COLORS[1].accent
+                : TEAM_COLORS[2].accent,
+            )}
+          >
+            Ganó {match.winner === 1 ? teams.left.name : teams.right.name}
+          </div>
+          <ResultList match={match} />
+        </StageCard>
+      )}
+
+      {match.status === "CANCELLED" && (
+        <StageCard
+          title="Match cancelado"
+          subtitle="Cancelado por ambos capitanes para testing"
+          tone="#fca5a5"
+        >
+          <StageCallout
+            tone="#fca5a5"
+            label="Sesión abortada"
+            title="La sala se cerró antes del cierre competitivo"
+            description="Se preserva el contexto del room, pero este match ya no va a aplicar resultado competitivo."
+          />
+          <div style={winnerBannerStyle("#fca5a5")}>La partida fue cancelada</div>
+          <small style={{ color: "#94a3b8" }}>
+            Volvé al dashboard y podés buscar otra partida.
+          </small>
+        </StageCard>
+      )}
+
+      <StageCard
+        title="Chat del match"
+        subtitle={
+          canSendChat
+            ? "Coordinación en tiempo real entre jugadores"
+            : "Chat deshabilitado porque la partida está cancelada"
+        }
+        tone={canSendChat ? "#38bdf8" : "#94a3b8"}
+      >
+        <MatchChatPanel
+          currentUserId={currentUserId}
+          messages={chatMessages}
+          draft={chatInput}
+          remainingChars={chatRemainingChars}
+          canSend={canSendChat}
+          compact={isTablet}
+          onDraftChange={setChatInput}
+          onSubmit={handleSendChat}
+        />
+      </StageCard>
+    </div>
+  );
+
   return (
     <div style={pageShellStyle}>
       <div style={panelStyle}>
         <div style={headerStyle}>
           <div>
             <div style={eyebrowStyle}>Match room</div>
-            <h2
+            <div
               style={{
-                margin: 0,
-                fontFamily: "var(--font-display)",
-                letterSpacing: "0.08em",
+                marginTop: "0.15rem",
+                color: "rgba(232,244,255,0.54)",
+                fontSize: "0.8rem",
               }}
             >
-              {match.status === "COMPLETED"
-                ? "Partida cerrada"
-                : match.status === "CANCELLED"
-                  ? "Partida cancelada"
-                  : `Estado: ${match.status}`}
-            </h2>
+              <span
+                style={{
+                  color: statusMeta.tone,
+                  fontFamily: "var(--font-display)",
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  marginRight: "0.55rem",
+                }}
+              >
+                {statusMeta.phase}
+              </span>
+              {statusMeta.stage ?? statusMeta.detail}
+            </div>
           </div>
           <div style={{ display: "flex", gap: "0.75rem" }}>
             {canRequestCancel && (
@@ -268,12 +633,52 @@ export function ActiveMatchRoom({
           </div>
         </div>
 
+        <div style={opsGridStyle(isMobile)}>
+          <OpsPill
+            label="Fase"
+            value={statusMeta.stage ?? "Standby"}
+            tone={statusMeta.tone}
+          />
+          <OpsPill
+            label="Mapa"
+            value={selectedMap ?? "Pendiente"}
+            tone="#e2e8f0"
+          />
+          <OpsPill
+            label="Jugadores"
+            value={`${humanPlayersCount}/10`}
+            tone="#7dd3fc"
+          />
+          <OpsPill
+            label={
+              stageTimer != null
+                ? "Timer activo"
+                : match.status === "PLAYING"
+                  ? "Conectados"
+                  : "Señal"
+            }
+            value={
+              stageTimer != null
+                ? `00:${String(stageTimer).padStart(2, "0")}`
+                : match.status === "PLAYING"
+                  ? `${readyBy.length}/${totalReadyPlayers}`
+                  : statusMeta.signal
+            }
+            tone={
+              stageTimer != null && stageTimer <= 10
+                ? "#fda4af"
+                : match.status === "PLAYING"
+                  ? allConnected
+                    ? "#4ade80"
+                    : "#fbbf24"
+                  : "#cbd5e1"
+            }
+          />
+        </div>
+
         <MatchTimeline
           status={match.status}
-          allConnected={
-            readyBy.length ===
-            (match.runtime?.ready?.totalPlayers ?? humanPlayersCount)
-          }
+          allConnected={allConnected}
         />
 
         {cancelState &&
@@ -285,218 +690,21 @@ export function ActiveMatchRoom({
             </div>
           )}
 
-        <div style={teamsGridStyle}>
-          <TeamColumn team={teams.left} teamNumber={1} />
+        {isMobile ? (
           <div style={{ display: "grid", gap: "1rem" }}>
-            {match.status === "VETOING" && (
-              <StageCard
-                title="Veto de mapas"
-                subtitle={
-                  vetoTurn
-                    ? `Turno del ${vetoTurn.team === 1 ? teams.left.name : teams.right.name}`
-                    : "Esperando turno"
-                }
-              >
-                <div
-                  style={timerBadgeStyle(
-                    vetoSeconds != null && vetoSeconds <= 10,
-                  )}
-                >
-                  {vetoSeconds != null
-                    ? `00:${String(vetoSeconds).padStart(2, "0")}`
-                    : "—"}
-                </div>
-                <div style={mapGridStyle}>
-                  {getRemainingMaps(match).map((mapName) => (
-                    <MapVetoCard
-                      key={mapName}
-                      mapName={mapName}
-                      active={isCaptainTurn}
-                      onBan={() => onBanMap(getMapIdFromName(mapName))}
-                    />
-                  ))}
-                </div>
-                <small style={{ color: "#94a3b8" }}>
-                  {isCaptainTurn
-                    ? "Te toca vetar. Si expira el timer, el sistema banea un mapa al azar."
-                    : "Solo el capitán del turno puede vetar."}
-                </small>
-              </StageCard>
-            )}
-
-            {match.status === "PLAYING" &&
-              (() => {
-                const totalPlayers =
-                  match.runtime?.ready?.totalPlayers ?? humanPlayersCount;
-                const connectedCount = readyBy.length;
-                const allConnected = connectedCount === totalPlayers;
-                const isCaptain = Boolean(currentPlayer?.isCaptain);
-                const alreadyRequestedFinish = Boolean(
-                  isCaptain && finishState?.requestedBy.includes(currentUserId),
-                );
-
-                return (
-                  <StageCard
-                    title={
-                      allConnected ? "Todos conectados" : "Mapa confirmado"
-                    }
-                    subtitle={
-                      allConnected
-                        ? "La partida terminó. Cerrá el cliente y finalizá aquí."
-                        : "Conectate a la lobby en Heroes of the Storm"
-                    }
-                  >
-                    <MapSelectedCard mapName={selectedMap} />
-
-                    {!allConnected && (
-                      <button
-                        onClick={onReady}
-                        disabled={isReady}
-                        style={primaryButtonStyle}
-                      >
-                        {isReady
-                          ? "Esperando al resto…"
-                          : "Conectarse a la partida"}
-                      </button>
-                    )}
-
-                    <div style={{ color: "#94a3b8", fontSize: "0.9rem" }}>
-                      Conectados: {connectedCount}/{totalPlayers}
-                    </div>
-
-                    {allConnected && (
-                      <>
-                        <button
-                          onClick={onFinishMatch}
-                          disabled={!isCaptain || alreadyRequestedFinish}
-                          style={finishButtonStyle(
-                            !isCaptain || alreadyRequestedFinish,
-                          )}
-                        >
-                          ✓ Finalizar partida
-                        </button>
-                        <div style={{ color: "#94a3b8", fontSize: "0.86rem" }}>
-                          Requiere confirmación de ambos capitanes:{" "}
-                          {finishApprovals}/{finishNeeded}
-                        </div>
-                      </>
-                    )}
-                  </StageCard>
-                );
-              })()}
-
-            {match.status === "VOTING" && (
-              <StageCard
-                title="Votación de ganador"
-                subtitle="Votan todos los jugadores reales del test"
-              >
-                <div
-                  style={{
-                    display: "flex",
-                    gap: "0.75rem",
-                    justifyContent: "center",
-                  }}
-                >
-                  <button
-                    onClick={() => onVote(1)}
-                    style={voteButtonStyle(1, currentVote === 1)}
-                  >
-                    Gana {teams.left.name}
-                  </button>
-                  <button
-                    onClick={() => onVote(2)}
-                    style={voteButtonStyle(2, currentVote === 2)}
-                  >
-                    Gana {teams.right.name}
-                  </button>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "1fr 1fr",
-                    gap: "0.75rem",
-                  }}
-                >
-                  <VotePill
-                    label={teams.left.name}
-                    votes={voteCounts.team1Votes}
-                    color={TEAM_COLORS[1].accent}
-                  />
-                  <VotePill
-                    label={teams.right.name}
-                    votes={voteCounts.team2Votes}
-                    color={TEAM_COLORS[2].accent}
-                  />
-                </div>
-                <div
-                  style={timerBadgeStyle(
-                    votingSeconds != null && votingSeconds <= 20,
-                  )}
-                >
-                  {votingSeconds != null
-                    ? `${Math.floor(votingSeconds / 60)}:${String(votingSeconds % 60).padStart(2, "0")}`
-                    : "—"}
-                </div>
-              </StageCard>
-            )}
-
-            {match.status === "COMPLETED" && (
-              <StageCard
-                title="Resultado final"
-                subtitle={
-                  match.duration
-                    ? `Duración estimada ${formatDuration(match.duration)}`
-                    : "Match finalizado"
-                }
-              >
-                <div
-                  style={winnerBannerStyle(
-                    match.winner === 1
-                      ? TEAM_COLORS[1].accent
-                      : TEAM_COLORS[2].accent,
-                  )}
-                >
-                  Ganó {match.winner === 1 ? teams.left.name : teams.right.name}
-                </div>
-                <ResultList match={match} />
-              </StageCard>
-            )}
-
-            {match.status === "CANCELLED" && (
-              <StageCard
-                title="Match cancelado"
-                subtitle="Cancelado por ambos capitanes para testing"
-              >
-                <div style={winnerBannerStyle("#fca5a5")}>
-                  La partida fue cancelada
-                </div>
-                <small style={{ color: "#94a3b8" }}>
-                  Volvé al dashboard y podés buscar otra partida.
-                </small>
-              </StageCard>
-            )}
-
-            <StageCard
-              title="Chat del match"
-              subtitle={
-                canSendChat
-                  ? "Coordinación en tiempo real entre jugadores"
-                  : "Chat deshabilitado porque la partida está cancelada"
-              }
-            >
-              <MatchChatPanel
-                currentUserId={currentUserId}
-                messages={chatMessages}
-                draft={chatInput}
-                remainingChars={chatRemainingChars}
-                canSend={canSendChat}
-                onDraftChange={setChatInput}
-                onSubmit={handleSendChat}
-              />
-            </StageCard>
+            {centerColumn}
+            <div style={mobileTeamGridStyle(isNarrow)}>
+              <TeamColumn team={teams.left} teamNumber={1} compact={isTablet} />
+              <TeamColumn team={teams.right} teamNumber={2} compact={isTablet} />
+            </div>
           </div>
-          <TeamColumn team={teams.right} teamNumber={2} />
-        </div>
+        ) : (
+          <div style={teamsGridStyle(isTablet)}>
+            <TeamColumn team={teams.left} teamNumber={1} compact={isTablet} />
+            {centerColumn}
+            <TeamColumn team={teams.right} teamNumber={2} compact={isTablet} />
+          </div>
+        )}
       </div>
     </div>
   );
@@ -572,6 +780,55 @@ function MatchTimeline({
   );
 }
 
+function OpsPill({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid rgba(232,244,255,0.08)",
+        background: "rgba(2,6,14,0.48)",
+        padding: "0.52rem 0.62rem",
+        minWidth: 0,
+      }}
+    >
+      <div
+        style={{
+          color: "rgba(232,244,255,0.36)",
+          fontSize: "0.56rem",
+          fontWeight: 900,
+          letterSpacing: "0.14em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          marginTop: "0.16rem",
+          color: tone,
+          fontFamily: "var(--font-display)",
+          fontSize: "0.86rem",
+          fontWeight: 900,
+          letterSpacing: "0.04em",
+          textTransform: "uppercase",
+          whiteSpace: "nowrap",
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+        }}
+      >
+        {value}
+      </div>
+    </div>
+  );
+}
+
 function ResultList({ match }: { match: MatchState }) {
   return (
     <div style={{ display: "grid", gap: "0.5rem" }}>
@@ -604,9 +861,11 @@ function ResultList({ match }: { match: MatchState }) {
 function TeamColumn({
   team,
   teamNumber,
+  compact = false,
 }: {
   team: ReturnType<typeof toDisplayTeam>;
   teamNumber: 1 | 2;
+  compact?: boolean;
 }) {
   const colors = TEAM_COLORS[teamNumber];
 
@@ -619,10 +878,30 @@ function TeamColumn({
       }}
     >
       <div style={{ display: "grid", gap: "0.35rem" }}>
-        <div style={{ ...eyebrowStyle, color: colors.accent }}>
-          {teamNumber === 1 ? "Blue side" : "Red side"}
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            gap: "0.75rem",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ ...eyebrowStyle, color: colors.accent }}>
+            {teamNumber === 1 ? "Blue side" : "Red side"}
+          </div>
+          <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
+            <MetaChip label="Activos" value={`${team.realPlayersCount}/5`} />
+            <MetaChip label="Win avg" value={`${team.avgWinrate}%`} />
+          </div>
         </div>
-        <div style={{ fontFamily: "var(--font-display)", fontSize: "1.3rem" }}>
+        <div
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "1.3rem",
+            letterSpacing: "0.05em",
+          }}
+        >
           {team.name}
         </div>
         <div style={{ color: "#cbd5e1", fontSize: "0.92rem" }}>
@@ -636,10 +915,18 @@ function TeamColumn({
             key={player.id}
             style={{
               ...playerCardStyle(player.placeholder),
+              borderColor: player.isCaptain
+                ? `${colors.accent}44`
+                : player.placeholder
+                  ? "rgba(100,116,139,0.25)"
+                  : "rgba(148,163,184,0.18)",
               flexDirection: "column",
               alignItems: "stretch",
-              gap: "0.5rem",
-              padding: "0.65rem 0.75rem",
+              gap: compact ? "0.42rem" : "0.5rem",
+              padding: compact ? "0.58rem 0.65rem" : "0.65rem 0.75rem",
+              boxShadow: player.isCaptain
+                ? `0 0 0 1px ${colors.accent}14, 0 0 18px ${colors.accent}12`
+                : undefined,
             }}
           >
             {/* Top row: avatar + name + badge */}
@@ -660,7 +947,25 @@ function TeamColumn({
               {player.placeholder ? (
                 <div style={{ color: "#64748b", fontWeight: 700, fontSize: "0.72rem" }}>BOT</div>
               ) : (
-                <LevelBadge level={player.level} color={LEVEL_COLORS[player.level] ?? colors.accent} />
+                <div style={{ display: "grid", justifyItems: "end", gap: "0.25rem" }}>
+                  {player.isCaptain && (
+                    <div
+                      style={{
+                        padding: "0.18rem 0.4rem",
+                        border: `1px solid ${colors.accent}55`,
+                        background: `${colors.accent}12`,
+                        color: colors.accent,
+                        fontSize: "0.58rem",
+                        fontWeight: 900,
+                        letterSpacing: "0.14em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      Captain
+                    </div>
+                  )}
+                  <LevelBadge level={player.level} />
+                </div>
               )}
             </div>
 
@@ -730,49 +1035,54 @@ function TeamColumn({
   );
 }
 
-function LevelBadge({ level, color }: { level: number; color: string }) {
+function LevelBadge({ level }: { level: number }) {
+  return (
+    <div title={`Rango ${level}`} style={{ flexShrink: 0 }}>
+      <RankBadge
+        level={level}
+        size="sm"
+        showLabel={false}
+        showMmr={false}
+        glow="soft"
+      />
+    </div>
+  );
+}
+
+function MetaChip({ label, value }: { label: string; value: string }) {
   return (
     <div
-      title={`Nivel ${level}`}
       style={{
-        position: "relative",
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: "32px",
-        height: "32px",
-        flexShrink: 0,
+        display: "grid",
+        gap: "0.1rem",
+        padding: "0.35rem 0.5rem",
+        minWidth: "72px",
+        border: "1px solid rgba(148,163,184,0.14)",
+        background: "rgba(255,255,255,0.025)",
+        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
       }}
     >
-      {/* Outer hex ring */}
-      <svg
-        width="32"
-        height="32"
-        viewBox="0 0 32 32"
-        style={{ position: "absolute", inset: 0 }}
-      >
-        <polygon
-          points="16,2 28,9 28,23 16,30 4,23 4,9"
-          fill={`${color}18`}
-          stroke={color}
-          strokeWidth="1.5"
-        />
-      </svg>
-      {/* Level number */}
-      <span
+      <div
         style={{
-          position: "relative",
-          fontFamily: "var(--font-display)",
-          fontSize: level >= 10 ? "0.62rem" : "0.75rem",
-          fontWeight: 900,
-          color,
-          letterSpacing: "-0.02em",
-          lineHeight: 1,
-          textShadow: `0 0 8px ${color}80`,
+          color: "#64748b",
+          fontSize: "0.56rem",
+          fontWeight: 800,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
         }}
       >
-        {level}
-      </span>
+        {label}
+      </div>
+      <div
+        style={{
+          color: "#e2e8f0",
+          fontFamily: "var(--font-display)",
+          fontSize: "0.78rem",
+          letterSpacing: "0.06em",
+        }}
+      >
+        {value}
+      </div>
     </div>
   );
 }
@@ -825,19 +1135,110 @@ function AvatarCell({
 function StageCard({
   title,
   subtitle,
+  tone,
   children,
 }: {
   title: string;
   subtitle: string;
+  tone?: string;
   children: ReactNode;
 }) {
   return (
-    <div style={stageCardStyle}>
+    <div
+      style={{
+        ...stageCardStyle,
+        borderColor: tone ? `${tone}2e` : stageCardStyle.borderColor,
+        boxShadow: tone ? `inset 0 1px 0 rgba(255,255,255,0.03), 0 0 28px ${tone}10` : undefined,
+      }}
+    >
       <div>
-        <div style={eyebrowStyle}>{title}</div>
+        <div style={{ ...eyebrowStyle, color: tone ?? eyebrowStyle.color }}>
+          {title}
+        </div>
         <div style={{ color: "#e2e8f0", fontWeight: 700 }}>{subtitle}</div>
       </div>
       <div style={{ display: "grid", gap: "1rem" }}>{children}</div>
+    </div>
+  );
+}
+
+function StageCallout({
+  tone,
+  label,
+  title,
+  description,
+  rightSlot,
+}: {
+  tone: string;
+  label: string;
+  title: string;
+  description: string;
+  rightSlot?: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        border: `1px solid ${tone}36`,
+        background: `linear-gradient(135deg, ${tone}18, rgba(15,23,42,0.78))`,
+        padding: "0.95rem 1rem",
+        display: "grid",
+        gap: "0.35rem",
+      }}
+    >
+      <div
+        style={{
+          position: "absolute",
+          inset: "auto 18% -14px",
+          height: "54px",
+          background: `radial-gradient(circle at 50% 100%, ${tone}28, transparent 72%)`,
+          pointerEvents: "none",
+          filter: "blur(10px)",
+        }}
+      />
+      <div
+        style={{
+          display: "flex",
+          alignItems: "start",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+        }}
+      >
+        <div style={{ display: "grid", gap: "0.2rem", position: "relative", zIndex: 1 }}>
+          <div
+            style={{
+              color: tone,
+              fontSize: "0.64rem",
+              fontWeight: 900,
+              letterSpacing: "0.18em",
+              textTransform: "uppercase",
+            }}
+          >
+            {label}
+          </div>
+          <div
+            style={{
+              color: "#f8fafc",
+              fontFamily: "var(--font-display)",
+              fontSize: "1.02rem",
+              letterSpacing: "0.05em",
+            }}
+          >
+            {title}
+          </div>
+          <div
+            style={{
+              color: "rgba(226,232,240,0.72)",
+              fontSize: "0.86rem",
+              lineHeight: 1.5,
+            }}
+          >
+            {description}
+          </div>
+        </div>
+        {rightSlot ? <div style={{ position: "relative", zIndex: 1 }}>{rightSlot}</div> : null}
+      </div>
     </div>
   );
 }
@@ -848,6 +1249,7 @@ function MatchChatPanel({
   draft,
   remainingChars,
   canSend,
+  compact = false,
   onDraftChange,
   onSubmit,
 }: {
@@ -856,6 +1258,7 @@ function MatchChatPanel({
   draft: string;
   remainingChars: number;
   canSend: boolean;
+  compact?: boolean;
   onDraftChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
@@ -865,8 +1268,87 @@ function MatchChatPanel({
     listEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
+  const lastMessage = messages[messages.length - 1];
+  const quickPrompts = [
+    "Listos para entrar",
+    "Esperen 1 minuto",
+    "Ya conecté",
+    "GG, cerramos",
+  ];
+
   return (
     <div style={chatPanelStyle}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+          flexWrap: "wrap",
+          padding: "0.75rem 0.85rem",
+          border: "1px solid rgba(148,163,184,0.14)",
+          background:
+            "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015))",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
+          <span
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "999px",
+              background: canSend ? "#4ade80" : "#f87171",
+              boxShadow: canSend ? "0 0 12px rgba(74,222,128,0.7)" : "none",
+              flexShrink: 0,
+            }}
+          />
+          <div style={{ display: "grid", gap: "0.08rem" }}>
+            <span
+              style={{
+                color: "#e2e8f0",
+                fontWeight: 800,
+                fontSize: "0.84rem",
+              }}
+            >
+              Canal operativo
+            </span>
+            <span
+              style={{
+                color: "#94a3b8",
+                fontSize: "0.72rem",
+                letterSpacing: "0.04em",
+              }}
+            >
+              {messages.length} mensajes ·{" "}
+              {lastMessage
+                ? `último ${formatChatTime(lastMessage.timestamp)}`
+                : "sin actividad todavía"}
+            </span>
+          </div>
+        </div>
+        {canSend && (
+          <div
+            style={{
+              display: "flex",
+              gap: "0.45rem",
+              flexWrap: compact ? "nowrap" : "wrap",
+              overflowX: compact ? "auto" : "visible",
+              paddingBottom: compact ? "0.1rem" : 0,
+            }}
+          >
+            {quickPrompts.map((prompt) => (
+              <button
+                key={prompt}
+                type="button"
+                onClick={() => onDraftChange(prompt)}
+                style={quickPromptStyle}
+              >
+                {prompt}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
       <div style={chatListStyle}>
         {messages.length === 0 ? (
           <div style={chatEmptyStateStyle}>
@@ -956,9 +1438,10 @@ function VotePill({
     <div
       style={{
         border: `1px solid ${color}66`,
-        borderRadius: "12px",
+        borderRadius: "0",
         padding: "0.85rem 1rem",
         textAlign: "center",
+        background: `${color}0f`,
       }}
     >
       <div
@@ -980,6 +1463,107 @@ function VotePill({
         }}
       >
         {votes} voto(s)
+      </div>
+    </div>
+  );
+}
+
+function ProgressRail({
+  label,
+  value,
+  total,
+  color,
+}: {
+  label: string;
+  value: number;
+  total: number;
+  color: string;
+}) {
+  const percentage = total > 0 ? Math.max(0, Math.min(100, (value / total) * 100)) : 0;
+
+  return (
+    <div style={{ display: "grid", gap: "0.45rem" }}>
+      <div
+        style={{
+          display: "flex",
+          alignItems: "baseline",
+          justifyContent: "space-between",
+          gap: "0.75rem",
+        }}
+      >
+        <div style={{ ...eyebrowStyle, color: "#94a3b8" }}>{label}</div>
+        <div
+          style={{
+            color,
+            fontFamily: "var(--font-display)",
+            fontSize: "0.88rem",
+            letterSpacing: "0.08em",
+          }}
+        >
+          {value}/{total}
+        </div>
+      </div>
+      <div
+        style={{
+          height: "10px",
+          border: "1px solid rgba(148,163,184,0.14)",
+          background: "rgba(15,23,42,0.78)",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            width: `${percentage}%`,
+            height: "100%",
+            background: `linear-gradient(90deg, ${color}, ${color}aa)`,
+            boxShadow: `0 0 18px ${color}44`,
+            transition: "width 180ms ease",
+          }}
+        />
+      </div>
+    </div>
+  );
+}
+
+function StatusTile({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+}) {
+  return (
+    <div
+      style={{
+        display: "grid",
+        gap: "0.15rem",
+        padding: "0.7rem 0.8rem",
+        border: `1px solid ${tone}26`,
+        background: `linear-gradient(180deg, ${tone}10, rgba(255,255,255,0.02))`,
+      }}
+    >
+      <div
+        style={{
+          color: "#94a3b8",
+          fontSize: "0.66rem",
+          fontWeight: 800,
+          letterSpacing: "0.16em",
+          textTransform: "uppercase",
+        }}
+      >
+        {label}
+      </div>
+      <div
+        style={{
+          color: tone,
+          fontFamily: "var(--font-display)",
+          fontSize: "1rem",
+          letterSpacing: "0.05em",
+        }}
+      >
+        {value}
       </div>
     </div>
   );
@@ -1026,6 +1610,13 @@ function toDisplayTeam(players: Player[], teamNumber: 1 | 2) {
   return {
     name: `Team ${leader}`,
     captainName: captain,
+    realPlayersCount: realPlayers.filter((player) => !player.isBot).length,
+    avgWinrate: realPlayers.length
+      ? Math.round(
+          realPlayers.reduce((sum, player) => sum + (player.user.winrate ?? 0), 0) /
+            realPlayers.length,
+        )
+      : 0,
     players: padded,
   };
 }
@@ -1085,10 +1676,6 @@ function getMapNameFromId(mapId: string) {
   return MAP_NAME_BY_ID[mapId];
 }
 
-function getMapIdFromName(mapName: string) {
-  return MAP_ID_BY_NAME[mapName] ?? "";
-}
-
 function formatDuration(totalSeconds: number) {
   const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
@@ -1106,7 +1693,7 @@ function formatChatTime(value: string) {
 
 const pageShellStyle: CSSProperties = {
   minHeight: "calc(100vh - 80px)",
-  padding: "1.5rem 0 2rem",
+  padding: "1rem 0 1.25rem",
   position: "relative",
 };
 
@@ -1117,24 +1704,46 @@ const panelStyle: CSSProperties = {
   border: "1px solid var(--nexus-border)",
   borderRadius: "0",
   boxShadow: "0 24px 70px rgba(0, 0, 0, 0.28)",
-  padding: "1.25rem",
+  padding: "0.9rem",
   display: "grid",
-  gap: "1.25rem",
+  gap: "0.75rem",
 };
 
 const headerStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   alignItems: "center",
-  gap: "1rem",
+  gap: "0.75rem",
 };
 
-const teamsGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr minmax(360px, 480px) 1fr",
-  gap: "1rem",
-  alignItems: "start",
-};
+function teamsGridStyle(isTablet: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: isTablet
+      ? "minmax(240px, 0.95fr) minmax(320px, 1.2fr) minmax(240px, 0.95fr)"
+      : "1fr minmax(360px, 480px) 1fr",
+    gap: isTablet ? "0.8rem" : "1rem",
+    alignItems: "start",
+  };
+}
+
+function mobileTeamGridStyle(isNarrow: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+    gap: "1rem",
+  };
+}
+
+function opsGridStyle(isMobile: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: isMobile
+      ? "repeat(2, minmax(0, 1fr))"
+      : "repeat(4, minmax(0, 1fr))",
+    gap: "0.55rem",
+  };
+}
 
 const teamColumnStyle: CSSProperties = {
   border: "1px solid",
@@ -1148,11 +1757,13 @@ const teamColumnStyle: CSSProperties = {
 
 const stageCardStyle: CSSProperties = {
   border: "1px solid var(--nexus-border)",
+  borderColor: "var(--nexus-border)",
   borderRadius: "0",
   padding: "1rem",
   display: "grid",
   gap: "1rem",
   background: "var(--nexus-card)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
 };
 
 const chatPanelStyle: CSSProperties = {
@@ -1161,13 +1772,13 @@ const chatPanelStyle: CSSProperties = {
 };
 
 const chatListStyle: CSSProperties = {
-  maxHeight: "240px",
+  maxHeight: "168px",
   overflowY: "auto",
   border: "1px solid rgba(148,163,184,0.18)",
   background: "rgba(2,6,23,0.55)",
-  padding: "0.65rem",
+  padding: "0.55rem",
   display: "grid",
-  gap: "0.55rem",
+  gap: "0.45rem",
 };
 
 const chatEmptyStateStyle: CSSProperties = {
@@ -1208,7 +1819,7 @@ const chatContentStyle: CSSProperties = {
 const chatComposerStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "1fr auto",
-  gap: "0.55rem",
+  gap: "0.45rem",
 };
 
 const chatInputStyle: CSSProperties = {
@@ -1243,13 +1854,33 @@ function chatCounterStyle(urgent: boolean): CSSProperties {
   };
 }
 
-const mapGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 1fr",
-  gap: "0.5rem",
+const quickPromptStyle: CSSProperties = {
+  border: "1px solid rgba(125,211,252,0.18)",
+  background: "rgba(14,116,144,0.12)",
+  color: "#bae6fd",
+  padding: "0.32rem 0.5rem",
+  cursor: "pointer",
+  fontSize: "0.64rem",
+  fontWeight: 800,
+  letterSpacing: "0.06em",
+  whiteSpace: "nowrap",
 };
 
-function MapSelectedCard({ mapName }: { mapName: string }) {
+function mapGridStyle(isNarrow: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+    gap: "0.5rem",
+  };
+}
+
+function MapSelectedCard({
+  mapName,
+  compact = false,
+}: {
+  mapName: string;
+  compact?: boolean;
+}) {
   const [imgFailed, setImgFailed] = useState(false);
   const imageUrl = getMapImageUrl(mapName);
   const backdrop =
@@ -1260,7 +1891,7 @@ function MapSelectedCard({ mapName }: { mapName: string }) {
     <div
       style={{
         position: "relative",
-        minHeight: "180px",
+        minHeight: compact ? "150px" : "180px",
         borderRadius: "2px",
         overflow: "hidden",
         border: "1px solid rgba(148,163,184,0.18)",
@@ -1339,10 +1970,14 @@ function MapSelectedCard({ mapName }: { mapName: string }) {
 function MapVetoCard({
   mapName,
   active,
+  bannedBy,
+  bannedByTone,
   onBan,
 }: {
   mapName: string;
   active: boolean;
+  bannedBy?: string | null;
+  bannedByTone?: string;
   onBan: () => void;
 }) {
   const [hovered, setHovered] = useState(false);
@@ -1351,13 +1986,14 @@ function MapVetoCard({
   const backdrop =
     MAP_BACKDROPS[mapName] ??
     "linear-gradient(135deg, rgba(0,200,255,0.25), rgba(15,23,42,0.95))";
+  const isBanned = Boolean(bannedBy);
 
-  const isBanning = active && hovered;
+  const isBanning = active && hovered && !isBanned;
 
   return (
     <button
       onClick={active ? onBan : undefined}
-      disabled={!active}
+      disabled={!active || isBanned}
       onMouseEnter={() => setHovered(true)}
       onMouseLeave={() => setHovered(false)}
       style={{
@@ -1366,7 +2002,7 @@ function MapVetoCard({
         borderRadius: "2px",
         padding: 0,
         overflow: "hidden",
-        cursor: active ? "pointer" : "not-allowed",
+        cursor: active && !isBanned ? "pointer" : "not-allowed",
         aspectRatio: "16/7",
         background: "#0d1422",
         transition: "border-color 0.15s, transform 0.12s",
@@ -1387,8 +2023,14 @@ function MapVetoCard({
             width: "100%",
             height: "100%",
             objectFit: "cover",
-            opacity: active ? 1 : 0.35,
-            filter: isBanning ? "brightness(0.45)" : active ? "brightness(0.75)" : "brightness(0.4) saturate(0.6)",
+            opacity: active || isBanned ? 1 : 0.35,
+            filter: isBanned
+              ? "grayscale(1) brightness(0.38) contrast(1.1)"
+              : isBanning
+                ? "brightness(0.45)"
+                : active
+                  ? "brightness(0.75)"
+                  : "brightness(0.4) saturate(0.6)",
             transition: "opacity 0.15s, filter 0.15s",
           }}
         />
@@ -1402,12 +2044,53 @@ function MapVetoCard({
             ? isBanning
               ? "linear-gradient(to top, rgba(248,113,113,0.55) 0%, rgba(0,0,0,0.4) 100%)"
               : backdrop
-            : isBanning
-              ? "linear-gradient(to top, rgba(200,30,30,0.7) 0%, transparent 55%)"
-              : "linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 50%)",
+            : isBanned
+              ? "linear-gradient(to top, rgba(2,6,23,0.92) 0%, rgba(2,6,23,0.5) 58%, rgba(2,6,23,0.35) 100%)"
+              : isBanning
+                ? "linear-gradient(to top, rgba(200,30,30,0.7) 0%, transparent 55%)"
+                : "linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 50%)",
           transition: "background 0.15s",
         }}
       />
+      {isBanned && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 2,
+            display: "grid",
+            placeContent: "center",
+            textAlign: "center",
+            gap: "0.25rem",
+            padding: "0.5rem",
+          }}
+        >
+          <span
+            style={{
+              fontSize: "0.55rem",
+              fontWeight: 800,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+              color: "rgba(226,232,240,0.9)",
+            }}
+          >
+            Vetado por
+          </span>
+          <span
+            style={{
+              fontFamily: "var(--font-display)",
+              fontSize: "0.78rem",
+              fontWeight: 900,
+              letterSpacing: "0.04em",
+              textTransform: "uppercase",
+              color: bannedByTone ?? "#f8fafc",
+              textShadow: "0 2px 8px rgba(0,0,0,0.85)",
+            }}
+          >
+            {bannedBy}
+          </span>
+        </div>
+      )}
       {/* Ban X overlay on hover */}
       {isBanning && (
         <div
@@ -1451,11 +2134,11 @@ function MapVetoCard({
             fontFamily: "var(--font-display)",
             fontSize: "0.7rem",
             fontWeight: 800,
-            color: active ? "#fff" : "#64748b",
+            color: active ? "#fff" : isBanned ? "#cbd5e1" : "#64748b",
             letterSpacing: "0.04em",
             textTransform: "uppercase",
             lineHeight: 1.2,
-            textShadow: active ? "0 1px 4px rgba(0,0,0,0.8)" : "none",
+            textShadow: active || isBanned ? "0 1px 4px rgba(0,0,0,0.8)" : "none",
           }}
         >
           {mapName}
@@ -1498,13 +2181,14 @@ function finishButtonStyle(disabled: boolean): CSSProperties {
 const ghostButtonStyle: CSSProperties = {
   border: "1px solid var(--nexus-border-active)",
   borderRadius: "0",
-  padding: "0.75rem 1rem",
+  padding: "0.58rem 0.82rem",
   background: "transparent",
   color: "#e2e8f0",
   cursor: "pointer",
   textTransform: "uppercase",
-  letterSpacing: "0.08em",
+  letterSpacing: "0.07em",
   fontWeight: 700,
+  fontSize: "0.72rem",
 };
 
 const eyebrowStyle: CSSProperties = {
@@ -1538,13 +2222,13 @@ const infoBannerStyle: CSSProperties = {
 const timelineWrapStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns: "repeat(5, 1fr)",
-  gap: "0.75rem",
+  gap: "0.42rem",
   alignItems: "start",
 };
 
 const timelineStepStyle: CSSProperties = {
   display: "grid",
-  gap: "0.55rem",
+  gap: "0.35rem",
 };
 
 const timelineNodeRowStyle: CSSProperties = {
@@ -1554,10 +2238,10 @@ const timelineNodeRowStyle: CSSProperties = {
 
 const timelineLabelStyle = (active: boolean): CSSProperties => ({
   color: active ? "#e2e8f0" : "#94a3b8",
-  fontSize: "0.8rem",
+  fontSize: "0.68rem",
   fontWeight: active ? 800 : 700,
   textTransform: "uppercase",
-  letterSpacing: "0.12em",
+  letterSpacing: "0.1em",
 });
 
 function timelineNodeStyle(
@@ -1566,8 +2250,8 @@ function timelineNodeStyle(
   cancelled: boolean,
 ): CSSProperties {
   return {
-    width: "34px",
-    height: "34px",
+    width: "28px",
+    height: "28px",
     borderRadius: "999px",
     display: "flex",
     alignItems: "center",
@@ -1605,7 +2289,7 @@ function timelineLineStyle(active: boolean): CSSProperties {
   return {
     flex: 1,
     height: "2px",
-    marginInline: "0.55rem",
+    marginInline: "0.4rem",
     background: active
       ? "linear-gradient(90deg, #22c55e, #38bdf8)"
       : "rgba(148,163,184,0.2)",
@@ -1669,12 +2353,13 @@ function dangerButtonStyle(disabled: boolean): CSSProperties {
   return {
     border: "1px solid rgba(248,113,113,0.35)",
     borderRadius: "0",
-    padding: "0.75rem 1rem",
+    padding: "0.58rem 0.82rem",
     background: disabled ? "rgba(248,113,113,0.12)" : "rgba(127,29,29,0.25)",
     color: "#fecaca",
     cursor: disabled ? "not-allowed" : "pointer",
     fontWeight: 800,
     textTransform: "uppercase",
-    letterSpacing: "0.08em",
+    letterSpacing: "0.07em",
+    fontSize: "0.72rem",
   };
 }

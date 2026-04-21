@@ -4,6 +4,7 @@ import { ActiveMatchRoom } from '../components/matchmaking/ActiveMatchRoom'
 import { api } from '../lib/api'
 import { getSocket } from '../lib/socket'
 import { useAuthStore } from '../stores/auth.store'
+import { useMatchmakingStore } from '../stores/matchmaking.store'
 
 const DISMISSED_ACTIVE_MATCH_KEY = 'nexusgg.dismissedActiveMatchId'
 
@@ -69,8 +70,11 @@ export function MatchRoom() {
   const { matchId } = useParams({ strict: false }) as { matchId: string }
   const navigate = useNavigate()
   const { user } = useAuthStore()
+  const resetMatchmaking = useMatchmakingStore((state) => state.resetMatchmaking)
   const [match, setMatch] = useState<any | null>(null)
   const [chatMessages, setChatMessages] = useState<MatchChatMessage[]>([])
+  const [loading, setLoading] = useState(true)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     if (!user || !matchId) return
@@ -277,9 +281,16 @@ export function MatchRoom() {
     socket.on('matchmaking:cancelled', onCancelled)
     socket.on('chat:message', onChatMessage)
 
-    api.get(`/matches/${matchId}`)
-      .then(({ data }) => setMatch(data))
-      .catch(() => navigate({ to: '/dashboard' }))
+    api
+      .get(`/matches/${matchId}`)
+      .then(({ data }) => {
+        setMatch(data)
+        setLoadError(null)
+      })
+      .catch(() => {
+        setLoadError('No pude recuperar el estado del match room.')
+      })
+      .finally(() => setLoading(false))
 
     api.get(`/matches/${matchId}/chat`)
       .then(({ data }) => {
@@ -312,7 +323,36 @@ export function MatchRoom() {
     }
   }, [matchId, navigate, user])
 
-  if (!user || !match) return null
+  useEffect(() => {
+    if (!match?.status) return
+    if (['VETOING', 'PLAYING', 'VOTING', 'COMPLETED', 'CANCELLED'].includes(match.status)) {
+      resetMatchmaking()
+    }
+  }, [match?.status, resetMatchmaking])
+
+  if (!user) return null
+
+  if (loading) {
+    return (
+      <RoomShellCard
+        eyebrow='Match room'
+        title='Sincronizando sala'
+        description='Estamos trayendo el estado vivo del match, los equipos y el chat operativo.'
+      />
+    )
+  }
+
+  if (loadError || !match) {
+    return (
+      <RoomShellCard
+        eyebrow='Match room'
+        title='Sala no disponible'
+        description={loadError ?? 'No se pudo abrir la sala solicitada.'}
+        actionLabel='Volver al dashboard'
+        onAction={() => navigate({ to: '/dashboard' })}
+      />
+    )
+  }
 
   return (
     <ActiveMatchRoom
@@ -339,5 +379,91 @@ export function MatchRoom() {
       }}
     />
 
+  )
+}
+
+function RoomShellCard({
+  eyebrow,
+  title,
+  description,
+  actionLabel,
+  onAction,
+}: {
+  eyebrow: string
+  title: string
+  description: string
+  actionLabel?: string
+  onAction?: () => void
+}) {
+  return (
+    <section
+      style={{
+        maxWidth: '960px',
+        margin: '0 auto',
+        border: '1px solid rgba(0,200,255,0.15)',
+        background:
+          "linear-gradient(180deg, rgba(17,25,39,0.86), rgba(8,12,20,0.82))",
+        padding: '1.4rem',
+        display: 'grid',
+        gap: '0.9rem',
+      }}
+    >
+      <div
+        style={{
+          color: '#7dd3fc',
+          fontFamily: 'var(--font-display)',
+          fontSize: '0.72rem',
+          fontWeight: 900,
+          letterSpacing: '0.22em',
+          textTransform: 'uppercase',
+        }}
+      >
+        {eyebrow}
+      </div>
+      <div
+        style={{
+          color: '#fff',
+          fontFamily: 'var(--font-display)',
+          fontSize: 'clamp(1.6rem, 4vw, 2.6rem)',
+          fontWeight: 900,
+          letterSpacing: '0.05em',
+          textTransform: 'uppercase',
+          lineHeight: 0.95,
+        }}
+      >
+        {title}
+      </div>
+      <p
+        style={{
+          margin: 0,
+          maxWidth: '680px',
+          color: 'rgba(232,244,255,0.62)',
+          fontSize: '0.95rem',
+          lineHeight: 1.65,
+        }}
+      >
+        {description}
+      </p>
+      {actionLabel && onAction && (
+        <button
+          type='button'
+          onClick={onAction}
+          style={{
+            justifySelf: 'start',
+            border: '1px solid rgba(125,211,252,0.38)',
+            background: 'rgba(14,116,144,0.18)',
+            color: '#bae6fd',
+            padding: '0.8rem 1rem',
+            fontFamily: 'var(--font-display)',
+            fontWeight: 900,
+            letterSpacing: '0.12em',
+            textTransform: 'uppercase',
+            cursor: 'pointer',
+          }}
+        >
+          {actionLabel}
+        </button>
+      )}
+    </section>
   )
 }

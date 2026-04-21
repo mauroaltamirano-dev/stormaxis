@@ -140,6 +140,16 @@ body::after {
   }
 }
 
+@keyframes pulseGlow {
+  0%,
+  100% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.8;
+  }
+}
+
 /* ─── Landing Layout ─────────────────────────────────────── */
 .landing-section-inner {
   display: block;

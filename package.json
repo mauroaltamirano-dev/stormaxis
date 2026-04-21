@@ -13,7 +13,11 @@
     "dev:client": "npm run dev --workspace=client",
     "db:migrate": "npm run db:migrate --workspace=server",
     "db:studio": "npm run db:studio --workspace=server",
-    "db:seed": "npm run db:seed --workspace=server"
+    "db:seed": "npm run db:seed --workspace=server",
+    "redis:up": "docker compose up -d redis",
+    "redis:down": "docker compose down",
+    "redis:logs": "docker compose logs -f redis",
+    "tunnel": "./bin/cloudflared tunnel --url http://localhost:5173"
   },
   "devDependencies": {
     "concurrently": "^9.1.0"

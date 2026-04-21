@@ -12,6 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { RankBadge } from "../components/RankBadge";
 import { useAuthStore } from "../stores/auth.store";
 import { getRoleMeta } from "../lib/roles";
 
@@ -195,6 +196,12 @@ export function Profile() {
 
   const level = profile?.level ?? 1;
   const levelColor = LEVEL_COLORS[level] || "var(--nexus-accent)";
+  const levelProgressPct = Math.max(
+    0,
+    Math.min(100, profile?.levelProgressPct ?? 0),
+  );
+  const pointsToNextLevel =
+    profile?.nextLevelAt == null ? null : Math.max(0, profile.nextLevelAt - profile.mmr);
   const totalMatches = useMemo(
     () => (profile ? profile.wins + profile.losses : 0),
     [profile],
@@ -486,19 +493,12 @@ export function Profile() {
                     {profile.username}
                   </h1>
 
-                  <span
-                    style={{
-                      border: `1px solid ${levelColor}`,
-                      color: levelColor,
-                      padding: "4px 8px",
-                      fontSize: "11px",
-                      fontWeight: 800,
-                      letterSpacing: "1px",
-                      textTransform: "uppercase",
-                    }}
-                  >
-                    {profile.displayLevel ?? `Lvl ${level}`}
-                  </span>
+                  <RankBadge
+                    level={level}
+                    mmr={profile.mmr}
+                    size="md"
+                    glow="medium"
+                  />
                 </div>
 
                 <div
@@ -580,37 +580,55 @@ export function Profile() {
 
             <div
               style={{
-                marginTop: "4px",
                 display: "flex",
                 justifyContent: "space-between",
-                fontSize: "13px",
-                color: "var(--nexus-text)",
+                alignItems: "center",
+                color: "rgba(232,244,255,0.42)",
+                fontSize: "11px",
+                fontWeight: 900,
+                letterSpacing: "1px",
+                textTransform: "uppercase",
               }}
             >
-              <span>{profile.displayLevel ?? `Lvl ${level}`}</span>
-              <span>{profile.levelProgressPct ?? 0}%</span>
+              <span>Progreso al próximo rango</span>
+              <strong style={{ color: levelColor }}>
+                {pointsToNextLevel == null ? "Rango máximo" : `+${pointsToNextLevel}`}
+              </strong>
             </div>
 
             <div
               style={{
+                position: "relative",
                 height: "10px",
-                background: "rgba(255,255,255,0.06)",
-                border: "1px solid rgba(255,255,255,0.08)",
+                overflow: "hidden",
+                border: "1px solid rgba(255,255,255,0.07)",
+                background: "rgba(2,6,14,0.8)",
               }}
             >
               <div
                 style={{
-                  width: `${profile.levelProgressPct ?? 0}%`,
+                  position: "absolute",
+                  inset: "0 auto 0 0",
+                  width: `${levelProgressPct}%`,
                   height: "100%",
-                  background: `linear-gradient(90deg, ${levelColor}, var(--nexus-accent))`,
+                  background: `linear-gradient(90deg, ${levelColor}, #00c8ff)`,
+                }}
+              />
+              <div
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  backgroundImage:
+                    "linear-gradient(90deg, rgba(2,6,14,0.35) 1px, transparent 1px)",
+                  backgroundSize: "14px 100%",
                 }}
               />
             </div>
 
             <div style={{ color: "var(--nexus-muted)", fontSize: "12px" }}>
-              {profile.nextLevelAt == null
+              {pointsToNextLevel == null
                 ? "Ya estás en el techo actual del ladder."
-                : `Te faltan ${Math.max(0, profile.nextLevelAt - profile.mmr)} puntos para el próximo nivel.`}
+                : `Te faltan ${pointsToNextLevel} puntos para el próximo rango.`}
             </div>
 
             {isOwnProfile && profile.email ? (
@@ -833,16 +851,18 @@ export function Profile() {
                     gap: "12px",
                   }}
                 >
-                  <ScoutCard
-                    label="Main"
-                    value={getRoleLabel(profile.mainRole)}
-                    icon={<Swords size={16} />}
-                  />
-                  <ScoutCard
-                    label="Secundario"
-                    value={getRoleLabel(profile.secondaryRole)}
-                    icon={<Users size={16} />}
-                  />
+                    <ScoutCard
+                      label="Main"
+                      value={getRoleLabel(profile.mainRole)}
+                      icon={<Swords size={16} />}
+                      role={profile.mainRole}
+                    />
+                    <ScoutCard
+                      label="Secundario"
+                      value={getRoleLabel(profile.secondaryRole)}
+                      icon={<Users size={16} />}
+                      role={profile.secondaryRole}
+                    />
                   <ScoutCard
                     label="Total partidas"
                     value={String(totalMatches)}
@@ -1208,27 +1228,6 @@ export function Profile() {
             )}
           </section>
 
-          <section style={{ ...cardStyle, display: "grid", gap: "12px" }}>
-            <div
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: "16px",
-                fontWeight: 800,
-                letterSpacing: "2px",
-                textTransform: "uppercase",
-                color: "var(--nexus-text)",
-              }}
-            >
-              Resumen táctico
-            </div>
-
-            <ScoutCard label="Main" value={getRoleLabel(profile.mainRole)} />
-            <ScoutCard
-              label="Secundario"
-              value={getRoleLabel(profile.secondaryRole)}
-            />
-            <ScoutCard label="Nivel" value={profile.displayLevel ?? `Lvl ${level}`} />
-          </section>
         </div>
       </div>
     </div>
@@ -1449,16 +1448,22 @@ function ScoutCard({
   label,
   value,
   icon,
+  role,
 }: {
   label: string;
   value: string;
   icon?: ReactNode;
+  role?: PlayerRole | null;
 }) {
+  const roleMeta = getRoleMeta(role);
+  const accent = roleMeta?.accent ?? "var(--nexus-accent)";
   return (
     <div
       style={{
-        border: "1px solid rgba(255,255,255,0.06)",
-        background: "rgba(255,255,255,0.02)",
+        border: roleMeta ? `1px solid ${accent}44` : "1px solid rgba(255,255,255,0.06)",
+        background: roleMeta
+          ? `linear-gradient(145deg, ${accent}1f, rgba(255,255,255,0.02) 52%, rgba(255,255,255,0.01))`
+          : "rgba(255,255,255,0.02)",
         padding: "12px",
         display: "grid",
         gap: "8px",
@@ -1483,11 +1488,24 @@ function ScoutCard({
         >
           {label}
         </span>
-        {icon ? <span style={{ color: "var(--nexus-accent)" }}>{icon}</span> : null}
+        {roleMeta ? (
+          <img
+            src={roleMeta.icon}
+            alt=""
+            style={{
+              width: "18px",
+              height: "18px",
+              objectFit: "contain",
+              filter: `drop-shadow(0 0 6px ${accent}66)`,
+            }}
+          />
+        ) : icon ? (
+          <span style={{ color: "var(--nexus-accent)" }}>{icon}</span>
+        ) : null}
       </div>
       <div
         style={{
-          color: "var(--nexus-text)",
+          color: roleMeta ? accent : "var(--nexus-text)",
           fontSize: "14px",
           fontWeight: 800,
         }}

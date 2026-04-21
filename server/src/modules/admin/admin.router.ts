@@ -6,7 +6,7 @@ import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
 import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
 import { getIO } from '../../infrastructure/socket/server'
-import { fillQueueWithBots } from '../matchmaking/matchmaking.service'
+import { clearQueue, fillQueueWithBots } from '../matchmaking/matchmaking.service'
 
 export const adminRouter = Router()
 
@@ -235,6 +235,15 @@ adminRouter.get('/queue', async (req, res, next) => {
     }
 
     res.json({ count: players.length, players })
+  } catch (err) {
+    next(err)
+  }
+})
+
+adminRouter.post('/queue/clear', async (_req, res, next) => {
+  try {
+    const result = await clearQueue('Admin cleared queue')
+    res.json({ ok: true, ...result })
   } catch (err) {
     next(err)
   }

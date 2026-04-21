@@ -15,6 +15,8 @@ import { Profile } from "./pages/Profile";
 import { Leaderboard } from "./pages/Leaderboard";
 import { AppLayout } from "./layouts/AppLayout";
 import { AuthCallback } from "./pages/AuthCallback";
+import { Onboarding } from "./pages/Onboarding";
+import { requiresCompetitiveOnboarding } from "./lib/onboarding";
 
 // ─── Root ──────────────────────────────────────────────────
 const rootRoute = createRootRoute({ component: Outlet });
@@ -31,7 +33,8 @@ const loginRoute = createRoute({
   path: "/login",
   component: Login,
   beforeLoad: () => {
-    if (useAuthStore.getState().user) throw redirect({ to: "/dashboard" });
+    const user = useAuthStore.getState().user;
+    if (user) throw redirect({ to: requiresCompetitiveOnboarding(user) ? "/onboarding" : "/dashboard" });
   },
 });
 
@@ -40,7 +43,8 @@ const registerRoute = createRoute({
   path: "/register",
   component: Register,
   beforeLoad: () => {
-    if (useAuthStore.getState().user) throw redirect({ to: "/dashboard" });
+    const user = useAuthStore.getState().user;
+    if (user) throw redirect({ to: requiresCompetitiveOnboarding(user) ? "/onboarding" : "/dashboard" });
   },
 });
 
@@ -51,12 +55,34 @@ const authCallbackRoute = createRoute({
 });
 
 // ─── Protected layout ──────────────────────────────────────
-const appRoute = createRoute({
+const protectedRoute = createRoute({
   getParentRoute: () => rootRoute,
+  id: "protected",
+  component: Outlet,
+  beforeLoad: () => {
+    if (!useAuthStore.getState().user) throw redirect({ to: "/login" });
+  },
+});
+
+const onboardingRoute = createRoute({
+  getParentRoute: () => protectedRoute,
+  path: "/onboarding",
+  component: Onboarding,
+  beforeLoad: () => {
+    const user = useAuthStore.getState().user;
+    if (!user) throw redirect({ to: "/login" });
+    if (!requiresCompetitiveOnboarding(user)) throw redirect({ to: "/dashboard" });
+  },
+});
+
+const appRoute = createRoute({
+  getParentRoute: () => protectedRoute,
   id: "app",
   component: AppLayout,
   beforeLoad: () => {
-    if (!useAuthStore.getState().user) throw redirect({ to: "/login" });
+    const user = useAuthStore.getState().user;
+    if (!user) throw redirect({ to: "/login" });
+    if (requiresCompetitiveOnboarding(user)) throw redirect({ to: "/onboarding" });
   },
 });
 
@@ -96,12 +122,15 @@ const routeTree = rootRoute.addChildren([
   loginRoute,
   registerRoute,
   authCallbackRoute,
-  appRoute.addChildren([
-    dashboardRoute,
-    leaderboardRoute,
-    profileRoute,
-    publicProfileRoute,
-    matchRoomRoute,
+  protectedRoute.addChildren([
+    onboardingRoute,
+    appRoute.addChildren([
+      dashboardRoute,
+      leaderboardRoute,
+      profileRoute,
+      publicProfileRoute,
+      matchRoomRoute,
+    ]),
   ]),
 ]);
 

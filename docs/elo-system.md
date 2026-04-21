@@ -21,7 +21,13 @@ Eso se usa solo para calibración inicial durante el onboarding.
 ### MMR Inicial (MVP — selector manual)
 Para el MVP los testers pueden asignarse su MMR manualmente al registrarse:
 - Selección de rango en el formulario de onboarding
-- El sistema les asigna el MMR del punto medio del rango elegido
+- El sistema les asigna un MMR calibrado según los bands reales del producto:
+  - Bronce → 100
+  - Plata → 300
+  - Oro → 600
+  - Platino → 1000
+  - Diamante → 1450
+  - Master → 1800
 - Los admins pueden override el MMR desde el panel
 
 ---
@@ -78,7 +84,9 @@ En el formulario de registro o primer login:
 ○ Oro         ○ Platino  
 ○ Diamante    ○ Master
 ```
-El sistema asigna el MMR del punto medio del rango seleccionado.
+El sistema asigna un MMR calibrado a partir de los bands reales del producto,
+manteniendo `Master` dentro del rango de `Lvl 9` (1700–1899) y dejando `Lvl 10`
+como techo equivalente a Gran Maestro.
 
 ---
 

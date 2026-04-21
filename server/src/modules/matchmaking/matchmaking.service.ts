@@ -224,7 +224,7 @@ async function emitQueuePositionUpdates() {
   }
 }
 
-export async function joinQueue(userId: string, mode: string, roles: string[]) {
+export async function joinQueue(userId: string, mode: string) {
   // Prevent double-queue
   const alreadyInQueue = await redis.get(REDIS_KEYS.userInQueue(userId))
   if (alreadyInQueue) throw Errors.CONFLICT('Already in queue')
@@ -244,10 +244,17 @@ export async function joinQueue(userId: string, mode: string, roles: string[]) {
 
   const user = await db.user.findUnique({
     where: { id: userId },
-    select: { mmr: true, isBanned: true },
+    select: { mmr: true, isBanned: true, mainRole: true, secondaryRole: true },
   })
   if (!user) throw Errors.NOT_FOUND('User')
   if (user.isBanned) throw Errors.FORBIDDEN()
+  if (!user.mainRole || !user.secondaryRole) {
+    throw Errors.CONFLICT('Complete your competitive roles before joining the queue')
+  }
+
+  const roles = [user.mainRole, user.secondaryRole].filter(
+    (role, index, array) => Boolean(role) && array.indexOf(role) === index,
+  )
 
   // Add to sorted set by MMR
   await redis.zadd(REDIS_KEYS.matchmakingQueue(REGION), user.mmr, userId)
@@ -267,6 +274,84 @@ export async function leaveQueue(userId: string) {
   await redis.zrem(REDIS_KEYS.matchmakingQueue(REGION), userId)
   await redis.del(REDIS_KEYS.userInQueue(userId))
   void emitQueuePositionUpdates()
+}
+
+export async function cleanupUserMatchmakingSession(
+  userId: string,
+  reason = 'Session closed during accept',
+) {
+  let leftQueue = false
+  let cancelledAccept = false
+
+  const queueState = await redis.get(REDIS_KEYS.userInQueue(userId))
+  if (queueState) {
+    await leaveQueue(userId)
+    leftQueue = true
+  }
+
+  const acceptingPlayer = await db.matchPlayer.findFirst({
+    where: {
+      userId,
+      match: {
+        status: 'ACCEPTING',
+      },
+    },
+    select: {
+      matchId: true,
+    },
+    orderBy: {
+      match: { createdAt: 'desc' },
+    },
+  })
+
+  if (acceptingPlayer) {
+    await db.matchPlayer.update({
+      where: { matchId_userId: { matchId: acceptingPlayer.matchId, userId } },
+      data: { accepted: false },
+    })
+    await cancelMatch(acceptingPlayer.matchId, reason)
+    cancelledAccept = true
+  }
+
+  return { leftQueue, cancelledAccept }
+}
+
+export async function clearQueue(reason = 'Queue cleared') {
+  const queueKey = REDIS_KEYS.matchmakingQueue(REGION)
+  const queueIds = await redis.zrange(queueKey, 0, -1)
+
+  await redis.del(queueKey)
+  await redis.del(REDIS_KEYS.matchmakingScheduleLock(REGION))
+
+  if (queueIds.length > 0) {
+    const tx = redis.multi()
+    for (const queueId of queueIds) {
+      tx.del(REDIS_KEYS.userInQueue(queueId))
+    }
+    await tx.exec()
+  }
+
+  try {
+    const io = getIO()
+    for (const queueId of queueIds) {
+      if (!isBotQueueId(queueId)) {
+        io.to(`user:${queueId}`).emit('matchmaking:cancelled', {
+          reason,
+          admin: true,
+          queueCleared: true,
+        })
+      }
+    }
+  } catch {
+    // noop
+  }
+
+  void emitQueuePositionUpdates()
+
+  return {
+    cleared: queueIds.length,
+    humansCleared: queueIds.filter((queueId) => !isBotQueueId(queueId)).length,
+  }
 }
 
 export async function fillQueueWithBots(targetSize = MATCH_SIZE) {
@@ -706,14 +791,6 @@ export async function declineMatch(matchId: string, userId: string) {
   })
 
   await cancelMatch(matchId, 'Player declined')
-
-  // Return declining player to queue
-  const player = await db.matchPlayer.findUnique({
-    where: { matchId_userId: { matchId, userId } },
-  })
-  if (player && player.userId) {
-    await joinQueue(userId, 'COMPETITIVE', [])
-  }
 }
 
 async function cancelMatchIfNotFull(matchId: string) {
@@ -722,6 +799,10 @@ async function cancelMatchIfNotFull(matchId: string) {
 
   const parsed = JSON.parse(state)
   if (parsed.acceptedBy.length < parsed.totalPlayers) {
+    await db.matchPlayer.updateMany({
+      where: { matchId, accepted: null, isBot: false },
+      data: { accepted: false },
+    })
     await cancelMatch(matchId, 'Accept timeout')
   }
 }
@@ -744,7 +825,16 @@ async function cancelMatch(matchId: string, reason: string) {
     }
     // Return players who accepted back to queue
     if (p.accepted === true && p.userId) {
-      await joinQueue(p.userId, 'COMPETITIVE', [])
+      try {
+        await joinQueue(p.userId, 'COMPETITIVE')
+      } catch (err) {
+        logger.warn('Failed to requeue accepted player after match cancellation', {
+          err,
+          matchId,
+          userId: p.userId,
+          reason,
+        })
+      }
     }
   }
 }
