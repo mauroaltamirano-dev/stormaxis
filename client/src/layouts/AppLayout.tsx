@@ -68,7 +68,7 @@ type SearchResult = {
   displayLevel?: string;
 };
 
-type PlayerRole = "TANK" | "DPS" | "BRUISER" | "SUPPORT" | "HEALER";
+type PlayerRole = "RANGED" | "HEALER" | "OFFLANE" | "FLEX" | "TANK";
 
 type MatchHistoryEntry = {
   id: string;

@@ -16,8 +16,8 @@ interface AuthUser {
   winrate?: number
   wins: number
   losses: number
-  mainRole?: 'TANK' | 'DPS' | 'BRUISER' | 'SUPPORT' | 'HEALER' | null
-  secondaryRole?: 'TANK' | 'DPS' | 'BRUISER' | 'SUPPORT' | 'HEALER' | null
+  mainRole?: 'RANGED' | 'HEALER' | 'OFFLANE' | 'FLEX' | 'TANK' | null
+  secondaryRole?: 'RANGED' | 'HEALER' | 'OFFLANE' | 'FLEX' | 'TANK' | null
   discordId: string | null
   discordUsername: string | null
   bnetId: string | null

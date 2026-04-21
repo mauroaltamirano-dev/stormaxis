@@ -8,7 +8,7 @@ import { authUserSelect, presentPublicUser, presentUser, publicUserSelect } from
 export const usersRouter = Router()
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/
-const PLAYER_ROLES = ['TANK', 'DPS', 'BRUISER', 'SUPPORT', 'HEALER'] as const
+const PLAYER_ROLES = ['RANGED', 'HEALER', 'OFFLANE', 'FLEX', 'TANK'] as const
 const AccountProviderSchema = z.enum(['discord', 'google', 'bnet'])
 
 const SearchUsersQuerySchema = z.object({
@@ -98,8 +98,9 @@ usersRouter.patch('/me', authenticate, async (req, res, next) => {
       data: {
         ...(body.username !== undefined ? { username: body.username } : {}),
         ...(body.avatar !== undefined ? { avatar: body.avatar } : {}),
-        ...(body.mainRole !== undefined ? { mainRole: body.mainRole } : {}),
-        ...(body.secondaryRole !== undefined ? { secondaryRole: body.secondaryRole } : {}),
+        // Cast until local Prisma Client is regenerated after the role enum migration.
+        ...(body.mainRole !== undefined ? { mainRole: body.mainRole as any } : {}),
+        ...(body.secondaryRole !== undefined ? { secondaryRole: body.secondaryRole as any } : {}),
       },
       select: authUserSelect,
     })

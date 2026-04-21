@@ -15,7 +15,7 @@ import { api } from "../lib/api";
 import { useAuthStore } from "../stores/auth.store";
 import { getRoleMeta } from "../lib/roles";
 
-type PlayerRole = "TANK" | "DPS" | "BRUISER" | "SUPPORT" | "HEALER";
+type PlayerRole = "RANGED" | "HEALER" | "OFFLANE" | "FLEX" | "TANK";
 type LinkedAccountProvider = "discord" | "google" | "bnet";
 
 type LinkedAccount = {
@@ -80,11 +80,11 @@ type ProfileTab = "overview" | "history" | "accounts";
 type MatchFilter = "all" | "wins" | "losses";
 
 const PLAYER_ROLE_OPTIONS: Array<{ value: PlayerRole; label: string }> = [
-  { value: "TANK", label: "Tank" },
-  { value: "DPS", label: "DPS" },
-  { value: "BRUISER", label: "Bruiser" },
-  { value: "SUPPORT", label: "Support" },
+  { value: "RANGED", label: "Ranged" },
   { value: "HEALER", label: "Healer" },
+  { value: "OFFLANE", label: "Offlane" },
+  { value: "FLEX", label: "Flex" },
+  { value: "TANK", label: "Tank" },
 ];
 
 const LEVEL_COLORS: Record<number, string> = {

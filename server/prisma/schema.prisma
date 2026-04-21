@@ -34,11 +34,11 @@ enum GameMode {
 }
 
 enum PlayerRole {
-  TANK
-  DPS
-  BRUISER
-  SUPPORT
+  RANGED
   HEALER
+  OFFLANE
+  FLEX
+  TANK
 }
 
 // ─── Models ───────────────────────────────────────────────
