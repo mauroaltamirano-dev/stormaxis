@@ -100,6 +100,9 @@ export function Dashboard() {
   const [adminFillingBots, setAdminFillingBots] = useState(false);
   const [adminError, setAdminError] = useState<string | null>(null);
   const [avatarLoadError, setAvatarLoadError] = useState(false);
+  const [matchmakingLayout, setMatchmakingLayout] = useState<"split" | "stack">(
+    "split",
+  );
 
   useEffect(() => {
     if (status !== "searching" || !searchStartedAt) return;
@@ -557,7 +560,10 @@ export function Dashboard() {
         <section
           style={{
             display: "grid",
-            gridTemplateColumns: "minmax(0, 1.65fr) minmax(260px, 0.55fr)",
+            gridTemplateColumns:
+              matchmakingLayout === "stack"
+                ? "1fr"
+                : "minmax(0, 1.65fr) minmax(260px, 0.55fr)",
             gap: "1rem",
             alignItems: "stretch",
           }}
@@ -571,10 +577,24 @@ export function Dashboard() {
               gap: "1rem",
             }}
           >
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "1rem", flexWrap: "wrap" }}>
               <PanelTitle eyebrow="Centro de preparación" title="Escuadra previa" />
-              <div style={{ color: "rgba(232,244,255,0.40)", fontSize: "0.8rem", fontWeight: 700 }}>
-                Tu identidad antes de entrar a cola
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", flexWrap: "wrap" }}>
+                <div style={{ color: "rgba(232,244,255,0.40)", fontSize: "0.8rem", fontWeight: 700 }}>
+                  Tu identidad antes de entrar a cola
+                </div>
+                <div style={{ display: "flex", border: "1px solid rgba(232,244,255,0.08)", background: "rgba(2,6,14,0.45)" }}>
+                  <LayoutToggleButton
+                    active={matchmakingLayout === "split"}
+                    label="Dividido"
+                    onClick={() => setMatchmakingLayout("split")}
+                  />
+                  <LayoutToggleButton
+                    active={matchmakingLayout === "stack"}
+                    label="Columna"
+                    onClick={() => setMatchmakingLayout("stack")}
+                  />
+                </div>
               </div>
             </div>
 
@@ -582,13 +602,13 @@ export function Dashboard() {
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(5, minmax(90px, 1fr))",
-                gap: "0.7rem",
+                gap: matchmakingLayout === "stack" ? "0.9rem" : "0.7rem",
               }}
             >
               {SLOT_ORDER.map((idx) => {
                 const isYou = idx === 2;
                 return isYou ? (
-                  <div key="you" style={{ ...slotBaseStyle, borderColor: `${rankColor}66`, background: `linear-gradient(180deg, ${rankColor}12, rgba(2,6,14,0.74))` }}>
+                  <div key="you" style={{ ...slotBaseStyle, minHeight: matchmakingLayout === "stack" ? "290px" : slotBaseStyle.minHeight, borderColor: `${rankColor}66`, background: `linear-gradient(180deg, ${rankColor}12, rgba(2,6,14,0.74))` }}>
                     <div style={{ color: rankColor, fontSize: "0.62rem", letterSpacing: "0.18em", fontWeight: 900, textTransform: "uppercase" }}>Tú</div>
                     <div
                       style={{
@@ -625,7 +645,7 @@ export function Dashboard() {
                     </div>
                   </div>
                 ) : (
-                  <div key={idx} style={slotBaseStyle}>
+                  <div key={idx} style={{ ...slotBaseStyle, minHeight: matchmakingLayout === "stack" ? "290px" : slotBaseStyle.minHeight }}>
                     <div style={{ width: "42px", height: "42px", border: "1px dashed rgba(232,244,255,0.13)", display: "grid", placeItems: "center", color: "rgba(232,244,255,0.22)" }}>
                       <Plus size={18} />
                     </div>
@@ -897,6 +917,38 @@ function RolePill({ role, muted }: { role: string; muted?: boolean }) {
     <span style={{ border: `1px solid ${muted ? "rgba(232,244,255,0.12)" : `${color}66`}`, background: muted ? "rgba(255,255,255,0.03)" : `${color}16`, color: muted ? "rgba(232,244,255,0.42)" : color, padding: "0.28rem 0.45rem", fontFamily: "var(--font-display)", fontSize: "0.62rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
       {labels[role] ?? role}
     </span>
+  );
+}
+
+function LayoutToggleButton({
+  active,
+  label,
+  onClick,
+}: {
+  active: boolean;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      style={{
+        border: "none",
+        borderRight: label === "Dividido" ? "1px solid rgba(232,244,255,0.08)" : "none",
+        background: active ? "rgba(0,200,255,0.14)" : "transparent",
+        color: active ? "#7dd3fc" : "rgba(232,244,255,0.42)",
+        padding: "0.45rem 0.65rem",
+        fontFamily: "var(--font-display)",
+        fontSize: "0.68rem",
+        fontWeight: 900,
+        letterSpacing: "0.12em",
+        textTransform: "uppercase",
+        cursor: "pointer",
+      }}
+    >
+      {label}
+    </button>
   );
 }
 
