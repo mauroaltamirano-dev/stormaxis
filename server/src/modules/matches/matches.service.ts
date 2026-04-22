@@ -3,8 +3,10 @@ import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
 import { getIO } from '../../infrastructure/socket/server'
 import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
+import { scheduleDiscordMatchVoiceCleanup } from './discord-match-voice.service'
 
 const VOTING_TIMEOUT_MS = 2 * 60_000
+const MVP_VOTING_TIMEOUT_MS = 90_000
 const READY_STATE_TTL_SECONDS = 60 * 60
 
 type ReadyState = {
@@ -13,6 +15,12 @@ type ReadyState = {
 }
 
 type VotingState = {
+  expiresAt: number
+  totalPlayers: number
+  scheduledAt: number
+}
+
+type MvpVotingState = {
   expiresAt: number
   totalPlayers: number
   scheduledAt: number
@@ -41,6 +49,11 @@ type VoteCounts = {
   team1Votes: number
   team2Votes: number
   total: number
+}
+
+type MvpVoteCount = {
+  nomineeUserId: string
+  votes: number
 }
 
 export async function markPlayerReady(matchId: string, userId: string) {
@@ -155,27 +168,72 @@ export async function castVote(matchId: string, userId: string, winner: 1 | 2) {
           : null
 
   if (winnerTeam) {
-    await finalizeMatch(matchId, winnerTeam, 'votes')
+    await openMvpVoting(matchId, winnerTeam, totalPlayers, 'votes')
   }
 }
 
 export async function getRealtimeMatchMeta(matchId: string) {
-  const [readyRaw, votingRaw, vetoRaw, cancelRaw, finishRaw, voteCounts] = await Promise.all([
+  const [readyRaw, votingRaw, mvpVotingRaw, vetoRaw, cancelRaw, finishRaw, voteCounts, mvpVoteCounts] = await Promise.all([
     redis.get(REDIS_KEYS.matchReadyState(matchId)),
     redis.get(REDIS_KEYS.matchVotingState(matchId)),
+    redis.get(REDIS_KEYS.matchMvpVotingState(matchId)),
     redis.get(REDIS_KEYS.matchVetoState(matchId)),
     redis.get(REDIS_KEYS.matchCancelState(matchId)),
     redis.get(REDIS_KEYS.matchFinishState(matchId)),
     getVoteCounts(matchId),
+    getMvpVoteCounts(matchId),
   ])
 
   return {
     ready: readyRaw ? (JSON.parse(readyRaw) as ReadyState) : null,
     voting: votingRaw ? (JSON.parse(votingRaw) as VotingState) : null,
+    mvpVoting: mvpVotingRaw ? (JSON.parse(mvpVotingRaw) as MvpVotingState) : null,
     veto: vetoRaw ? (JSON.parse(vetoRaw) as VetoState) : null,
     cancel: cancelRaw ? (JSON.parse(cancelRaw) as CancelState) : null,
     finish: finishRaw ? (JSON.parse(finishRaw) as FinishState) : null,
     voteCounts,
+    mvpVoteCounts,
+  }
+}
+
+export async function castMvpVote(matchId: string, userId: string, nomineeUserId: string) {
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    include: { players: true },
+  })
+  if (!match) throw Errors.NOT_FOUND('Match')
+  if (match.status !== 'VOTING' || !match.winner) throw Errors.CONFLICT('MVP voting is not open')
+
+  const rawMvpVoting = await redis.get(REDIS_KEYS.matchMvpVotingState(matchId))
+  if (!rawMvpVoting) throw Errors.CONFLICT('MVP voting is not open')
+
+  const voter = match.players.find((entry) => entry.userId === userId)
+  if (!voter || voter.isBot) throw Errors.FORBIDDEN()
+  if (nomineeUserId === userId) throw Errors.CONFLICT('No podés votarte como MVP')
+
+  const nominee = match.players.find((entry) => entry.userId === nomineeUserId)
+  if (!nominee || nominee.isBot) throw Errors.CONFLICT('MVP nominee is not part of this match')
+
+  const totalPlayers = match.players.filter((entry) => !entry.isBot && entry.userId).length
+
+  await db.$executeRaw`
+    INSERT INTO "MvpVote" ("id", "matchId", "userId", "nomineeUserId", "createdAt")
+    VALUES (${`mvp_${matchId}_${userId}_${Date.now()}`}, ${matchId}, ${userId}, ${nomineeUserId}, NOW())
+    ON CONFLICT ("matchId", "userId")
+    DO UPDATE SET "nomineeUserId" = EXCLUDED."nomineeUserId"
+  `
+
+  const mvpVoteCounts = await getMvpVoteCounts(matchId)
+  const io = getIO()
+  io.to(`match:${matchId}`).emit('mvp:update', {
+    counts: mvpVoteCounts,
+    total: mvpVoteCounts.reduce((sum, entry) => sum + entry.votes, 0),
+  })
+
+  const majority = Math.floor(totalPlayers / 2) + 1
+  const majorityWinner = mvpVoteCounts.find((entry) => entry.votes >= majority)
+  if (majorityWinner) {
+    await finalizeMatchWithMvp(matchId, majorityWinner.nomineeUserId, 'votes')
   }
 }
 
@@ -217,6 +275,7 @@ export async function requestMatchCancellation(matchId: string, userId: string) 
     await Promise.all([
       redis.del(REDIS_KEYS.matchReadyState(matchId)),
       redis.del(REDIS_KEYS.matchVotingState(matchId)),
+      redis.del(REDIS_KEYS.matchMvpVotingState(matchId)),
       redis.del(REDIS_KEYS.matchVetoState(matchId)),
       redis.del(REDIS_KEYS.matchCancelState(matchId)),
       redis.del(REDIS_KEYS.matchFinishState(matchId)),
@@ -226,6 +285,7 @@ export async function requestMatchCancellation(matchId: string, userId: string) 
       reason: 'captains_cancelled',
       requestedBy: state.requestedBy,
     })
+    void scheduleDiscordMatchVoiceCleanup(matchId, 'match_cancelled')
   }
 }
 
@@ -279,8 +339,128 @@ function scheduleVotingTimeout(matchId: string, scheduledAt: number) {
 
     const voteCounts = await getVoteCounts(matchId)
     const winnerTeam = await resolveWinnerOnTimeout(match.players, voteCounts)
-    await finalizeMatch(matchId, winnerTeam, 'timeout')
+    const humanPlayers = match.players.filter((entry) => !entry.isBot && entry.userId)
+    await openMvpVoting(matchId, winnerTeam, humanPlayers.length, 'timeout')
   }, VOTING_TIMEOUT_MS + 500)
+}
+
+async function openMvpVoting(
+  matchId: string,
+  winnerTeam: 1 | 2,
+  totalPlayers: number,
+  resolution: 'votes' | 'timeout',
+) {
+  const current = await db.match.findUnique({
+    where: { id: matchId },
+    select: { status: true, winner: true },
+  })
+  if (!current) throw Errors.NOT_FOUND('Match')
+  if (current.status === 'COMPLETED') return
+  if (current.status !== 'VOTING') throw Errors.CONFLICT('Winner voting is not open')
+
+  const existingMvpVoting = await redis.get(REDIS_KEYS.matchMvpVotingState(matchId))
+  if (existingMvpVoting) return
+
+  await db.match.update({
+    where: { id: matchId },
+    data: { winner: winnerTeam },
+  })
+
+  const mvpVotingState: MvpVotingState = {
+    expiresAt: Date.now() + MVP_VOTING_TIMEOUT_MS,
+    totalPlayers,
+    scheduledAt: Date.now(),
+  }
+
+  await redis.setex(
+    REDIS_KEYS.matchMvpVotingState(matchId),
+    Math.ceil(MVP_VOTING_TIMEOUT_MS / 1000) + 30,
+    JSON.stringify(mvpVotingState),
+  )
+
+  const io = getIO()
+  const voteCounts = await getVoteCounts(matchId)
+  io.to(`match:${matchId}`).emit('vote:result', {
+    winner: winnerTeam,
+    resolution,
+    ...voteCounts,
+  })
+  io.to(`match:${matchId}`).emit('mvp:start', {
+    winner: winnerTeam,
+    expiresAt: mvpVotingState.expiresAt,
+    totalPlayers,
+    counts: await getMvpVoteCounts(matchId),
+  })
+
+  scheduleMvpVotingTimeout(matchId, mvpVotingState.scheduledAt)
+}
+
+function scheduleMvpVotingTimeout(matchId: string, scheduledAt: number) {
+  setTimeout(async () => {
+    const mvpVotingRaw = await redis.get(REDIS_KEYS.matchMvpVotingState(matchId))
+    if (!mvpVotingRaw) return
+
+    const mvpVotingState = JSON.parse(mvpVotingRaw) as MvpVotingState
+    if (mvpVotingState.scheduledAt !== scheduledAt) return
+
+    const match = await db.match.findUnique({
+      where: { id: matchId },
+      include: { players: true },
+    })
+    if (!match || match.status !== 'VOTING' || !match.winner) return
+
+    const mvpUserId = await resolveMvpOnTimeout(matchId, match.players, match.winner as 1 | 2)
+    await finalizeMatchWithMvp(matchId, mvpUserId, 'timeout')
+  }, MVP_VOTING_TIMEOUT_MS + 500)
+}
+
+async function resolveMvpOnTimeout(
+  matchId: string,
+  players: Array<{ userId: string | null; team: number; mmrBefore: number; isBot: boolean; isCaptain: boolean }>,
+  winnerTeam: 1 | 2,
+): Promise<string> {
+  const counts = await getMvpVoteCounts(matchId)
+  if (counts.length > 0) {
+    const sorted = [...counts].sort((a, b) => b.votes - a.votes)
+    const topVotes = sorted[0].votes
+    const tied = sorted.filter((entry) => entry.votes === topVotes)
+    if (tied.length === 1) return tied[0].nomineeUserId
+
+    const tiedPlayer = tied
+      .map((entry) => players.find((player) => player.userId === entry.nomineeUserId))
+      .filter((player): player is NonNullable<typeof player> => Boolean(player))
+      .sort((a, b) => {
+        if (a.team !== b.team) return a.team === winnerTeam ? -1 : 1
+        if (a.isCaptain !== b.isCaptain) return a.isCaptain ? -1 : 1
+        return b.mmrBefore - a.mmrBefore
+      })[0]
+    if (tiedPlayer?.userId) return tiedPlayer.userId
+  }
+
+  const fallback = players
+    .filter((player) => !player.isBot && player.userId)
+    .sort((a, b) => {
+      if (a.team !== b.team) return a.team === winnerTeam ? -1 : 1
+      if (a.isCaptain !== b.isCaptain) return a.isCaptain ? -1 : 1
+      return b.mmrBefore - a.mmrBefore
+    })[0]
+
+  if (!fallback?.userId) throw Errors.CONFLICT('No MVP candidates available')
+  return fallback.userId
+}
+
+async function finalizeMatchWithMvp(
+  matchId: string,
+  mvpUserId: string,
+  resolution: 'votes' | 'timeout',
+) {
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    select: { winner: true },
+  })
+  if (!match?.winner) throw Errors.CONFLICT('Winner must be resolved before MVP')
+
+  await finalizeMatch(matchId, match.winner as 1 | 2, resolution, mvpUserId)
 }
 
 async function resolveWinnerOnTimeout(
@@ -303,7 +483,12 @@ async function resolveWinnerOnTimeout(
   return team1Avg > team2Avg ? 1 : 2
 }
 
-async function finalizeMatch(matchId: string, winnerTeam: 1 | 2, resolution: 'votes' | 'timeout') {
+async function finalizeMatch(
+  matchId: string,
+  winnerTeam: 1 | 2,
+  resolution: 'votes' | 'timeout',
+  mvpUserId?: string,
+) {
   const match = await db.match.findUnique({
     where: { id: matchId },
     include: { players: true },
@@ -364,11 +549,18 @@ async function finalizeMatch(matchId: string, winnerTeam: 1 | 2, resolution: 'vo
     },
   })
 
+  if (mvpUserId) {
+    await db.$executeRaw`
+      UPDATE "Match" SET "mvpUserId" = ${mvpUserId} WHERE "id" = ${matchId}
+    `
+  }
+
   await Promise.all([
     redis.del(REDIS_KEYS.matchReadyState(matchId)),
-    redis.del(REDIS_KEYS.matchVotingState(matchId)),
-    redis.del(REDIS_KEYS.matchCancelState(matchId)),
-    redis.del(REDIS_KEYS.matchFinishState(matchId)),
+      redis.del(REDIS_KEYS.matchVotingState(matchId)),
+      redis.del(REDIS_KEYS.matchMvpVotingState(matchId)),
+      redis.del(REDIS_KEYS.matchCancelState(matchId)),
+      redis.del(REDIS_KEYS.matchFinishState(matchId)),
   ])
 
   const io = getIO()
@@ -382,10 +574,12 @@ async function finalizeMatch(matchId: string, winnerTeam: 1 | 2, resolution: 'vo
   })
   io.to(`match:${matchId}`).emit('match:complete', {
     winner: winnerTeam,
+    mvpUserId: mvpUserId ?? null,
     resolution,
     duration: durationSeconds,
     eloDeltas,
   })
+  void scheduleDiscordMatchVoiceCleanup(matchId, 'match_completed')
 
   for (const player of humanPlayers) {
     const delta = eloDeltas[player.userId as string]
@@ -416,6 +610,21 @@ async function getVoteCounts(matchId: string): Promise<VoteCounts> {
     team2Votes,
     total: team1Votes + team2Votes,
   }
+}
+
+async function getMvpVoteCounts(matchId: string): Promise<MvpVoteCount[]> {
+  const votes = await db.$queryRaw<Array<{ nomineeUserId: string; votes: bigint }>>`
+    SELECT "nomineeUserId", COUNT(*)::bigint AS votes
+    FROM "MvpVote"
+    WHERE "matchId" = ${matchId}
+    GROUP BY "nomineeUserId"
+    ORDER BY votes DESC
+  `
+
+  return votes.map((vote) => ({
+    nomineeUserId: vote.nomineeUserId,
+    votes: Number(vote.votes),
+  }))
 }
 
 function getKFactor(mmr: number): number {

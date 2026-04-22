@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "@tanstack/react-router";
+import { useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Clock3,
   Crosshair,
@@ -15,6 +15,8 @@ import { api } from "../lib/api";
 import { RankBadge } from "../components/RankBadge";
 import { useAuthStore } from "../stores/auth.store";
 import { getRoleMeta } from "../lib/roles";
+import { getRankMeta } from "../lib/ranks";
+import { MAP_ID_BY_NAME } from "@nexusgg/shared";
 
 type PlayerRole = "RANGED" | "HEALER" | "OFFLANE" | "FLEX" | "TANK";
 type LinkedAccountProvider = "discord" | "google" | "bnet";
@@ -110,19 +112,15 @@ const cardStyle: CSSProperties = {
   padding: "18px",
 };
 
-function parseRouteUsername() {
-  const pathname = window.location.pathname;
+const neonPanelStyle: CSSProperties = {
+  border: "1px solid rgba(0,174,255,0.25)",
+  boxShadow:
+    "inset 0 0 0 1px rgba(0,174,255,0.08), 0 0 24px rgba(0,100,255,0.12)",
+};
+
+function parseRouteUsername(pathname: string) {
   if (!pathname.startsWith("/profile/")) return null;
   return decodeURIComponent(pathname.replace("/profile/", "").trim());
-}
-
-function formatJoinDate(value?: string) {
-  if (!value) return "Fecha desconocida";
-  return new Date(value).toLocaleDateString("es-AR", {
-    day: "2-digit",
-    month: "long",
-    year: "numeric",
-  });
 }
 
 function formatShortDate(value: string) {
@@ -130,6 +128,23 @@ function formatShortDate(value: string) {
     day: "2-digit",
     month: "2-digit",
   });
+}
+
+function formatMatchRelativeTime(value: string) {
+  const diffMs = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(1, Math.floor(diffMs / 60_000));
+  if (minutes < 60) return `${minutes} min atrás`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h atrás`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} d atrás`;
+  return formatShortDate(value);
+}
+
+function getMatchMapImage(selectedMap: string | null) {
+  if (!selectedMap) return null;
+  const mapId = MAP_ID_BY_NAME[selectedMap];
+  return mapId ? `/maps/${mapId}.webp` : null;
 }
 
 function getProviderLabel(provider: LinkedAccountProvider) {
@@ -155,7 +170,10 @@ function getProviderAccent(provider: LinkedAccountProvider) {
 }
 
 function getRoleLabel(role?: PlayerRole | null) {
-  return PLAYER_ROLE_OPTIONS.find((entry) => entry.value === role)?.label ?? "No definido";
+  return (
+    PLAYER_ROLE_OPTIONS.find((entry) => entry.value === role)?.label ??
+    "No definido"
+  );
 }
 
 function initialFromUser(user: ProfileUser | null) {
@@ -170,7 +188,10 @@ function initialFromUser(user: ProfileUser | null) {
 export function Profile() {
   const navigate = useNavigate();
   const { user, updateUser } = useAuthStore();
-  const routeUsername = parseRouteUsername();
+  const pathname = useRouterState({
+    select: (state) => state.location.pathname,
+  });
+  const routeUsername = parseRouteUsername(pathname);
   const isOwnProfile = !routeUsername || routeUsername === user?.username;
 
   const [profile, setProfile] = useState<ProfileUser | null>(null);
@@ -195,13 +216,16 @@ export function Profile() {
   const [searchLoading, setSearchLoading] = useState(false);
 
   const level = profile?.level ?? 1;
+  const rankMeta = getRankMeta(level);
   const levelColor = LEVEL_COLORS[level] || "var(--nexus-accent)";
   const levelProgressPct = Math.max(
     0,
     Math.min(100, profile?.levelProgressPct ?? 0),
   );
   const pointsToNextLevel =
-    profile?.nextLevelAt == null ? null : Math.max(0, profile.nextLevelAt - profile.mmr);
+    profile?.nextLevelAt == null
+      ? null
+      : Math.max(0, profile.nextLevelAt - profile.mmr);
   const totalMatches = useMemo(
     () => (profile ? profile.wins + profile.losses : 0),
     [profile],
@@ -231,6 +255,37 @@ export function Profile() {
   }, [activeTab, isOwnProfile]);
 
   useEffect(() => {
+    if (!user || !profile || profile.id !== user.id) return;
+
+    setProfile((current) =>
+      current && current.id === user.id
+        ? {
+            ...current,
+            username: user.username,
+            avatar: user.avatar,
+            mmr: user.mmr,
+            rank: user.rank,
+            wins: user.wins,
+            losses: user.losses,
+            mainRole: user.mainRole,
+            secondaryRole: user.secondaryRole,
+            discordId: user.discordId,
+            discordUsername: user.discordUsername,
+            bnetId: user.bnetId,
+            bnetBattletag: user.bnetBattletag,
+            googleId: user.googleId,
+            level: user.level,
+            levelProgressPct: user.levelProgressPct,
+            nextLevelAt: user.nextLevelAt,
+            displayLevel: user.displayLevel,
+            winrate: user.winrate,
+            linkedAccounts: user.linkedAccounts,
+          }
+        : current,
+    );
+  }, [profile?.id, user]);
+
+  useEffect(() => {
     setHistoryPage(1);
   }, [matchFilter, routeUsername]);
 
@@ -251,10 +306,8 @@ export function Profile() {
           `/users/${routeUsername ?? user?.username}/matches`,
         );
 
-        const [{ data: profileData }, { data: matchesData }] = await Promise.all([
-          profilePromise,
-          matchesPromise,
-        ]);
+        const [{ data: profileData }, { data: matchesData }] =
+          await Promise.all([profilePromise, matchesPromise]);
 
         if (cancelled) return;
         setProfile(profileData);
@@ -327,6 +380,10 @@ export function Profile() {
       updateUser({
         username: data.username,
         avatar: data.avatar,
+        mmr: data.mmr,
+        rank: data.rank,
+        wins: data.wins,
+        losses: data.losses,
         mainRole: data.mainRole,
         secondaryRole: data.secondaryRole,
         displayLevel: data.displayLevel,
@@ -379,7 +436,9 @@ export function Profile() {
     setAccountMessage(null);
 
     try {
-      const { data } = await api.delete<ProfileUser>(`/users/me/accounts/${provider}`);
+      const { data } = await api.delete<ProfileUser>(
+        `/users/me/accounts/${provider}`,
+      );
       setProfile(data);
       updateUser({
         discordId: data.discordId ?? null,
@@ -389,7 +448,9 @@ export function Profile() {
         googleId: data.googleId ?? null,
         linkedAccounts: data.linkedAccounts,
       });
-      setAccountMessage(`${getProviderLabel(provider)} desvinculado correctamente.`);
+      setAccountMessage(
+        `${getProviderLabel(provider)} desvinculado correctamente.`,
+      );
     } catch (err: any) {
       setAccountMessage(
         err.response?.data?.error?.message ??
@@ -425,7 +486,8 @@ export function Profile() {
           Perfil no disponible
         </div>
         <div style={{ color: "var(--nexus-muted)", maxWidth: "60ch" }}>
-          {error ?? "No encontré ese perfil. Puede que el username haya cambiado."}
+          {error ??
+            "No encontré ese perfil. Puede que el username haya cambiado."}
         </div>
       </section>
     );
@@ -436,6 +498,7 @@ export function Profile() {
       <section
         style={{
           ...cardStyle,
+          ...neonPanelStyle,
           display: "grid",
           gap: "18px",
           background:
@@ -454,7 +517,7 @@ export function Profile() {
               <AvatarBlock
                 avatar={profile.avatar}
                 username={profile.username}
-                size={86}
+                size={200}
               />
 
               <div style={{ minWidth: 0 }}>
@@ -469,7 +532,9 @@ export function Profile() {
                     marginBottom: "6px",
                   }}
                 >
-                  {isOwnProfile ? "Tu perfil competitivo" : "Scouting de perfil"}
+                  {isOwnProfile
+                    ? "Tu perfil competitivo"
+                    : "Scouting de perfil"}
                 </div>
 
                 <div
@@ -492,28 +557,58 @@ export function Profile() {
                   >
                     {profile.username}
                   </h1>
-
-                  <RankBadge
-                    level={level}
-                    mmr={profile.mmr}
-                    size="md"
-                    glow="medium"
-                  />
                 </div>
 
                 <div
                   style={{
-                    marginTop: "8px",
-                    color: "var(--nexus-muted)",
+                    marginTop: "10px",
                     display: "flex",
-                    flexWrap: "wrap",
+                    alignItems: "center",
                     gap: "12px",
-                    fontSize: "13px",
                   }}
                 >
-                  <span>MMR {profile.mmr}</span>
-                  <span>Winrate {profile.winrate ?? 0}%</span>
-                  <span>Desde {formatJoinDate(profile.createdAt)}</span>
+                  <RankBadge
+                    level={level}
+                    mmr={profile.mmr}
+                    size="lg"
+                    showLabel={false}
+                    showMmr={false}
+                    glow="strong"
+                  />
+                  <div
+                    style={{
+                      height: "84px",
+                      display: "grid",
+                      alignContent: "center",
+                      gap: "6px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: rankMeta.color,
+                        fontFamily: "var(--font-display)",
+                        fontSize: "18px",
+                        fontWeight: 900,
+                        lineHeight: 1.05,
+                        letterSpacing: "1px",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      {rankMeta.label}
+                    </div>
+                    <div
+                      style={{
+                        color: "var(--nexus-text)",
+                        fontFamily: "var(--font-display)",
+                        fontSize: "22px",
+                        fontWeight: 900,
+                        lineHeight: 1.05,
+                        letterSpacing: "1px",
+                      }}
+                    >
+                      {profile.mmr.toLocaleString("es-AR")} MMR
+                    </div>
+                  </div>
                 </div>
               </div>
             </div>
@@ -528,7 +623,7 @@ export function Profile() {
               <MetricCard
                 label="MMR actual"
                 value={String(profile.mmr)}
-                accent="var(--nexus-accent)"
+                accent="#00c8ff"
                 icon={<Crosshair size={16} />}
               />
               <MetricCard
@@ -554,8 +649,10 @@ export function Profile() {
 
           <div
             style={{
-              border: "1px solid rgba(255,255,255,0.08)",
-              background: "rgba(7,12,22,0.65)",
+              border: "1px solid rgba(255,255,255,0.07)",
+              borderLeft: "1px solid rgba(0,174,255,0.18)",
+              background:
+                "linear-gradient(145deg, rgba(7,12,22,0.92), rgba(4,10,20,0.78) 60%, rgba(0,0,0,0.2))",
               padding: "16px",
               display: "grid",
               gap: "12px",
@@ -592,7 +689,9 @@ export function Profile() {
             >
               <span>Progreso al próximo rango</span>
               <strong style={{ color: levelColor }}>
-                {pointsToNextLevel == null ? "Rango máximo" : `+${pointsToNextLevel}`}
+                {pointsToNextLevel == null
+                  ? "Rango máximo"
+                  : `+${pointsToNextLevel}`}
               </strong>
             </div>
 
@@ -611,7 +710,8 @@ export function Profile() {
                   inset: "0 auto 0 0",
                   width: `${levelProgressPct}%`,
                   height: "100%",
-                  background: `linear-gradient(90deg, ${levelColor}, #00c8ff)`,
+                  background:
+                    "linear-gradient(90deg, #f97316 0%, #facc15 33%, #22d3ee 66%, #00c8ff 100%)",
                 }}
               />
               <div
@@ -725,7 +825,10 @@ export function Profile() {
                         Ajustes de perfil
                       </div>
                       <div
-                        style={{ color: "var(--nexus-muted)", fontSize: "13px" }}
+                        style={{
+                          color: "var(--nexus-muted)",
+                          fontSize: "13px",
+                        }}
                       >
                         Identidad clara, roles bien definidos y cero invento.
                       </div>
@@ -786,9 +889,7 @@ export function Profile() {
                     />
                   </div>
 
-                  {saveMessage ? (
-                    <MessageBanner text={saveMessage} />
-                  ) : null}
+                  {saveMessage ? <MessageBanner text={saveMessage} /> : null}
                 </section>
               ) : (
                 <section style={{ ...cardStyle, display: "grid", gap: "12px" }}>
@@ -804,8 +905,11 @@ export function Profile() {
                   >
                     Snapshot del jugador
                   </div>
-                  <div style={{ color: "var(--nexus-muted)", fontSize: "13px" }}>
-                    Acá ves la lectura rápida del perfil: nivel, roles, MMR y rendimiento.
+                  <div
+                    style={{ color: "var(--nexus-muted)", fontSize: "13px" }}
+                  >
+                    Acá ves la lectura rápida del perfil: nivel, roles, MMR y
+                    rendimiento.
                   </div>
                   <div
                     style={{
@@ -814,13 +918,19 @@ export function Profile() {
                       gap: "12px",
                     }}
                   >
-                    <ScoutCard label="Main role" value={getRoleLabel(profile.mainRole)} />
+                    <ScoutCard
+                      label="Main role"
+                      value={getRoleLabel(profile.mainRole)}
+                    />
                     <ScoutCard
                       label="Secundario"
                       value={getRoleLabel(profile.secondaryRole)}
                     />
                     <ScoutCard label="MMR" value={`${profile.mmr}`} />
-                    <ScoutCard label="Winrate" value={`${profile.winrate ?? 0}%`} />
+                    <ScoutCard
+                      label="Winrate"
+                      value={`${profile.winrate ?? 0}%`}
+                    />
                   </div>
                 </section>
               )}
@@ -839,7 +949,9 @@ export function Profile() {
                   >
                     Lectura rápida del perfil
                   </div>
-                  <div style={{ color: "var(--nexus-muted)", fontSize: "13px" }}>
+                  <div
+                    style={{ color: "var(--nexus-muted)", fontSize: "13px" }}
+                  >
                     Un resumen útil de verdad, no una bio vacía.
                   </div>
                 </div>
@@ -851,18 +963,18 @@ export function Profile() {
                     gap: "12px",
                   }}
                 >
-                    <ScoutCard
-                      label="Main"
-                      value={getRoleLabel(profile.mainRole)}
-                      icon={<Swords size={16} />}
-                      role={profile.mainRole}
-                    />
-                    <ScoutCard
-                      label="Secundario"
-                      value={getRoleLabel(profile.secondaryRole)}
-                      icon={<Users size={16} />}
-                      role={profile.secondaryRole}
-                    />
+                  <ScoutCard
+                    label="Main"
+                    value={getRoleLabel(profile.mainRole)}
+                    icon={<Swords size={16} />}
+                    role={profile.mainRole}
+                  />
+                  <ScoutCard
+                    label="Secundario"
+                    value={getRoleLabel(profile.secondaryRole)}
+                    icon={<Users size={16} />}
+                    role={profile.secondaryRole}
+                  />
                   <ScoutCard
                     label="Total partidas"
                     value={String(totalMatches)}
@@ -897,7 +1009,9 @@ export function Profile() {
                   >
                     Historial reciente
                   </div>
-                  <div style={{ color: "var(--nexus-muted)", fontSize: "13px" }}>
+                  <div
+                    style={{ color: "var(--nexus-muted)", fontSize: "13px" }}
+                  >
                     Las últimas partidas dicen MÁS que cualquier verso.
                   </div>
                 </div>
@@ -928,40 +1042,78 @@ export function Profile() {
                   {visibleMatches.map((entry) => {
                     const won = entry.match.winner === entry.team;
                     const delta = entry.mmrDelta ?? 0;
+                    const resultColor = won ? "#00e676" : "#ff4757";
+                    const mapImage = getMatchMapImage(entry.match.selectedMap);
 
                     return (
                       <div
                         key={entry.id}
                         style={{
                           display: "grid",
-                          gridTemplateColumns: "48px minmax(0, 1fr) auto",
+                          gridTemplateColumns: "78px minmax(0, 1fr) auto",
                           gap: "12px",
                           alignItems: "center",
-                          padding: "12px 14px",
-                          border: "1px solid rgba(255,255,255,0.06)",
-                          background: "rgba(255,255,255,0.02)",
+                          minHeight: "68px",
+                          padding: "8px 14px 8px 8px",
+                          border: "1px solid rgba(69,87,116,0.35)",
+                          background:
+                            "linear-gradient(180deg, rgba(7,14,27,0.92), rgba(3,8,18,0.94))",
+                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035)",
                         }}
                       >
                         <div
                           style={{
-                            width: "48px",
-                            height: "48px",
-                            display: "grid",
-                            placeItems: "center",
-                            border: `1px solid ${won ? "rgba(0,230,118,0.45)" : "rgba(255,71,87,0.45)"}`,
-                            color: won ? "#00e676" : "#ff4757",
-                            fontFamily: "var(--font-display)",
-                            fontWeight: 900,
-                            letterSpacing: "1px",
+                            position: "relative",
+                            width: "74px",
+                            height: "52px",
+                            overflow: "hidden",
+                            border: "1px solid rgba(232,244,255,0.08)",
+                            background: "rgba(2,6,14,0.65)",
                           }}
                         >
-                          {won ? "W" : "L"}
+                          {mapImage ? (
+                            <img
+                              src={mapImage}
+                              alt=""
+                              loading="lazy"
+                              decoding="async"
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                objectFit: "cover",
+                                display: "block",
+                              }}
+                            />
+                          ) : (
+                            <div
+                              style={{
+                                width: "100%",
+                                height: "100%",
+                                display: "grid",
+                                placeItems: "center",
+                                color: "rgba(232,244,255,0.45)",
+                                fontFamily: "var(--font-display)",
+                                fontWeight: 900,
+                              }}
+                            >
+                              {entry.match.selectedMap?.slice(0, 2).toUpperCase() ?? "?"}
+                            </div>
+                          )}
+                          <div
+                            style={{
+                              position: "absolute",
+                              inset: 0,
+                              background:
+                                "linear-gradient(135deg, rgba(255,255,255,0.08), transparent 44%, rgba(0,0,0,0.42))",
+                              boxShadow: `inset 0 0 0 1px ${resultColor}26`,
+                            }}
+                          />
                         </div>
 
                         <div style={{ minWidth: 0 }}>
                           <div
                             style={{
-                              fontWeight: 700,
+                              fontWeight: 800,
                               color: "var(--nexus-text)",
                               fontSize: "14px",
                               whiteSpace: "nowrap",
@@ -974,16 +1126,20 @@ export function Profile() {
                           <div
                             style={{
                               marginTop: "4px",
-                              color: "var(--nexus-muted)",
-                              fontSize: "12px",
+                              color: resultColor,
+                              fontSize: "11px",
                               display: "flex",
                               gap: "10px",
                               flexWrap: "wrap",
+                              textTransform: "uppercase",
+                              letterSpacing: "0.9px",
+                              fontWeight: 900,
                             }}
                           >
-                            <span>{formatShortDate(entry.match.createdAt)}</span>
                             <span>{won ? "Victoria" : "Derrota"}</span>
-                            <span>{entry.match.status}</span>
+                            <span>
+                              {formatMatchRelativeTime(entry.match.createdAt)}
+                            </span>
                           </div>
                         </div>
 
@@ -993,11 +1149,13 @@ export function Profile() {
                             fontSize: "15px",
                             fontWeight: 900,
                             color: delta >= 0 ? "#00e676" : "#ff4757",
+                            whiteSpace: "nowrap",
+                            letterSpacing: "0.7px",
                           }}
                         >
                           {entry.mmrDelta == null
                             ? "—"
-                            : `${delta > 0 ? "+" : ""}${delta}`}
+                            : `${delta > 0 ? "+" : ""}${delta} ELO`}
                         </div>
                       </div>
                     );
@@ -1015,13 +1173,17 @@ export function Profile() {
                     flexWrap: "wrap",
                   }}
                 >
-                  <div style={{ color: "var(--nexus-muted)", fontSize: "12px" }}>
+                  <div
+                    style={{ color: "var(--nexus-muted)", fontSize: "12px" }}
+                  >
                     Página {historyPage} de {totalHistoryPages}
                   </div>
                   <div style={{ display: "flex", gap: "8px" }}>
                     <button
                       disabled={historyPage === 1}
-                      onClick={() => setHistoryPage((current) => Math.max(1, current - 1))}
+                      onClick={() =>
+                        setHistoryPage((current) => Math.max(1, current - 1))
+                      }
                       style={secondaryButtonStyle(historyPage === 1)}
                     >
                       Anterior
@@ -1033,7 +1195,9 @@ export function Profile() {
                           Math.min(totalHistoryPages, current + 1),
                         )
                       }
-                      style={secondaryButtonStyle(historyPage === totalHistoryPages)}
+                      style={secondaryButtonStyle(
+                        historyPage === totalHistoryPages,
+                      )}
                     >
                       Siguiente
                     </button>
@@ -1059,7 +1223,9 @@ export function Profile() {
                   Cuentas vinculadas
                 </div>
                 <div style={{ color: "var(--nexus-muted)", fontSize: "13px" }}>
-                  Hoy el flujo REAL de vinculación existe para Discord. Google y Battle.net están preparados visualmente, pero no tienen OAuth funcional todavía.
+                  Hoy el flujo REAL de vinculación existe para Discord. Google y
+                  Battle.net están preparados visualmente, pero no tienen OAuth
+                  funcional todavía.
                 </div>
               </div>
 
@@ -1068,8 +1234,9 @@ export function Profile() {
               <AccountCard
                 provider="discord"
                 account={
-                  profile.linkedAccounts?.find((entry) => entry.provider === "discord") ??
-                  null
+                  profile.linkedAccounts?.find(
+                    (entry) => entry.provider === "discord",
+                  ) ?? null
                 }
                 busy={accountBusyProvider === "discord"}
                 status="ready"
@@ -1080,8 +1247,9 @@ export function Profile() {
               <AccountCard
                 provider="google"
                 account={
-                  profile.linkedAccounts?.find((entry) => entry.provider === "google") ??
-                  null
+                  profile.linkedAccounts?.find(
+                    (entry) => entry.provider === "google",
+                  ) ?? null
                 }
                 busy={false}
                 status="coming-soon"
@@ -1090,8 +1258,9 @@ export function Profile() {
               <AccountCard
                 provider="bnet"
                 account={
-                  profile.linkedAccounts?.find((entry) => entry.provider === "bnet") ??
-                  null
+                  profile.linkedAccounts?.find(
+                    (entry) => entry.provider === "bnet",
+                  ) ?? null
                 }
                 busy={false}
                 status="coming-soon"
@@ -1120,8 +1289,8 @@ export function Profile() {
                 display: "flex",
                 alignItems: "center",
                 gap: "10px",
-                border: "1px solid rgba(255,255,255,0.08)",
-                background: "rgba(255,255,255,0.02)",
+                border: "1px solid rgba(255,255,255,0.12)",
+                background: "rgba(0,0,0,0.2)",
                 padding: "10px 12px",
               }}
             >
@@ -1172,7 +1341,13 @@ export function Profile() {
                         gap: "12px",
                       }}
                     >
-                      <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <div
+                        style={{
+                          display: "flex",
+                          alignItems: "center",
+                          gap: "10px",
+                        }}
+                      >
                         <AvatarBlock
                           avatar={result.avatar}
                           username={result.username}
@@ -1188,7 +1363,12 @@ export function Profile() {
                           >
                             {result.username}
                           </div>
-                          <div style={{ color: "var(--nexus-muted)", fontSize: "12px" }}>
+                          <div
+                            style={{
+                              color: "var(--nexus-muted)",
+                              fontSize: "12px",
+                            }}
+                          >
                             {result.displayLevel ?? "Lvl 1"} · {result.mmr} MMR
                           </div>
                         </div>
@@ -1216,10 +1396,13 @@ export function Profile() {
                         flexWrap: "wrap",
                       }}
                     >
-                      <span>{result.wins}W · {result.losses}L</span>
+                      <span>
+                        {result.wins}W · {result.losses}L
+                      </span>
                       <span>Winrate {result.winrate ?? 0}%</span>
                       <span>
-                        {getRoleLabel(result.mainRole)} / {getRoleLabel(result.secondaryRole)}
+                        {getRoleLabel(result.mainRole)} /{" "}
+                        {getRoleLabel(result.secondaryRole)}
                       </span>
                     </div>
                   </button>
@@ -1227,7 +1410,6 @@ export function Profile() {
               </div>
             )}
           </section>
-
         </div>
       </div>
     </div>
@@ -1295,8 +1477,9 @@ function MetricCard({
   return (
     <div
       style={{
-        border: "1px solid rgba(255,255,255,0.07)",
-        background: "rgba(7,12,22,0.58)",
+        border: `1px solid ${accent}66`,
+        boxShadow: `inset 0 0 0 1px ${accent}1f`,
+        background: `linear-gradient(155deg, ${accent}12, rgba(7,12,22,0.75) 58%, rgba(7,12,22,0.92))`,
         padding: "14px",
         display: "grid",
         gap: "10px",
@@ -1316,6 +1499,9 @@ function MetricCard({
             fontWeight: 800,
             letterSpacing: "1px",
             textTransform: "uppercase",
+            border: `1px solid ${accent}66`,
+            background: `${accent}1f`,
+            padding: "4px 8px",
           }}
         >
           {label}
@@ -1368,7 +1554,16 @@ function RoleBadge({
       >
         {label}
       </span>
-      <span style={{ display: "inline-flex", alignItems: "center", gap: "7px", color: meta ? accent : "var(--nexus-text)", fontWeight: 800, fontSize: "13px" }}>
+      <span
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          gap: "7px",
+          color: meta ? accent : "var(--nexus-text)",
+          fontWeight: 800,
+          fontSize: "13px",
+        }}
+      >
         {meta && (
           <img
             src={meta.icon}
@@ -1377,7 +1572,6 @@ function RoleBadge({
               width: "18px",
               height: "18px",
               objectFit: "contain",
-              filter: `drop-shadow(0 0 5px ${accent}66)`,
             }}
           />
         )}
@@ -1460,7 +1654,9 @@ function ScoutCard({
   return (
     <div
       style={{
-        border: roleMeta ? `1px solid ${accent}44` : "1px solid rgba(255,255,255,0.06)",
+        border: roleMeta
+          ? `1px solid ${accent}44`
+          : "1px solid rgba(255,255,255,0.06)",
         background: roleMeta
           ? `linear-gradient(145deg, ${accent}1f, rgba(255,255,255,0.02) 52%, rgba(255,255,255,0.01))`
           : "rgba(255,255,255,0.02)",
@@ -1496,7 +1692,6 @@ function ScoutCard({
               width: "18px",
               height: "18px",
               objectFit: "contain",
-              filter: `drop-shadow(0 0 6px ${accent}66)`,
             }}
           />
         ) : icon ? (
@@ -1641,7 +1836,7 @@ function AccountCard({
           </span>
           <span style={{ color: "var(--nexus-text)", fontSize: "13px" }}>
             {linked
-              ? account?.displayName ?? "Cuenta vinculada"
+              ? (account?.displayName ?? "Cuenta vinculada")
               : status === "ready"
                 ? "Disponible para vincular"
                 : "Próximamente"}

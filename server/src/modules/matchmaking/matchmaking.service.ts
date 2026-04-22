@@ -5,6 +5,7 @@ import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
 import { HOTS_MAPS } from '@nexusgg/shared'
 import { logger } from '../../infrastructure/logging/logger'
+import { ensureDiscordMatchVoice, scheduleDiscordMatchVoiceCleanup } from '../matches/discord-match-voice.service'
 
 function toPositiveInt(value: string | undefined, fallback: number) {
   const parsed = Number(value)
@@ -63,6 +64,12 @@ type QueueProgressEvent = {
   matchSize: number
   etaSeconds: number
   waitedSeconds: number | null
+}
+
+type QueuePublicUpdateEvent = {
+  queueSize: number
+  matchSize: number
+  updatedAt: number
 }
 
 const BOT_QUEUE_PREFIX = 'bot:'
@@ -168,6 +175,12 @@ async function emitQueuePositionUpdates() {
   const queueIds = await redis.zrange(REDIS_KEYS.matchmakingQueue(REGION), 0, -1)
   const userQueueIds = queueIds.filter((queueId) => !isBotQueueId(queueId))
   const totalQueueSize = queueIds.length
+  const publicEvent: QueuePublicUpdateEvent = {
+    queueSize: totalQueueSize,
+    matchSize: MATCH_SIZE,
+    updatedAt: Date.now(),
+  }
+  io.emit('matchmaking:queue_public_update', publicEvent)
   const now = Date.now()
   let cycleSeconds = Math.max(1, Math.round(MATCH_FORM_DELAY_MS / 1000))
   let secondsPerPlayer = DEFAULT_ETA_SECONDS_PER_PLAYER
@@ -815,6 +828,13 @@ async function cancelMatch(matchId: string, reason: string) {
   await redis.del(REDIS_KEYS.matchCancelState(matchId))
 
   await db.match.update({ where: { id: matchId }, data: { status: 'CANCELLED' } })
+  void scheduleDiscordMatchVoiceCleanup(matchId, 'match_cancelled').catch((err) => {
+    logger.warn('Failed to schedule Discord voice cleanup after cancellation', {
+      matchId,
+      reason,
+      error: err instanceof Error ? err.message : String(err),
+    })
+  })
 
   const io = getIO()
   const players = await db.matchPlayer.findMany({ where: { matchId } })
@@ -1009,6 +1029,12 @@ export async function performVeto(
     await redis.del(REDIS_KEYS.matchVetoState(matchId))
 
     io.to(`match:${matchId}`).emit('veto:complete', { selectedMap: selectedMapName })
+    void ensureDiscordMatchVoice(matchId).catch((err) => {
+      logger.warn('Failed to create Discord match voice channels', {
+        matchId,
+        error: err instanceof Error ? err.message : String(err),
+      })
+    })
     return
   }
 

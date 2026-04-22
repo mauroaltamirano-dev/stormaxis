@@ -1,21 +1,13 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { useAuthStore } from "../stores/auth.store";
 import { useMatchmakingStore } from "../stores/matchmaking.store";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { reportClientError } from "../lib/monitoring";
-import { RankBadge } from "../components/RankBadge";
 import { PlayerSlotShell } from "../components/PlayerSlotShell";
 import { MatchFoundModal } from "../components/matchmaking/MatchFoundModal";
-import {
-  Activity,
-  Plus,
-  Radio,
-  Search,
-  ShieldCheck,
-  TimerReset,
-} from "lucide-react";
+import { ChevronDown, Plus, Search } from "lucide-react";
 import { getRoleIconSources, getRoleMeta } from "../lib/roles";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
 import { getQueueLifecycleMeta } from "../lib/competitiveStatus";
@@ -100,8 +92,55 @@ type AdminMatchRow = {
   }>;
 };
 
+type LiveMatchRow = {
+  id: string;
+  status: "VETOING" | "PLAYING" | "VOTING";
+  mode: string;
+  region: string;
+  selectedMap: string | null;
+  createdAt: string;
+  startedAt?: string | null;
+  viewerTeam: 1 | 2 | null;
+  readyCount: number;
+  totalPlayers: number;
+  voteCounts: {
+    team1Votes: number;
+    team2Votes: number;
+    total: number;
+  };
+  teams: Record<
+    1 | 2,
+    Array<{
+      userId: string | null;
+      username: string;
+      avatar: string | null;
+      mmr: number;
+      isCaptain: boolean;
+      isBot: boolean;
+    }>
+  >;
+};
+
+type OpsEventTone = "neutral" | "good" | "warn";
+
+type OpsEvent = {
+  id: string;
+  at: number;
+  title: string;
+  detail: string;
+  tone: OpsEventTone;
+};
+
 function formatCountdown(seconds: number) {
   return `0:${String(Math.max(0, seconds)).padStart(2, "0")}`;
+}
+
+function formatEventTime(timestamp: number) {
+  return new Intl.DateTimeFormat("es-AR", {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  }).format(timestamp);
 }
 
 export function Dashboard() {
@@ -124,7 +163,6 @@ export function Dashboard() {
   } = useMatchmakingStore() as any;
 
   const [selectedMode, setSelectedMode] = useState("COMPETITIVE");
-  const [queueRoles, setQueueRoles] = useState<string[]>([]);
   const [elapsed, setElapsed] = useState(0);
   const [dismissedActiveMatchId, setDismissedActiveMatchId] = useState<
     string | null
@@ -145,6 +183,8 @@ export function Dashboard() {
     }>
   >([]);
   const [adminMatches, setAdminMatches] = useState<AdminMatchRow[]>([]);
+  const [liveMatches, setLiveMatches] = useState<LiveMatchRow[]>([]);
+  const [liveMatchesOpen, setLiveMatchesOpen] = useState(true);
   const [adminLoading, setAdminLoading] = useState(false);
   const [adminActionMatchId, setAdminActionMatchId] = useState<string | null>(
     null,
@@ -157,6 +197,28 @@ export function Dashboard() {
   );
   const [hoveredEmptySlot, setHoveredEmptySlot] = useState<number | null>(null);
   const [acceptCountdown, setAcceptCountdown] = useState<number | null>(null);
+  const [opsEvents, setOpsEvents] = useState<OpsEvent[]>([]);
+  const [isOpsLogOpen, setIsOpsLogOpen] = useState(false);
+  const [currentStreak, setCurrentStreak] = useState(0);
+  const [streakType, setStreakType] = useState<"win" | "loss" | null>(null);
+  const [viewportWidth, setViewportWidth] = useState<number>(() =>
+    typeof window === "undefined" ? 1280 : window.innerWidth,
+  );
+  const queueSizeRef = useRef<number | null>(null);
+
+  const pushOpsEvent = useCallback(
+    (title: string, detail: string, tone: OpsEventTone = "neutral") => {
+      const event: OpsEvent = {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        at: Date.now(),
+        title,
+        detail,
+        tone,
+      };
+      setOpsEvents((prev) => [event, ...prev].slice(0, 10));
+    },
+    [],
+  );
 
   useEffect(() => {
     if (status !== "searching" || !searchStartedAt) return;
@@ -184,12 +246,28 @@ export function Dashboard() {
   }, [pendingMatch?.expiresAt]);
 
   useEffect(() => {
+    const onResize = () => setViewportWidth(window.innerWidth);
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
+  useEffect(() => {
     const socket = getSocket();
     socket.on("matchmaking:found", (data: any) => {
       setHasActiveMatch(true);
       setMatchFound(data);
+      pushOpsEvent(
+        "Match encontrado",
+        "Se abrió la ventana de confirmación para los 10 jugadores.",
+        "good",
+      );
     });
     socket.on("veto:start", () => {
+      pushOpsEvent(
+        "Veto iniciado",
+        "La lobby confirmó jugadores y pasó a selección de mapas.",
+        "good",
+      );
       if (pendingMatch?.matchId) {
         clearPendingMatch();
         navigate({
@@ -199,6 +277,11 @@ export function Dashboard() {
       }
     });
     socket.on("matchmaking:cancelled", () => {
+      pushOpsEvent(
+        "Match cancelado",
+        "Una confirmación falló o el ciclo fue cancelado.",
+        "warn",
+      );
       window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
       setDismissedActiveMatchId(null);
       setHiddenActiveMatchId(null);
@@ -215,10 +298,29 @@ export function Dashboard() {
         if (typeof payload?.queueSize === "number") {
           setQueueSize(payload.queueSize);
         }
+        if (
+          typeof payload?.position === "number" &&
+          payload.position > 0 &&
+          payload.position <= 3
+        ) {
+          pushOpsEvent(
+            "Prioridad de cola",
+            `Subiste a posición #${payload.position}.`,
+            "good",
+          );
+        }
         setQueueProgress({
           position: payload?.position,
           etaSeconds: payload?.etaSeconds,
         });
+      },
+    );
+    socket.on(
+      "matchmaking:queue_public_update",
+      (payload: { queueSize?: number }) => {
+        if (typeof payload?.queueSize === "number") {
+          setQueueSize(payload.queueSize);
+        }
       },
     );
     socket.on(
@@ -233,6 +335,7 @@ export function Dashboard() {
       socket.off("veto:start");
       socket.off("matchmaking:cancelled");
       socket.off("matchmaking:queue_update");
+      socket.off("matchmaking:queue_public_update");
       socket.off("user:elo_update");
     };
   }, [
@@ -244,6 +347,7 @@ export function Dashboard() {
     setQueueProgress,
     setQueueSize,
     updateUser,
+    pushOpsEvent,
   ]);
 
   useEffect(() => {
@@ -252,19 +356,16 @@ export function Dashboard() {
         inQueue: boolean;
         queueSize?: number;
         mode?: string;
-        roles?: string[];
         joinedAt?: number;
       }>("/matchmaking/queue/status")
       .then(({ data }) => {
         if (!data.inQueue) {
-          setQueueRoles([]);
           if (!pendingMatch && !hasActiveMatch) {
             resetMatchmaking();
           }
           return;
         }
         if (data.mode) setSelectedMode(data.mode);
-        if (data.roles) setQueueRoles(data.roles);
         if (data.queueSize != null) setQueueSize(data.queueSize);
         setQueueProgress({ position: null, etaSeconds: null });
         startSearching(data.joinedAt);
@@ -313,11 +414,6 @@ export function Dashboard() {
       }
     }
 
-    if (status !== "searching") {
-      setQueuePreview([]);
-      return;
-    }
-
     loadQueueSnapshot();
     const interval = setInterval(loadQueueSnapshot, 5000);
 
@@ -325,7 +421,7 @@ export function Dashboard() {
       cancelled = true;
       clearInterval(interval);
     };
-  }, [setQueueProgress, setQueueSize, status, user?.id]);
+  }, [setQueueProgress, setQueueSize, user?.id]);
 
   useEffect(() => {
     if (!user) return;
@@ -388,6 +484,26 @@ export function Dashboard() {
   ]);
 
   useEffect(() => {
+    let cancelled = false;
+
+    async function loadLiveMatches() {
+      try {
+        const { data } = await api.get<LiveMatchRow[]>("/matches/live");
+        if (!cancelled) setLiveMatches(data);
+      } catch {
+        if (!cancelled) setLiveMatches([]);
+      }
+    }
+
+    loadLiveMatches();
+    const interval = window.setInterval(loadLiveMatches, 8000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!user || user.role !== "ADMIN") {
       setAdminMatches([]);
       return;
@@ -428,24 +544,73 @@ export function Dashboard() {
     setAvatarLoadError(false);
   }, [user?.avatar]);
 
+  useEffect(() => {
+    if (!user?.username) return;
+    api
+      .get<
+        Array<{
+          team: number;
+          match: { winner: number | null; createdAt: string };
+        }>
+      >(`/users/${user.username}/matches`)
+      .then(({ data }) => {
+        const completed = [...data]
+          .filter((e) => e.match.winner !== null)
+          .sort(
+            (a, b) =>
+              new Date(b.match.createdAt).getTime() -
+              new Date(a.match.createdAt).getTime(),
+          );
+        if (!completed.length) {
+          setCurrentStreak(0);
+          setStreakType(null);
+          return;
+        }
+        const firstType =
+          completed[0].match.winner === completed[0].team ? "win" : "loss";
+        let count = 0;
+        for (const entry of completed) {
+          const type = entry.match.winner === entry.team ? "win" : "loss";
+          if (type === firstType) count++;
+          else break;
+        }
+        setCurrentStreak(count);
+        setStreakType(firstType);
+      })
+      .catch(() => {});
+  }, [user?.username]);
+
   async function handleFindMatch() {
     if (hasActiveMatch) return;
 
     if (status === "searching") {
       await api.post("/matchmaking/queue/leave");
-      setQueueRoles([]);
       stopSearching();
+      pushOpsEvent(
+        "Salida de cola",
+        "Cancelaste búsqueda manualmente desde dashboard.",
+        "warn",
+      );
       return;
     }
     try {
       await api.post("/matchmaking/queue/join", {
         mode: selectedMode,
       });
-      setQueueRoles(profileRoles);
       startSearching();
+      pushOpsEvent(
+        "Entrada a cola",
+        "Iniciaste búsqueda competitiva con tus roles de perfil.",
+        "good",
+      );
     } catch (err: any) {
       console.error("Queue error:", err.response?.data);
       reportClientError(err, "dashboard.queue.join_leave");
+      pushOpsEvent(
+        "Error de cola",
+        err?.response?.data?.error?.message ?? "No se pudo procesar la acción.",
+        "warn",
+      );
     }
   }
 
@@ -454,6 +619,11 @@ export function Dashboard() {
       setAdminActionMatchId(matchId);
       await api.patch(`/admin/matches/${matchId}/cancel`);
       setAdminMatches((prev) => prev.filter((match) => match.id !== matchId));
+      pushOpsEvent(
+        "Admin canceló match",
+        `Match ${matchId.slice(0, 8)} marcado como CANCELLED.`,
+        "warn",
+      );
       if (hiddenActiveMatchId === matchId) {
         window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
         setDismissedActiveMatchId(null);
@@ -466,6 +636,11 @@ export function Dashboard() {
       setAdminError(
         err.response?.data?.error?.message ?? "No pude cancelar el match.",
       );
+      pushOpsEvent(
+        "Error admin",
+        err?.response?.data?.error?.message ?? "No se pudo cancelar el match.",
+        "warn",
+      );
     } finally {
       setAdminActionMatchId(null);
     }
@@ -476,6 +651,11 @@ export function Dashboard() {
       setAdminActionMatchId(matchId);
       await api.delete(`/admin/matches/${matchId}`);
       setAdminMatches((prev) => prev.filter((match) => match.id !== matchId));
+      pushOpsEvent(
+        "Admin borró match",
+        `Match ${matchId.slice(0, 8)} eliminado del sistema.`,
+        "warn",
+      );
       if (hiddenActiveMatchId === matchId) {
         window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
         setDismissedActiveMatchId(null);
@@ -488,6 +668,11 @@ export function Dashboard() {
       setAdminError(
         err.response?.data?.error?.message ?? "No pude borrar el match.",
       );
+      pushOpsEvent(
+        "Error admin",
+        err?.response?.data?.error?.message ?? "No se pudo borrar el match.",
+        "warn",
+      );
     } finally {
       setAdminActionMatchId(null);
     }
@@ -498,10 +683,21 @@ export function Dashboard() {
       setAdminFillingBots(true);
       setAdminError(null);
       await api.post("/admin/queue/fill-bots", { targetSize: 10 });
+      pushOpsEvent(
+        "Admin completó cola",
+        "Se agregaron bots para llegar a 10 jugadores.",
+        "neutral",
+      );
     } catch (err: any) {
       setAdminError(
         err.response?.data?.error?.message ??
           "No pude completar la cola con bots.",
+      );
+      pushOpsEvent(
+        "Error admin",
+        err?.response?.data?.error?.message ??
+          "No se pudo completar la cola con bots.",
+        "warn",
       );
     } finally {
       setAdminFillingBots(false);
@@ -514,11 +710,20 @@ export function Dashboard() {
       setAdminError(null);
       await api.post("/admin/queue/clear");
       setQueuePreview([]);
-      setQueueRoles([]);
       resetMatchmaking();
+      pushOpsEvent(
+        "Admin limpió cola",
+        "Se purgó la cola de matchmaking para reiniciar testing.",
+        "warn",
+      );
     } catch (err: any) {
       setAdminError(
         err.response?.data?.error?.message ?? "No pude limpiar la cola.",
+      );
+      pushOpsEvent(
+        "Error admin",
+        err?.response?.data?.error?.message ?? "No se pudo limpiar la cola.",
+        "warn",
       );
     } finally {
       setAdminFillingBots(false);
@@ -547,7 +752,6 @@ export function Dashboard() {
   const profileRoles = [user.mainRole, user.secondaryRole].filter(
     Boolean,
   ) as string[];
-  const activeQueueRoles = queueRoles.length > 0 ? queueRoles : profileRoles;
   const acceptedCount = pendingMatch?.acceptedBy?.length ?? 0;
   const currentUserAccepted = user
     ? (pendingMatch?.acceptedBy ?? []).includes(user.id)
@@ -565,7 +769,80 @@ export function Dashboard() {
     acceptedCount,
     totalPlayers: totalPendingPlayers,
   });
-  const queuePhase = queueStateMeta.phase;
+  const isMd = viewportWidth < 1024;
+  const isSm = viewportWidth < 768;
+  const isXs = viewportWidth < 560;
+  const queueOccupancy = isAccepting
+    ? totalPendingPlayers
+    : (queueSize ?? queuePreviewForDisplay.length);
+  const hasQueuePlayers = queueOccupancy > 0;
+  const liveQueueState:
+    | "idle"
+    | "warming"
+    | "active"
+    | "accepting"
+    | "blocked" = isAccepting
+    ? "accepting"
+    : hasActiveMatch
+      ? "blocked"
+      : hasQueuePlayers
+        ? queuePreviewForDisplay.length > 0
+          ? "active"
+          : "warming"
+        : "idle";
+  const liveQueueTitle =
+    liveQueueState === "accepting"
+      ? "Accept en progreso"
+      : liveQueueState === "blocked"
+        ? "Partida activa"
+        : "Jugadores buscando partida";
+  const liveQueueSignal =
+    liveQueueState === "accepting"
+      ? `Aceptaron ${acceptedCount}/${totalPendingPlayers} · Ventana ${
+          acceptCountdown != null ? formatCountdown(acceptCountdown) : "—"
+        }`
+      : liveQueueState === "blocked"
+        ? "Tenés una partida abierta. No podés re-entrar a cola."
+        : liveQueueState === "active"
+          ? `${queueSize ?? queuePreviewForDisplay.length}/10 buscando · Espera ${
+              queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "calculando"
+            }`
+          : liveQueueState === "warming"
+            ? "Sincronizando snapshot en vivo de la cola."
+            : "No hay jugadores en cola ahora mismo.";
+
+  const totalPlayed = user.wins + user.losses;
+  const userWinrate =
+    totalPlayed > 0 ? `${Math.round((user.wins / totalPlayed) * 100)}%` : "—";
+  const waitValue = isAccepting
+    ? acceptCountdown != null
+      ? formatCountdown(acceptCountdown)
+      : "—"
+    : isSearching
+      ? formatElapsed(elapsed)
+      : "—";
+
+  useEffect(() => {
+    if (!isSearching || typeof queueSize !== "number") {
+      queueSizeRef.current = null;
+      return;
+    }
+    if (queueSizeRef.current == null) {
+      queueSizeRef.current = queueSize;
+      return;
+    }
+    if (queueSizeRef.current !== queueSize) {
+      const diff = queueSize - queueSizeRef.current;
+      queueSizeRef.current = queueSize;
+      pushOpsEvent(
+        "Movimiento de cola",
+        diff > 0
+          ? `Entraron ${diff} jugador${diff > 1 ? "es" : ""}. Total: ${queueSize}/10.`
+          : `Salieron ${Math.abs(diff)} jugador${Math.abs(diff) > 1 ? "es" : ""}. Total: ${queueSize}/10.`,
+        diff > 0 ? "neutral" : "warn",
+      );
+    }
+  }, [isSearching, pushOpsEvent, queueSize]);
 
   return (
     <>
@@ -585,7 +862,7 @@ export function Dashboard() {
             overflow: "hidden",
             border: "1px solid rgba(0,200,255,0.14)",
             background:
-              "linear-gradient(135deg, rgba(0,200,255,0.10), rgba(124,77,255,0.06) 42%, rgba(2,6,14,0.92)), url('/images/BC-2018-1_1920x1200.jpg') center/cover",
+              "linear-gradient(135deg, rgba(0,200,255,0.10), rgba(124,77,255,0.06) 42%, #02060e), url('/images/617568.webp') center/cover",
             minHeight: "230px",
             padding: "1.4rem",
             display: "grid",
@@ -650,173 +927,63 @@ export function Dashboard() {
                   Buscar partida
                 </h1>
               </div>
-
-              <div
-                style={{
-                  minWidth: "160px",
-                  border: `1px solid ${queueStateMeta.tone}66`,
-                  background: "rgba(2,6,14,0.72)",
-                  padding: "0.9rem 1rem",
-                  textAlign: "right",
-                }}
-              >
-                <div
-                  style={{
-                    color: "rgba(232,244,255,0.42)",
-                    fontSize: "0.68rem",
-                    textTransform: "uppercase",
-                    letterSpacing: "0.18em",
-                    fontWeight: 800,
-                  }}
-                >
-                  Estado
-                </div>
-                <div
-                  style={{
-                    color: queueStateMeta.tone,
-                    fontFamily: "var(--font-display)",
-                    fontSize: "1.35rem",
-                    fontWeight: 900,
-                    letterSpacing: "0.08em",
-                  }}
-                >
-                  {queuePhase}
-                </div>
-                <div
-                  style={{
-                    marginTop: "0.28rem",
-                    color: "rgba(232,244,255,0.46)",
-                    fontSize: "0.74rem",
-                    fontWeight: 700,
-                  }}
-                >
-                  {queueStateMeta.stage
-                    ? `${queueStateMeta.stage} · ${queueStateMeta.signal}`
-                    : queueStateMeta.signal}
-                </div>
-              </div>
             </div>
 
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(120px, 1fr))",
+                gridTemplateColumns: isXs
+                  ? "repeat(2, minmax(120px, 1fr))"
+                  : isMd
+                    ? "repeat(2, minmax(120px, 1fr))"
+                    : "repeat(4, minmax(120px, 1fr))",
                 gap: "0.7rem",
               }}
             >
-              <HeroMetric
-                label="Modo"
-                value={
-                  MODES.find((m) => m.key === selectedMode)?.label ??
-                  "Competitivo"
-                }
-                tone="#38bdf8"
+              <StatPanel
+                label="Winrate"
+                value={userWinrate}
+                sub={`${user.wins}W / ${user.losses}L`}
+                tone="#4ade80"
+                iconSrc="/brand/winrate.thumb.webp"
               />
-              <HeroMetric
-                label={isAccepting ? "Accept" : "Cola"}
-                value={
-                  isAccepting
-                    ? `${acceptedCount}/${totalPendingPlayers}`
-                    : `${queueSize ?? 0}/10`
-                }
-                tone={isAccepting ? queueStateMeta.tone : "#a78bfa"}
-              />
-              <HeroMetric
-                label={isAccepting ? "Tu estado" : "Posición"}
-                value={
-                  isAccepting
-                    ? currentUserAccepted
-                      ? "OK"
-                      : "Pendiente"
-                    : (queuePosition ?? "—")
-                }
-                tone={
-                  isAccepting
-                    ? currentUserAccepted
-                      ? "#4ade80"
-                      : "#f8fafc"
-                    : "#facc15"
-                }
-              />
-              <HeroMetric
-                label={isAccepting ? "Ventana" : "Espera"}
-                value={
-                  isAccepting
-                    ? acceptCountdown != null
-                      ? formatCountdown(acceptCountdown)
-                      : "—"
-                    : queueEtaSeconds != null
-                      ? `~${queueEtaSeconds}s`
-                      : "—"
-                }
-                tone={isAccepting ? queueStateMeta.tone : "#4ade80"}
-              />
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                gap: "0.7rem",
-              }}
-            >
-              <QueueSignalCard
-                icon={<Activity size={16} />}
-                label="Estado operativo"
-                value={queueStateMeta.phase}
-                sub={
-                  queueStateMeta.stage
-                    ? `${queueStateMeta.stage} · ${queueStateMeta.detail}`
-                    : queueStateMeta.detail
-                }
-                tone={queueStateMeta.tone}
-              />
-              <QueueSignalCard
-                icon={<Radio size={16} />}
-                label="Roles activos"
-                value={
-                  activeQueueRoles.length > 0
-                    ? activeQueueRoles.join(" · ")
-                    : "Perfil sin roles"
-                }
-                sub="El matchmaking usa tu identidad competitiva real."
+              <StatPanel
+                label="MMR actual"
+                value={user.mmr.toLocaleString("es-AR")}
+                sub={rankMeta.label}
                 tone={rankColor}
+                iconSrc={rankMeta.iconSrc}
               />
-              <QueueSignalCard
-                icon={
-                  isAccepting ? (
-                    <ShieldCheck size={16} />
-                  ) : (
-                    <TimerReset size={16} />
-                  )
-                }
-                label="Próxima acción"
-                value={
-                  hasActiveMatch
-                    ? "Volver al room"
-                    : isAccepting
-                      ? "Confirmar"
-                      : isSearching
-                        ? `Elapsed ${formatElapsed(elapsed)}`
-                        : "Buscar partida"
-                }
+              <StatPanel
+                label="Partidas"
+                value={(user.wins + user.losses).toString()}
+                sub="Temporada actual"
+                tone="#5217dd"
+                iconSrc="/brand/matches.thumb.webp"
+              />
+              <StatPanel
+                label="Racha"
+                value={currentStreak > 0 ? `${currentStreak}` : "—"}
                 sub={
-                  hasActiveMatch
-                    ? "Tenés una partida viva esperando continuidad."
-                    : isAccepting
-                      ? "Aceptá desde el modal antes de que cierre la ventana."
-                      : isSearching
-                        ? "Seguí en cola mientras balanceamos MMR y slots."
-                        : "Todo listo para entrar a la cola competitiva."
+                  streakType === "win"
+                    ? `${currentStreak} victoria${currentStreak !== 1 ? "s" : ""} seguida${currentStreak !== 1 ? "s" : ""}`
+                    : streakType === "loss"
+                      ? `${currentStreak} derrota${currentStreak !== 1 ? "s" : ""} seguida${currentStreak !== 1 ? "s" : ""}`
+                      : "Sin partidas"
                 }
                 tone={
-                  hasActiveMatch
-                    ? "#22c55e"
-                    : isAccepting
-                      ? queueStateMeta.tone
-                      : isSearching
-                        ? "#38bdf8"
-                        : "#cbd5e1"
+                  streakType === "win"
+                    ? "#F98005"
+                    : streakType === "loss"
+                      ? "#fb7185"
+                      : "#94a3b8"
+                }
+                iconSrc={
+                  streakType === "win"
+                    ? "/brand/racha.thumb.webp"
+                    : streakType === "loss"
+                      ? "/brand/racha.thumb.webp"
+                      : "/brand/logo.thumb.webp"
                 }
               />
             </div>
@@ -827,7 +994,7 @@ export function Dashboard() {
           style={{
             display: "grid",
             gridTemplateColumns:
-              matchmakingLayout === "stack"
+              matchmakingLayout === "stack" || isMd
                 ? "1fr"
                 : "minmax(0, 1.65fr) minmax(260px, 0.55fr)",
             gap: "1rem",
@@ -898,117 +1065,149 @@ export function Dashboard() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(5, minmax(90px, 1fr))",
+                gridTemplateColumns: isXs
+                  ? "repeat(2, minmax(90px, 1fr))"
+                  : isSm
+                    ? "repeat(3, minmax(90px, 1fr))"
+                    : "repeat(5, minmax(90px, 1fr))",
                 gap: matchmakingLayout === "stack" ? "0.9rem" : "0.7rem",
               }}
             >
               {SLOT_ORDER.map((idx) => {
                 const isYou = idx === 2;
                 return isYou ? (
-                  <PlayerSlotShell key="you" color={rankColor} minHeight={320}>
+                  <PlayerSlotShell
+                    key="you"
+                    color={rankColor}
+                    minHeight={320}
+                    isYou
+                  >
+                    {/* "Tú" label */}
                     <div
                       style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: "0.5rem",
+                        border: `1px solid ${rankColor}55`,
+                        background: `${rankColor}14`,
+                        color: rankColor,
+                        padding: "2px 10px",
+                        fontSize: "9px",
+                        fontWeight: 900,
+                        letterSpacing: "0.22em",
+                        textTransform: "uppercase",
+                        fontFamily: "var(--font-display)",
+                      }}
+                    >
+                      Tú
+                    </div>
+
+                    {/* Hex avatar — wider proportions (regular hex ratio ~1.155) */}
+                    <div
+                      style={{
+                        width: "90px",
+                        height: "78px",
+                        clipPath:
+                          "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
+                        background: `linear-gradient(135deg, ${rankColor}, ${rankColor}44)`,
+                        display: "grid",
+                        placeItems: "center",
                       }}
                     >
                       <div
                         style={{
-                          border: `1px solid ${rankColor}55`,
-                          background: `${rankColor}12`,
-                          color: rankColor,
-                          padding: "2px 8px",
-                          fontSize: "10px",
-                          fontWeight: 900,
-                          letterSpacing: "0.18em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Tú
-                      </div>
-
-                      <div
-                        style={{
-                          width: "68px",
-                          height: "68px",
-                          borderRadius: "999px",
+                          width: "84px",
+                          height: "72px",
+                          clipPath:
+                            "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
                           overflow: "hidden",
-                          border: `2px solid ${rankColor}`,
-                          boxShadow: `0 0 16px ${rankColor}33`,
                           display: "grid",
                           placeItems: "center",
+                          background: "rgba(4,10,20,0.95)",
                           color: rankColor,
                           fontFamily: "var(--font-display)",
                           fontWeight: 900,
-                          background: "rgba(255,255,255,0.05)",
+                          fontSize: "1.15rem",
                         }}
                       >
                         {user.avatar && !avatarLoadError ? (
                           <img
                             src={user.avatar}
                             alt={user.username}
+                            loading="lazy"
+                            decoding="async"
                             onError={() => setAvatarLoadError(true)}
-                            style={{ width: "100%", height: "100%", objectFit: "cover" }}
+                            style={{
+                              width: "100%",
+                              height: "100%",
+                              objectFit: "cover",
+                            }}
                           />
                         ) : (
                           user.username.slice(0, 2).toUpperCase()
                         )}
                       </div>
-
-                      <div
-                        style={{
-                          color: "#fff",
-                          fontSize: "1.1rem",
-                          fontWeight: 800,
-                        }}
-                      >
-                        {user.username}
-                      </div>
                     </div>
 
+                    {/* Rank image + label + MMR (outside avatar) */}
                     <div
                       style={{
                         display: "flex",
                         flexDirection: "column",
                         alignItems: "center",
-                        gap: "0.4rem",
+                        gap: "0.25rem",
                       }}
                     >
-                      <RankBadge
-                        level={level}
-                        size="lg"
-                        align="center"
-                        showLabel={false}
-                        showMmr={false}
-                        glow="medium"
+                      <img
+                        src={rankMeta.iconSrc}
+                        alt={rankMeta.label}
+                        loading="lazy"
+                        decoding="async"
+                        style={{
+                          width: "44px",
+                          height: "44px",
+                          objectFit: "contain",
+                          filter: `drop-shadow(0 0 10px ${rankColor})`,
+                        }}
                       />
-
                       <div
                         style={{
                           color: rankColor,
+                          fontFamily: "var(--font-display)",
                           fontWeight: 900,
-                          letterSpacing: "0.14em",
+                          fontSize: "0.78rem",
+                          letterSpacing: "0.16em",
                           textTransform: "uppercase",
-                          textShadow: `0 0 10px ${rankColor}33`,
+                          textShadow: `0 0 12px ${rankColor}55`,
                         }}
                       >
                         {rankMeta.label}
                       </div>
-
                       <div
                         style={{
-                          color: "rgba(255,255,255,0.85)",
-                          fontSize: "0.85rem",
+                          color: "rgba(255,255,255,0.55)",
+                          fontSize: "0.72rem",
                           fontWeight: 700,
+                          letterSpacing: "0.04em",
                         }}
                       >
                         {user.mmr.toLocaleString("es-AR")} MMR
                       </div>
                     </div>
 
-                    <div style={{ display: "flex", gap: "0.5rem" }}>
+                    {/* Username */}
+                    <div
+                      style={{
+                        color: "#fff",
+                        fontFamily: "var(--font-display)",
+                        fontSize: "1rem",
+                        fontWeight: 900,
+                        letterSpacing: "0.06em",
+                        lineHeight: 1,
+                      }}
+                    >
+                      {user.username}
+                    </div>
+
+                    {/* Roles */}
+                    <div style={{ display: "flex", gap: "0.45rem" }}>
                       {profileRoles.length > 0 ? (
                         profileRoles.map((role) => (
                           <RolePill key={role} role={role} iconOnly />
@@ -1022,7 +1221,11 @@ export function Dashboard() {
                   <div
                     key={idx}
                     onMouseEnter={() => setHoveredEmptySlot(idx)}
-                    onMouseLeave={() => setHoveredEmptySlot((current) => (current === idx ? null : current))}
+                    onMouseLeave={() =>
+                      setHoveredEmptySlot((current) =>
+                        current === idx ? null : current,
+                      )
+                    }
                     style={{
                       ...slotBaseStyle,
                       minHeight:
@@ -1031,33 +1234,86 @@ export function Dashboard() {
                           : slotBaseStyle.minHeight,
                       border:
                         hoveredEmptySlot === idx
-                          ? "1px solid rgba(125, 211, 252, 0.22)"
+                          ? "1px solid rgba(0,200,255,0.28)"
                           : "1px solid rgba(148,163,184,0.10)",
                       background:
-                        "linear-gradient(180deg, rgba(8,12,22,0.9), rgba(3,6,14,0.92))",
+                        hoveredEmptySlot === idx
+                          ? "linear-gradient(180deg, rgba(0,200,255,0.06), rgba(3,6,14,0.94))"
+                          : "linear-gradient(180deg, rgba(8,12,22,0.9), rgba(3,6,14,0.92))",
+                      clipPath:
+                        "polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px))",
                       transform:
                         hoveredEmptySlot === idx
                           ? "translateY(-2px)"
                           : "translateY(0)",
                       boxShadow:
                         hoveredEmptySlot === idx
-                          ? "0 0 18px rgba(56, 189, 248, 0.08)"
+                          ? "0 0 24px rgba(0,200,255,0.10), inset 0 0 24px rgba(0,200,255,0.04)"
                           : slotBaseStyle.boxShadow,
                       transition:
-                        "border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease",
+                        "border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, background 180ms ease",
                     }}
                   >
-                    <CardCorners color="rgba(148,163,184,0.16)" />
+                    {/* Animated corner marks */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        inset: 0,
+                        animation: "slotIdlePulse 2.8s ease-in-out infinite",
+                        pointerEvents: "none",
+                      }}
+                    >
+                      <CardCorners
+                        color={
+                          hoveredEmptySlot === idx
+                            ? "rgba(0,200,255,0.6)"
+                            : "rgba(148,163,184,0.35)"
+                        }
+                      />
+                    </div>
 
+                    {/* Diagonal border overlays */}
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: 0,
+                        right: 0,
+                        width: "14px",
+                        height: "14px",
+                        background:
+                          hoveredEmptySlot === idx
+                            ? "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(0,200,255,0.7) 50%, transparent calc(50% + 0.6px))"
+                            : "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(148,163,184,0.25) 50%, transparent calc(50% + 0.6px))",
+                        pointerEvents: "none",
+                        transition: "background 180ms ease",
+                      }}
+                    />
+                    <div
+                      style={{
+                        position: "absolute",
+                        bottom: 0,
+                        left: 0,
+                        width: "14px",
+                        height: "14px",
+                        background:
+                          hoveredEmptySlot === idx
+                            ? "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(0,200,255,0.7) 50%, transparent calc(50% + 0.6px))"
+                            : "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(148,163,184,0.25) 50%, transparent calc(50% + 0.6px))",
+                        pointerEvents: "none",
+                        transition: "background 180ms ease",
+                      }}
+                    />
+
+                    {/* Watermark */}
                     <div
                       style={{
                         position: "absolute",
                         inset: 0,
                         display: "grid",
                         placeItems: "center",
-                        opacity: 0.06,
+                        opacity: 0.04,
                         pointerEvents: "none",
-                        fontSize: "7rem",
+                        fontSize: "6rem",
                         fontFamily: "var(--font-display)",
                         fontWeight: 900,
                         color: "#7dd3fc",
@@ -1066,21 +1322,31 @@ export function Dashboard() {
                       V
                     </div>
 
+                    {/* Plus icon */}
                     <div
                       style={{
-                        width: "52px",
-                        height: "52px",
-                        border: "1px solid rgba(232,244,255,0.12)",
+                        width: "48px",
+                        height: "48px",
+                        border:
+                          hoveredEmptySlot === idx
+                            ? "1px solid rgba(0,200,255,0.35)"
+                            : "1px solid rgba(232,244,255,0.10)",
                         background:
-                          "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
+                          hoveredEmptySlot === idx
+                            ? "rgba(0,200,255,0.08)"
+                            : "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
+                        clipPath:
+                          "polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px))",
                         display: "grid",
                         placeItems: "center",
-                        color: "rgba(232,244,255,0.42)",
-                        boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04)",
+                        color:
+                          hoveredEmptySlot === idx
+                            ? "rgba(0,200,255,0.8)"
+                            : "rgba(232,244,255,0.30)",
                         transition: "all 180ms ease",
                       }}
                     >
-                      <Plus size={20} />
+                      <Plus size={18} />
                     </div>
 
                     <div
@@ -1093,22 +1359,25 @@ export function Dashboard() {
                     >
                       <div
                         style={{
-                          color: "rgba(232,244,255,0.28)",
+                          color:
+                            hoveredEmptySlot === idx
+                              ? "rgba(0,200,255,0.7)"
+                              : "rgba(232,244,255,0.25)",
                           fontFamily: "var(--font-display)",
                           fontWeight: 900,
-                          fontSize: "0.68rem",
-                          letterSpacing: "0.14em",
+                          fontSize: "0.66rem",
+                          letterSpacing: "0.16em",
                           textTransform: "uppercase",
                           textAlign: "center",
+                          transition: "color 180ms ease",
                         }}
                       >
                         Slot aliado
                       </div>
-
                       <div
                         style={{
-                          color: "rgba(232,244,255,0.16)",
-                          fontSize: "0.62rem",
+                          color: "rgba(232,244,255,0.14)",
+                          fontSize: "0.6rem",
                           letterSpacing: "0.06em",
                           textTransform: "uppercase",
                         }}
@@ -1120,34 +1389,6 @@ export function Dashboard() {
                 );
               })}
             </div>
-            {/* 
-            <div
-              style={{
-                border: "1px solid rgba(0,200,255,0.13)",
-                background: "rgba(0,200,255,0.04)",
-                padding: "0.85rem 1rem",
-                display: "grid",
-                gap: "0.55rem",
-              }}
-            >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
-                <div>
-                  <div style={{ color: "#7dd3fc", fontSize: "0.68rem", letterSpacing: "0.18em", textTransform: "uppercase", fontWeight: 900 }}>
-                    Flujo manual HOTS
-                  </div>
-                  <div style={{ color: "rgba(232,244,255,0.76)", fontSize: "0.9rem", marginTop: "0.2rem" }}>
-                    El sistema arma sala, define capitanes, ejecuta veto y registra resultado por votación.
-                  </div>
-                </div>
-                <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
-                  {profileRoles.length === 0 ? (
-                    <RolePill role="Configura tus roles en Perfil" muted />
-                  ) : (
-                    profileRoles.map((role) => <RolePill key={role} role={role} />)
-                  )}
-                </div>
-              </div>
-            </div> */}
           </div>
 
           <div
@@ -1157,7 +1398,7 @@ export function Dashboard() {
                 "linear-gradient(180deg, rgba(0,200,255,0.08), rgba(17,25,39,0.78))",
               padding: "1rem",
               display: "grid",
-              gap: "1rem",
+              gap: "0.85rem",
               alignContent: "space-between",
             }}
           >
@@ -1165,139 +1406,125 @@ export function Dashboard() {
 
             <div
               style={{
-                border: "1px solid rgba(232,244,255,0.07)",
-                background: "rgba(2,6,14,0.36)",
-                padding: "0.9rem",
                 display: "grid",
-                gap: "0.6rem",
+                gridTemplateColumns:
+                  matchmakingLayout === "stack" || isMd
+                    ? "minmax(180px, 0.85fr) minmax(0, 1.15fr)"
+                    : "1fr",
+                gap: "0.8rem",
+                alignItems: "stretch",
               }}
             >
-              <div
+              <button
+                onClick={handleFindMatch}
+                disabled={findMatchDisabled}
                 style={{
-                  color: "#7dd3fc",
+                  width: "100%",
+                  minHeight:
+                    matchmakingLayout === "stack" || isMd ? "100%" : "50px",
+                  border: findMatchDisabled
+                    ? "1px solid rgba(148,163,184,0.26)"
+                    : isSearching
+                      ? "1px solid rgba(0,200,255,0.75)"
+                      : "1px solid rgba(0,200,255,0.88)",
+                  background: findMatchDisabled
+                    ? "rgba(148,163,184,0.14)"
+                    : isSearching
+                      ? "rgba(0,200,255,0.06)"
+                      : "linear-gradient(90deg, #00c8ff, #7dd3fc)",
+                  color: findMatchDisabled
+                    ? "#cbd5e1"
+                    : isSearching
+                      ? "#7dd3fc"
+                      : "#020617",
                   fontFamily: "var(--font-display)",
                   fontWeight: 900,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                }}
-              >
-                5v5 · Draft · MMR activo
-              </div>
-              <div
-                style={{
-                  color: "rgba(232,244,255,0.58)",
-                  fontSize: "0.86rem",
-                  lineHeight: 1.45,
-                }}
-              >
-                Entrás solo o en party chica. El sistema completa la sala,
-                balancea MMR y abre veto en vivo.
-              </div>
-            </div>
-
-            <div
-              style={{
-                border: "1px solid rgba(232,244,255,0.07)",
-                background: "rgba(2,6,14,0.36)",
-                padding: "0.9rem",
-                display: "grid",
-                gap: "0.6rem",
-              }}
-            >
-              <div
-                style={{
-                  color: "rgba(232,244,255,0.38)",
-                  fontSize: "0.7rem",
+                  fontSize: "0.92rem",
                   letterSpacing: "0.16em",
                   textTransform: "uppercase",
-                  fontWeight: 900,
-                }}
-              >
-                Roles usados para entrar
-              </div>
-              <div
-                style={{
-                  color: "rgba(232,244,255,0.62)",
-                  fontSize: "0.84rem",
-                  lineHeight: 1.45,
-                }}
-              >
-                La cola usa tus roles guardados en perfil, sin selección manual.
-              </div>
-              <div
-                style={{
+                  cursor: findMatchDisabled ? "not-allowed" : "pointer",
                   display: "flex",
-                  gap: "0.45rem",
-                  flexWrap: "wrap",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "0.65rem",
+                  boxShadow: findMatchDisabled
+                    ? "none"
+                    : "0 0 28px rgba(0,200,255,0.12)",
                 }}
               >
-                {activeQueueRoles.length > 0 ? (
-                  activeQueueRoles.map((role) => (
-                    <RolePill key={role} role={role} />
-                  ))
+                {findMatchDisabled ? (
+                  "Partida activa"
+                ) : isSearching ? (
+                  <>
+                    <span
+                      style={{
+                        width: 10,
+                        height: 10,
+                        background: "#00c8ff",
+                        animation: "blink 1s infinite",
+                      }}
+                    />
+                    Cancelar búsqueda
+                  </>
                 ) : (
-                  <RolePill role="Completa onboarding" muted />
+                  <>
+                    <Search size={17} />
+                    Buscar partida
+                  </>
                 )}
+              </button>
+
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns:
+                    matchmakingLayout === "stack" || isMd
+                      ? "repeat(3, minmax(0, 1fr))"
+                      : "1fr",
+                  gap: "0.55rem",
+                }}
+              >
+                <QueueBriefStat
+                  label={isAccepting ? "Confirmados" : "Buscando ahora"}
+                  value={
+                    isAccepting
+                      ? `${acceptedCount}/${totalPendingPlayers}`
+                      : `${queueOccupancy}/10`
+                  }
+                  sub={
+                    isAccepting
+                      ? currentUserAccepted
+                        ? "Tu accept ya entró"
+                        : "Falta tu confirmación"
+                      : isSearching
+                        ? "Jugadores visibles en cola"
+                        : "Cola global en tiempo real"
+                  }
+                  tone={isAccepting ? queueStateMeta.tone : "#7dd3fc"}
+                />
+                <QueueBriefStat
+                  label={isAccepting ? "Ventana" : "Espera"}
+                  value={waitValue}
+                  sub={
+                    isAccepting
+                      ? "Tiempo para aceptar"
+                      : isSearching
+                        ? "Tiempo en cola"
+                        : "Sin búsqueda activa"
+                  }
+                  tone={isSearching || isAccepting ? "#4ade80" : "#94a3b8"}
+                />
+                <QueueBriefStat
+                  label="Formato"
+                  value={
+                    MODES.find((mode) => mode.key === selectedMode)?.label ??
+                    "Competitivo"
+                  }
+                  sub="SA · Draft · MMR activo"
+                  tone={rankColor}
+                />
               </div>
             </div>
-
-            <button
-              onClick={handleFindMatch}
-              disabled={findMatchDisabled}
-              style={{
-                width: "100%",
-                minHeight: "58px",
-                border: findMatchDisabled
-                  ? "1px solid rgba(148,163,184,0.26)"
-                  : isSearching
-                    ? "1px solid rgba(0,200,255,0.75)"
-                    : "1px solid rgba(0,200,255,0.88)",
-                background: findMatchDisabled
-                  ? "rgba(148,163,184,0.14)"
-                  : isSearching
-                    ? "rgba(0,200,255,0.06)"
-                    : "linear-gradient(90deg, #00c8ff, #7dd3fc)",
-                color: findMatchDisabled
-                  ? "#cbd5e1"
-                  : isSearching
-                    ? "#7dd3fc"
-                    : "#020617",
-                fontFamily: "var(--font-display)",
-                fontWeight: 900,
-                fontSize: "1rem",
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-                cursor: findMatchDisabled ? "not-allowed" : "pointer",
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "center",
-                gap: "0.7rem",
-                boxShadow: findMatchDisabled
-                  ? "none"
-                  : "0 0 28px rgba(0,200,255,0.12)",
-              }}
-            >
-              {findMatchDisabled ? (
-                "Partida activa en curso"
-              ) : isSearching ? (
-                <>
-                  <span
-                    style={{
-                      width: 10,
-                      height: 10,
-                      background: "#00c8ff",
-                      animation: "blink 1s infinite",
-                    }}
-                  />
-                  Buscando {formatElapsed(elapsed)} · cancelar
-                </>
-              ) : (
-                <>
-                  <Search size={18} />
-                  Buscar partida
-                </>
-              )}
-            </button>
 
             {hasActiveMatch && (
               <Notice
@@ -1308,117 +1535,206 @@ export function Dashboard() {
           </div>
         </section>
 
-        {isSearching && (
-          <section style={panelStyle}>
+        <section style={panelStyle}>
+          <div
+            style={{
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "1rem",
+              flexWrap: "wrap",
+            }}
+          >
+            <PanelTitle eyebrow="Live queue" title={liveQueueTitle} />
             <div
               style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "1rem",
-                flexWrap: "wrap",
+                color:
+                  liveQueueState === "accepting"
+                    ? "#fcd34d"
+                    : liveQueueState === "blocked"
+                      ? "#fb7185"
+                      : "#7dd3fc",
+                fontFamily: "var(--font-display)",
+                fontWeight: 900,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
               }}
             >
-              <PanelTitle
-                eyebrow="Live queue"
-                title="Jugadores buscando partida"
+              {liveQueueSignal}
+            </div>
+          </div>
+
+          <div style={{ display: "grid", gap: "0.55rem" }}>
+            {liveQueueState === "idle" ? (
+              <Notice text="No hay jugadores en cola en este momento." />
+            ) : liveQueueState === "warming" ? (
+              <Notice text="Buscando snapshot inicial de cola. Si persiste, revisa conectividad realtime/polling." />
+            ) : liveQueueState === "accepting" ? (
+              <Notice
+                tone="warn"
+                text="Match encontrado. Confirmá desde el modal para evitar cancelación por timeout."
               />
+            ) : liveQueueState === "blocked" ? (
+              <Notice
+                tone="warn"
+                text="Ya hay una partida activa asociada a tu sesión. Reabrí el matchroom para continuar."
+              />
+            ) : queuePreviewForDisplay.length === 0 ? (
+              <Notice text="Todavía no hay jugadores visibles en la cola." />
+            ) : (
+              queuePreviewForDisplay.map((entry, index) => (
+                <div key={entry.userId} style={queueRowStyle}>
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.75rem",
+                      minWidth: 0,
+                    }}
+                  >
+                    <div style={queueAvatarStyle}>
+                      {entry.username.slice(0, 2).toUpperCase()}
+                    </div>
+                    <div style={{ minWidth: 0 }}>
+                      <div
+                        style={{
+                          color: "#fff",
+                          fontWeight: 800,
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {entry.username}{" "}
+                        {entry.userId === user.id ? "(vos)" : ""}
+                      </div>
+                      <div
+                        style={{
+                          color: "rgba(232,244,255,0.34)",
+                          fontSize: "0.78rem",
+                        }}
+                      >
+                        #{index + 1} · {formatCompactRating(entry.mmr)} MMR ·{" "}
+                        {entry.isBot ? "bot testing" : "usuario real"}
+                      </div>
+                      {!entry.isBot &&
+                        entry.roles &&
+                        entry.roles.length > 0 && (
+                          <div
+                            style={{
+                              display: "flex",
+                              gap: "0.35rem",
+                              marginTop: "0.35rem",
+                              flexWrap: "wrap",
+                            }}
+                          >
+                            {entry.roles.map((role) => (
+                              <RolePill
+                                key={`${entry.userId}-${role}`}
+                                role={role}
+                                iconOnly
+                              />
+                            ))}
+                          </div>
+                        )}
+                    </div>
+                  </div>
+                  <div
+                    style={{
+                      color: "rgba(232,244,255,0.48)",
+                      fontSize: "0.8rem",
+                      textAlign: "right",
+                    }}
+                  >
+                    {entry.isBot
+                      ? "Sistema"
+                      : entry.joinedAt
+                        ? `${Math.max(0, Math.floor((Date.now() - entry.joinedAt) / 1000))}s`
+                        : "Esperando"}
+                  </div>
+                </div>
+              ))
+            )}
+          </div>
+        </section>
+
+        <section style={panelStyle}>
+          <button
+            type="button"
+            onClick={() => setLiveMatchesOpen((value) => !value)}
+            style={{
+              width: "100%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "1rem",
+              flexWrap: "wrap",
+              border: "none",
+              background: "transparent",
+              color: "inherit",
+              cursor: "pointer",
+              padding: 0,
+              textAlign: "left",
+            }}
+          >
+            <PanelTitle
+              eyebrow="Nexus live rooms"
+              title={`Partidas en curso · ${liveMatches.length}`}
+            />
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}
+            >
               <div
                 style={{
-                  color: "#7dd3fc",
+                  color: liveMatches.length
+                    ? "#7dd3fc"
+                    : "rgba(232,244,255,0.38)",
                   fontFamily: "var(--font-display)",
+                  fontSize: "0.86rem",
                   fontWeight: 900,
                   letterSpacing: "0.12em",
                   textTransform: "uppercase",
                 }}
               >
-                Posición {queuePosition ?? "—"} · Espera estimada{" "}
-                {queueEtaSeconds != null
-                  ? `~${queueEtaSeconds}s`
-                  : "calculando"}
+                {liveMatches.length ? "Observar rooms" : "Sin actividad"}
               </div>
+              <ChevronDown
+                size={16}
+                style={{
+                  color: "rgba(232,244,255,0.42)",
+                  transform: liveMatchesOpen
+                    ? "rotate(180deg)"
+                    : "rotate(0deg)",
+                  transition: "transform 160ms ease",
+                  flexShrink: 0,
+                }}
+              />
             </div>
+          </button>
 
-            <div style={{ display: "grid", gap: "0.55rem" }}>
-              {queuePreviewForDisplay.length === 0 ? (
-                <Notice text="Todavía no hay jugadores visibles en la cola." />
+          {liveMatchesOpen && (
+            <div
+              style={{ marginTop: "0.9rem", display: "grid", gap: "0.7rem" }}
+            >
+              {liveMatches.length === 0 ? (
+                <Notice text="No hay matchrooms en vivo ahora. Cuando empiece un veto o una partida, va a aparecer acá para observar." />
               ) : (
-                queuePreviewForDisplay.map((entry, index) => (
-                  <div key={entry.userId} style={queueRowStyle}>
-                    <div
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "0.75rem",
-                        minWidth: 0,
-                      }}
-                    >
-                      <div style={queueAvatarStyle}>
-                        {entry.username.slice(0, 2).toUpperCase()}
-                      </div>
-                      <div style={{ minWidth: 0 }}>
-                        <div
-                          style={{
-                            color: "#fff",
-                            fontWeight: 800,
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {entry.username}{" "}
-                          {entry.userId === user.id ? "(vos)" : ""}
-                        </div>
-                        <div
-                          style={{
-                            color: "rgba(232,244,255,0.34)",
-                            fontSize: "0.78rem",
-                          }}
-                        >
-                          #{index + 1} · {formatCompactRating(entry.mmr)} MMR ·{" "}
-                          {entry.isBot ? "bot testing" : "usuario real"}
-                        </div>
-                        {!entry.isBot &&
-                          entry.roles &&
-                          entry.roles.length > 0 && (
-                            <div
-                              style={{
-                                display: "flex",
-                                gap: "0.35rem",
-                                marginTop: "0.35rem",
-                                flexWrap: "wrap",
-                              }}
-                            >
-                              {entry.roles.map((role) => (
-                                <RolePill
-                                  key={`${entry.userId}-${role}`}
-                                  role={role}
-                                  iconOnly
-                                />
-                              ))}
-                            </div>
-                          )}
-                      </div>
-                    </div>
-                    <div
-                      style={{
-                        color: "rgba(232,244,255,0.48)",
-                        fontSize: "0.8rem",
-                        textAlign: "right",
-                      }}
-                    >
-                      {entry.isBot
-                        ? "Sistema"
-                        : entry.joinedAt
-                          ? `${Math.max(0, Math.floor((Date.now() - entry.joinedAt) / 1000))}s`
-                          : "Esperando"}
-                    </div>
-                  </div>
+                liveMatches.map((match) => (
+                  <LiveMatchCard
+                    key={match.id}
+                    match={match}
+                    onOpen={() =>
+                      navigate({
+                        to: "/match/$matchId",
+                        params: { matchId: match.id },
+                      })
+                    }
+                  />
                 ))
               )}
             </div>
-          </section>
-        )}
+          )}
+        </section>
 
         {hiddenActiveMatchId && (
           <section
@@ -1467,35 +1783,68 @@ export function Dashboard() {
           </section>
         )}
 
-        <section
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(3, 1fr)",
-            gap: "0.8rem",
-          }}
-        >
-          <StatPanel
-            label="Winrate"
-            value={
-              user.wins + user.losses > 0
-                ? `${Math.round((user.wins / (user.wins + user.losses)) * 100)}%`
-                : "—"
-            }
-            sub={`${user.wins}W / ${user.losses}L`}
-            tone="#4ade80"
-          />
-          <StatPanel
-            label="MMR actual"
-            value={user.mmr.toLocaleString()}
-            sub="Rating global"
-            tone="#38bdf8"
-          />
-          <StatPanel
-            label="Partidas"
-            value={(user.wins + user.losses).toString()}
-            sub="Temporada actual"
-            tone="#facc15"
-          />
+        <section style={panelStyle}>
+          <button
+            type="button"
+            onClick={() => setIsOpsLogOpen((v) => !v)}
+            style={{
+              width: "100%",
+              display: "flex",
+              justifyContent: "space-between",
+              alignItems: "center",
+              gap: "1rem",
+              flexWrap: "wrap",
+              border: "none",
+              background: "transparent",
+              color: "inherit",
+              cursor: "pointer",
+              padding: 0,
+              textAlign: "left",
+            }}
+          >
+            <PanelTitle
+              eyebrow="Live logs"
+              title="Actividad operativa del matchmaking"
+            />
+            <div
+              style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}
+            >
+              <div
+                style={{
+                  color: "rgba(232,244,255,0.42)",
+                  fontSize: "0.78rem",
+                  textTransform: "uppercase",
+                  letterSpacing: "0.14em",
+                  fontWeight: 800,
+                }}
+              >
+                {opsEvents.length}/10
+              </div>
+              <ChevronDown
+                size={16}
+                style={{
+                  color: "rgba(232,244,255,0.42)",
+                  transform: isOpsLogOpen ? "rotate(180deg)" : "rotate(0deg)",
+                  transition: "transform 160ms ease",
+                  flexShrink: 0,
+                }}
+              />
+            </div>
+          </button>
+
+          {isOpsLogOpen && (
+            <div style={{ marginTop: "0.75rem" }}>
+              {opsEvents.length === 0 ? (
+                <Notice text="Todavía no hay eventos. Entrá a cola para empezar a registrar actividad en vivo." />
+              ) : (
+                <div style={{ display: "grid", gap: "0.55rem" }}>
+                  {opsEvents.map((event) => (
+                    <OpsEventRow key={event.id} event={event} />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </section>
 
         {user.role === "ADMIN" && (
@@ -1559,7 +1908,17 @@ export function Dashboard() {
                     (player) => player.accepted === true,
                   ).length;
                   return (
-                    <div key={match.id} style={adminMatchStyle}>
+                    <div
+                      key={match.id}
+                      style={{
+                        ...adminMatchStyle,
+                        gridTemplateColumns: isSm
+                          ? "1fr"
+                          : isMd
+                            ? "minmax(0, 1fr) auto"
+                            : adminMatchStyle.gridTemplateColumns,
+                      }}
+                    >
                       <div style={{ minWidth: 0 }}>
                         <div style={{ color: "#fff", fontWeight: 900 }}>
                           {match.status} · {match.id.slice(0, 8)}
@@ -1664,21 +2023,25 @@ function PanelTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
   );
 }
 
-function HeroMetric({
+function QueueBriefStat({
   label,
   value,
+  sub,
   tone,
 }: {
   label: string;
   value: string | number;
+  sub: string;
   tone: string;
 }) {
   return (
     <div
       style={{
         border: "1px solid rgba(232,244,255,0.08)",
-        background: "rgba(2,6,14,0.58)",
-        padding: "0.8rem 0.9rem",
+        background:
+          "linear-gradient(180deg, rgba(2,6,14,0.62), rgba(2,6,14,0.38))",
+        padding: "0.72rem 0.8rem",
+        minWidth: 0,
       }}
     >
       <div
@@ -1696,69 +2059,10 @@ function HeroMetric({
         style={{
           color: tone,
           fontFamily: "var(--font-display)",
-          fontSize: "1.35rem",
+          fontSize: "1.12rem",
           fontWeight: 900,
           lineHeight: 1.05,
-          marginTop: "0.25rem",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
-function QueueSignalCard({
-  icon,
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  icon: React.ReactNode;
-  label: string;
-  value: string;
-  sub: string;
-  tone: string;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid rgba(232,244,255,0.08)",
-        background: "rgba(2,6,14,0.58)",
-        padding: "0.85rem 0.95rem",
-        display: "grid",
-        gap: "0.35rem",
-        minWidth: 0,
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "0.75rem",
-          color: "rgba(232,244,255,0.34)",
-          fontSize: "0.64rem",
-          textTransform: "uppercase",
-          letterSpacing: "0.16em",
-          fontWeight: 900,
-        }}
-      >
-        <span>{label}</span>
-        <span
-          style={{ color: tone, display: "inline-grid", placeItems: "center" }}
-        >
-          {icon}
-        </span>
-      </div>
-      <div
-        style={{
-          color: tone,
-          fontFamily: "var(--font-display)",
-          fontSize: "1.05rem",
-          lineHeight: 1.05,
-          fontWeight: 900,
+          marginTop: "0.22rem",
           letterSpacing: "0.06em",
           textTransform: "uppercase",
           whiteSpace: "nowrap",
@@ -1771,14 +2075,217 @@ function QueueSignalCard({
       <div
         style={{
           color: "rgba(232,244,255,0.48)",
-          fontSize: "0.79rem",
-          lineHeight: 1.45,
+          fontSize: "0.72rem",
+          lineHeight: 1.35,
+          marginTop: "0.26rem",
         }}
       >
         {sub}
       </div>
     </div>
   );
+}
+
+function LiveMatchCard({
+  match,
+  onOpen,
+}: {
+  match: LiveMatchRow;
+  onOpen: () => void;
+}) {
+  const teamOne = match.teams[1] ?? [];
+  const teamTwo = match.teams[2] ?? [];
+  const teamOneCaptain = teamOne.find((player) => player.isCaptain);
+  const teamTwoCaptain = teamTwo.find((player) => player.isCaptain);
+  const statusMeta = getLiveMatchStatusMeta(match.status);
+  const totalPlayers = teamOne.length + teamTwo.length;
+  const avgMmr =
+    totalPlayers > 0
+      ? Math.round(
+          [...teamOne, ...teamTwo].reduce(
+            (sum, player) => sum + player.mmr,
+            0,
+          ) / totalPlayers,
+        )
+      : 0;
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${statusMeta.tone}2e`,
+        background:
+          "linear-gradient(135deg, rgba(2,6,14,0.82), rgba(15,23,42,0.72))",
+        padding: "0.9rem",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gap: "0.9rem",
+        alignItems: "center",
+      }}
+    >
+      <div style={{ display: "grid", gap: "0.7rem", minWidth: 0 }}>
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "0.75rem",
+            flexWrap: "wrap",
+          }}
+        >
+          <div style={{ minWidth: 0 }}>
+            <div
+              style={{
+                color: statusMeta.tone,
+                fontSize: "0.68rem",
+                fontWeight: 900,
+                letterSpacing: "0.18em",
+                textTransform: "uppercase",
+              }}
+            >
+              {statusMeta.label} · {match.region}
+              {match.viewerTeam ? ` · Tu equipo ${match.viewerTeam}` : ""}
+            </div>
+            <div
+              style={{
+                color: "#fff",
+                fontFamily: "var(--font-display)",
+                fontSize: "1rem",
+                fontWeight: 900,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                marginTop: "0.15rem",
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                textOverflow: "ellipsis",
+              }}
+            >
+              {teamOneCaptain?.username ?? "Team Azul"} vs{" "}
+              {teamTwoCaptain?.username ?? "Team Rojo"}
+            </div>
+          </div>
+          <div
+            style={{
+              color: "rgba(232,244,255,0.46)",
+              fontSize: "0.78rem",
+              fontWeight: 800,
+              textAlign: "right",
+            }}
+          >
+            {match.selectedMap ?? "Mapa pendiente"} · {avgMmr} MMR avg
+          </div>
+        </div>
+
+        <div
+          style={{
+            display: "grid",
+            gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
+            gap: "0.7rem",
+            alignItems: "center",
+          }}
+        >
+          <LiveTeamPreview team={teamOne} color="#00c8ff" align="left" />
+          <div
+            style={{
+              color: "rgba(232,244,255,0.24)",
+              fontFamily: "var(--font-display)",
+              fontWeight: 900,
+              letterSpacing: "0.2em",
+              textTransform: "uppercase",
+            }}
+          >
+            VS
+          </div>
+          <LiveTeamPreview team={teamTwo} color="#ff4757" align="right" />
+        </div>
+
+        <div
+          style={{
+            display: "flex",
+            gap: "0.45rem",
+            flexWrap: "wrap",
+            color: "rgba(232,244,255,0.48)",
+            fontSize: "0.76rem",
+            fontWeight: 700,
+          }}
+        >
+          <span>{totalPlayers}/10 jugadores</span>
+          <span>·</span>
+          <span>
+            Conectados {match.readyCount}/{match.totalPlayers}
+          </span>
+          {match.status === "VOTING" && (
+            <>
+              <span>·</span>
+              <span>
+                Votos {match.voteCounts.total}/{match.totalPlayers}
+              </span>
+            </>
+          )}
+          <span>·</span>
+          <span>ID {match.id.slice(0, 8)}</span>
+        </div>
+      </div>
+
+      <button onClick={onOpen} style={spectateButtonStyle}>
+        Ver room
+      </button>
+    </div>
+  );
+}
+
+function LiveTeamPreview({
+  team,
+  color,
+  align,
+}: {
+  team: LiveMatchRow["teams"][1];
+  color: string;
+  align: "left" | "right";
+}) {
+  return (
+    <div
+      style={{
+        display: "flex",
+        justifyContent: align === "left" ? "flex-start" : "flex-end",
+        alignItems: "center",
+        gap: "0.35rem",
+        minWidth: 0,
+      }}
+    >
+      {team.slice(0, 5).map((player) => (
+        <div
+          key={player.userId ?? player.username}
+          title={player.username}
+          style={{
+            width: "30px",
+            height: "30px",
+            border: `1px solid ${player.isCaptain ? color : "rgba(232,244,255,0.12)"}`,
+            background: player.isCaptain ? `${color}22` : "rgba(2,6,14,0.72)",
+            color: player.isCaptain ? color : "rgba(232,244,255,0.72)",
+            display: "grid",
+            placeItems: "center",
+            fontFamily: "var(--font-display)",
+            fontSize: "0.7rem",
+            fontWeight: 900,
+            clipPath:
+              "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))",
+          }}
+        >
+          {player.username.slice(0, 2).toUpperCase()}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function getLiveMatchStatusMeta(status: LiveMatchRow["status"]) {
+  switch (status) {
+    case "VETOING":
+      return { label: "Veto en vivo", tone: "#7dd3fc" };
+    case "PLAYING":
+      return { label: "Jugando", tone: "#4ade80" };
+    case "VOTING":
+      return { label: "Votando resultado", tone: "#c084fc" };
+  }
 }
 
 function RolePill({
@@ -1814,6 +2321,8 @@ function RolePill({
         <img
           src={iconSources?.primary}
           alt=""
+          loading="lazy"
+          decoding="async"
           onError={(event) => {
             if (
               !iconSources?.fallback ||
@@ -1903,51 +2412,218 @@ function Notice({ text, tone = "default" }: { text: string; tone?: Tone }) {
   );
 }
 
+function OpsEventRow({ event }: { event: OpsEvent }) {
+  const palette =
+    event.tone === "good"
+      ? {
+          border: "rgba(74,222,128,0.22)",
+          bg: "rgba(21,128,61,0.12)",
+          dot: "#4ade80",
+          title: "#bbf7d0",
+        }
+      : event.tone === "warn"
+        ? {
+            border: "rgba(251,191,36,0.24)",
+            bg: "rgba(251,191,36,0.10)",
+            dot: "#fbbf24",
+            title: "#fde68a",
+          }
+        : {
+            border: "rgba(232,244,255,0.09)",
+            bg: "rgba(255,255,255,0.03)",
+            dot: "#7dd3fc",
+            title: "#e2e8f0",
+          };
+
+  return (
+    <div
+      style={{
+        border: `1px solid ${palette.border}`,
+        background: palette.bg,
+        padding: "0.65rem 0.8rem",
+        display: "grid",
+        gap: "0.24rem",
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "0.65rem",
+        }}
+      >
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.45rem",
+            minWidth: 0,
+          }}
+        >
+          <span
+            style={{
+              width: "8px",
+              height: "8px",
+              borderRadius: "999px",
+              background: palette.dot,
+              boxShadow: `0 0 10px ${palette.dot}66`,
+              flexShrink: 0,
+            }}
+          />
+          <span
+            style={{
+              color: palette.title,
+              fontWeight: 800,
+              whiteSpace: "nowrap",
+              overflow: "hidden",
+              textOverflow: "ellipsis",
+            }}
+          >
+            {event.title}
+          </span>
+        </div>
+        <span
+          style={{
+            color: "rgba(232,244,255,0.40)",
+            fontSize: "0.74rem",
+            fontFamily: "var(--font-mono, monospace)",
+          }}
+        >
+          {formatEventTime(event.at)}
+        </span>
+      </div>
+      <div
+        style={{
+          color: "rgba(232,244,255,0.56)",
+          fontSize: "0.82rem",
+          lineHeight: 1.35,
+        }}
+      >
+        {event.detail}
+      </div>
+    </div>
+  );
+}
+
 function StatPanel({
   label,
   value,
   sub,
   tone,
+  iconSrc,
 }: {
   label: string;
   value: string;
   sub: string;
   tone: string;
+  iconSrc?: string;
 }) {
   return (
-    <div style={panelStyle}>
+    <div
+      style={{
+        ...panelStyle,
+        position: "relative",
+        overflow: "hidden",
+        minHeight: "132px",
+        padding: "1rem 1rem 0.95rem",
+        borderColor: `${tone}33`,
+        background:
+          `radial-gradient(circle at 84% 20%, ${tone}24, transparent 32%), ` +
+          "linear-gradient(180deg, rgba(17,25,39,0.88), rgba(5,10,20,0.76))",
+        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 40px ${tone}0f`,
+      }}
+    >
       <div
         style={{
-          color: "rgba(232,244,255,0.30)",
+          position: "absolute",
+          inset: "0 0 auto 0",
+          height: "2px",
+          background: `linear-gradient(90deg, transparent, ${tone}, transparent)`,
+          opacity: 0.78,
+        }}
+      />
+
+      <div
+        style={{
+          position: "relative",
+          zIndex: 1,
+          width: iconSrc ? "calc(100% - 4rem)" : "100%",
+          color: "var(--nexus-faint)",
           fontSize: "0.68rem",
           textTransform: "uppercase",
           letterSpacing: "0.16em",
           fontWeight: 900,
+          marginLeft: "0.5rem",
         }}
       >
         {label}
       </div>
       <div
         style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "flex-start",
+          gap: "1rem",
+          zIndex: 1,
           color: tone,
           fontFamily: "var(--font-display)",
           fontSize: "2rem",
           lineHeight: 1,
           fontWeight: 900,
           marginTop: "0.35rem",
+          textShadow: `0 0 22px ${tone}55`,
         }}
       >
-        {value}
+        {iconSrc && (
+          <img
+            src={iconSrc}
+            alt=""
+            loading="lazy"
+            decoding="async"
+            style={{
+              width: "80px",
+              height: "80px",
+              objectFit: "contain",
+              filter: `drop-shadow(0 0 12px ${tone}66)`,
+            }}
+          />
+        )}
+        <div
+          style={{
+            display: "flex",
+            flexDirection: "column",
+            alignItems: "flex-start",
+            justifyContent: "flex-start",
+          }}
+        >
+          {value}
+          <div
+            style={{
+              zIndex: 1,
+              color: "rgba(232,244,255,0.36)",
+              fontSize: "0.8rem",
+              marginTop: "0.25rem",
+              lineHeight: 1.35,
+            }}
+          >
+            {sub}
+          </div>
+        </div>
       </div>
+
       <div
+        aria-hidden="true"
         style={{
-          color: "rgba(232,244,255,0.36)",
-          fontSize: "0.8rem",
-          marginTop: "0.25rem",
+          position: "absolute",
+          right: "-24px",
+          bottom: "-30px",
+          width: "120px",
+          height: "120px",
+          borderRadius: "999px",
+          border: `1px solid ${tone}16`,
         }}
-      >
-        {sub}
-      </div>
+      />
     </div>
   );
 }
@@ -2005,6 +2681,20 @@ const goldButtonStyle: React.CSSProperties = {
   padding: "0.8rem 1rem",
   fontWeight: 900,
   cursor: "pointer",
+};
+
+const spectateButtonStyle: React.CSSProperties = {
+  border: "1px solid rgba(125,211,252,0.42)",
+  background: "rgba(14,116,144,0.18)",
+  color: "#bae6fd",
+  padding: "0.72rem 0.9rem",
+  fontFamily: "var(--font-display)",
+  fontSize: "0.76rem",
+  fontWeight: 900,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+  cursor: "pointer",
+  whiteSpace: "nowrap",
 };
 
 const blueGhostButtonStyle: React.CSSProperties = {

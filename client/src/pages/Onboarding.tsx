@@ -336,7 +336,7 @@ const styles: Record<string, CSSProperties> = {
   backdropImage: {
     position: 'absolute',
     inset: 0,
-    backgroundImage: 'url(/images/greymane_1920x1200.jpg)',
+    backgroundImage: 'url(/images/greymane_1920x1200.webp)',
     backgroundSize: 'cover',
     backgroundPosition: 'center',
     opacity: 0.16,

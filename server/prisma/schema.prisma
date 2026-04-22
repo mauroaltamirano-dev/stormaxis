@@ -81,6 +81,9 @@ model User {
   matchPlayers  MatchPlayer[]
   chatMessages  ChatMessage[]
   votes         Vote[]
+  mvpVotesCast     MvpVote[] @relation("MvpVotesCast")
+  mvpVotesReceived MvpVote[] @relation("MvpVotesReceived")
+  matchMvps        Match[]   @relation("MatchMvp")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -115,6 +118,8 @@ model Match {
 
   // Post-votación
   winner    Int? // 1 o 2 (team number)
+  mvpUserId String?
+  mvpUser   User? @relation("MatchMvp", fields: [mvpUserId], references: [id])
   duration  Int? // segundos estimados
 
   // Relations
@@ -122,12 +127,14 @@ model Match {
   vetoes   MapVeto[]
   messages ChatMessage[]
   votes    Vote[]
+  mvpVotes MvpVote[]
 
   createdAt DateTime  @default(now())
   startedAt DateTime?
   endedAt   DateTime?
 
   @@index([status])
+  @@index([mvpUserId])
   @@index([createdAt])
 }
 
@@ -186,6 +193,22 @@ model Vote {
 
   @@unique([matchId, userId])
   @@index([matchId])
+}
+
+model MvpVote {
+  id      String @id @default(cuid())
+  matchId String
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId  String
+  user    User   @relation("MvpVotesCast", fields: [userId], references: [id])
+  nomineeUserId String
+  nominee User @relation("MvpVotesReceived", fields: [nomineeUserId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([matchId, userId])
+  @@index([matchId])
+  @@index([nomineeUserId])
 }
 
 model ChatMessage {

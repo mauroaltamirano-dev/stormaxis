@@ -795,7 +795,7 @@ export function Landing() {
             position: "absolute",
             inset: 0,
             y: heroY,
-            backgroundImage: "url('/images/Enforcers_1920x1200.jpg')",
+            backgroundImage: "url('/images/Enforcers_1920x1200.webp')",
             backgroundSize: "cover",
             backgroundPosition: "center 15%",
             opacity: 0.55,
@@ -1422,7 +1422,7 @@ export function Landing() {
           style={{
             position: "absolute",
             inset: 0,
-            backgroundImage: "url('/images/Mephisto_1920x1200.jpg')",
+            backgroundImage: "url('/images/Mephisto_1920x1200.webp')",
             backgroundSize: "cover",
             backgroundPosition: "center",
             opacity: 0.18,
@@ -1597,8 +1597,8 @@ export function Landing() {
                       marginTop: "0.2rem",
                     }}
                   >
-                    Los cambios de MMR pesan más al principio y se estabilizan
-                    a medida que te acercás a Immortal.
+                    Los cambios de MMR pesan más al principio y se estabilizan a
+                    medida que te acercás a Immortal.
                   </div>
                 </div>
               </div>
@@ -2024,7 +2024,7 @@ export function Landing() {
           style={{
             position: "absolute",
             inset: 0,
-            backgroundImage: "url('/images/greymane_1920x1200.jpg')",
+            backgroundImage: "url('/images/greymane_1920x1200.webp')",
             backgroundSize: "cover",
             backgroundPosition: "center",
             opacity: 0.22,
@@ -2168,23 +2168,12 @@ function Navbar({ user }: { user: { username?: string | null } | null }) {
           textDecoration: "none",
         }}
       >
-        <div
-          style={{
-            width: "40px",
-            height: "40px",
-            display: "grid",
-            placeItems: "center",
-            border: "1px solid rgba(0,200,255,0.35)",
-            background:
-              "linear-gradient(135deg, rgba(0,200,255,0.18), rgba(124,77,255,0.12))",
-            clipPath:
-              "polygon(12% 0, 100% 0, 100% 78%, 82% 100%, 0 100%, 0 18%)",
-          }}
-        >
+        <div>
           <img
-            src="/brand/logo.png"
+            src="/brand/logo.webp"
             alt="NexusGG"
-            style={{ width: "28px", height: "28px", objectFit: "contain" }}
+            decoding="async"
+            style={{ width: "50px", height: "50px", objectFit: "contain" }}
           />
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "0.7rem" }}>
@@ -2358,11 +2347,12 @@ function Footer() {
             }}
           >
             <img
-              src="/brand/logo.png"
+              src="/brand/logo.webp"
               alt="NexusGG"
+              decoding="async"
               style={{
-                width: "32px",
-                height: "32px",
+                width: "52px",
+                height: "52px",
                 objectFit: "contain",
                 filter: "grayscale(100%)",
                 opacity: 0.55,

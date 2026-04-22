@@ -11,6 +11,11 @@
     "dev": "concurrently \"npm run dev --workspace=server\" \"npm run dev --workspace=client\"",
     "dev:server": "npm run dev --workspace=server",
     "dev:client": "npm run dev --workspace=client",
+    "assets:optimize": "node scripts/optimize-assets.mjs",
+    "assets:budget": "node scripts/image-budget-report.mjs",
+    "cf:verify-images": "bash scripts/verify-cloudflare-images.sh",
+    "typecheck": "npm run typecheck --workspace=server && npm run typecheck --workspace=client",
+    "check": "npm run typecheck && npm run build --workspace=client",
     "db:migrate": "npm run db:migrate --workspace=server",
     "db:studio": "npm run db:studio --workspace=server",
     "db:seed": "npm run db:seed --workspace=server",
@@ -20,7 +25,8 @@
     "tunnel": "./bin/cloudflared tunnel --url http://localhost:5173"
   },
   "devDependencies": {
-    "concurrently": "^9.1.0"
+    "concurrently": "^9.1.0",
+    "sharp": "^0.34.5"
   },
   "engines": {
     "node": "22.x",

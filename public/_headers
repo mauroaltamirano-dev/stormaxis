@@ -1,0 +1,18 @@
+# Cloudflare Pages static cache policy for fingerprinted/static assets
+/assets/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/images/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/ranked/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/brand/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/maps/*
+  Cache-Control: public, max-age=31536000, immutable
+
+/roles/*
+  Cache-Control: public, max-age=31536000, immutable

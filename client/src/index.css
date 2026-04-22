@@ -17,7 +17,7 @@
   --nexus-purple: #7c4dff;
   --nexus-text: #e8f4ff;
   --nexus-muted: rgba(200, 220, 255, 0.45);
-  --nexus-faint: rgba(200, 220, 255, 0.15);
+  --nexus-faint: rgba(200, 220, 255, 0.568);
   --font-display: "Rajdhani", sans-serif;
   --font-body: "Exo 2", sans-serif;
 }
@@ -148,6 +148,29 @@ body::after {
   50% {
     opacity: 0.8;
   }
+}
+
+@keyframes rankBadgeShimmer {
+  0%, 75%, 100% { opacity: 0.2; }
+  82% { opacity: 0.95; }
+  91% { opacity: 0.35; }
+}
+
+@keyframes scanDown {
+  0%   { transform: translateY(-2px); opacity: 0; }
+  6%   { opacity: 0.75; }
+  84%  { opacity: 0.55; }
+  100% { transform: translateY(520px); opacity: 0; }
+}
+
+@keyframes cardEdgePulse {
+  0%, 100% { box-shadow: inherit; opacity: 0.7; }
+  50%       { opacity: 1; }
+}
+
+@keyframes slotIdlePulse {
+  0%, 100% { opacity: 0.2; }
+  50%       { opacity: 0.6; }
 }
 
 /* ─── Landing Layout ─────────────────────────────────────── */

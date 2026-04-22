@@ -1,21 +1,22 @@
 import { Server, Socket } from 'socket.io'
 import { db } from '../../infrastructure/database/client'
 import { performVeto } from '../matchmaking/matchmaking.service'
-import { castVote, finishMatch, getRealtimeMatchMeta, markPlayerReady, requestMatchCancellation } from './matches.service'
+import { castMvpVote, castVote, finishMatch, getRealtimeMatchMeta, markPlayerReady, requestMatchCancellation } from './matches.service'
 import { calculateRank } from '../users/player-progression'
+import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
 
 export function registerMatchHandlers(io: Server, socket: Socket) {
   const userId = socket.data.userId as string
 
   // Join a match room
   socket.on('match:join', async ({ matchId }: { matchId: string }) => {
-    // Verify the user is a participant
-    const player = await db.matchPlayer.findUnique({
-      where: { matchId_userId: { matchId, userId } },
+    const matchExists = await db.match.findUnique({
+      where: { id: matchId },
+      select: { id: true },
     })
 
-    if (!player) {
-      socket.emit('error', { code: 'NOT_IN_MATCH' })
+    if (!matchExists) {
+      socket.emit('error', { code: 'MATCH_NOT_FOUND' })
       return
     }
 
@@ -34,10 +35,24 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
       },
     })
     const runtime = match ? await getRealtimeMatchMeta(matchId) : null
+    const [mvpVotes, mvpRecord, discordVoice] = match
+      ? await Promise.all([
+          db.$queryRaw<Array<{ userId: string; nomineeUserId: string }>>`
+            SELECT "userId", "nomineeUserId" FROM "MvpVote" WHERE "matchId" = ${matchId}
+          `,
+          db.$queryRaw<Array<{ mvpUserId: string | null }>>`
+            SELECT "mvpUserId" FROM "Match" WHERE "id" = ${matchId}
+          `,
+          getDiscordVoiceAccessForUser(matchId, userId),
+        ])
+      : [[], [], null]
 
     socket.emit('match:state', match
       ? {
           ...match,
+          mvpUserId: mvpRecord[0]?.mvpUserId ?? null,
+          mvpVotes,
+          discordVoice,
           runtime,
           players: match.players.map((player) => ({
             ...player,
@@ -98,6 +113,16 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
   socket.on('chat:send', async ({ matchId, content }: { matchId: string; content: string }) => {
     if (!content?.trim() || content.length > 500) return
 
+    const match = await db.match.findUnique({
+      where: { id: matchId },
+      select: { status: true },
+    })
+    const chatEnabledStatuses = new Set(['ACCEPTING', 'VETOING', 'PLAYING', 'VOTING'])
+    if (!match || !chatEnabledStatuses.has(match.status)) {
+      socket.emit('error', { code: 'CHAT_DISABLED', message: 'El chat solo está disponible durante un match activo.' })
+      return
+    }
+
     const player = await db.matchPlayer.findUnique({
       where: { matchId_userId: { matchId, userId } },
       include: { user: { select: { username: true, avatar: true } } },
@@ -125,6 +150,14 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
       await castVote(matchId, userId, winner)
     } catch (err) {
       socket.emit('error', { code: 'VOTE_FAILED', message: (err as Error).message })
+    }
+  })
+
+  socket.on('mvp:cast', async ({ matchId, nomineeUserId }: { matchId: string; nomineeUserId: string }) => {
+    try {
+      await castMvpVote(matchId, userId, nomineeUserId)
+    } catch (err) {
+      socket.emit('error', { code: 'MVP_VOTE_FAILED', message: (err as Error).message })
     }
   })
 }

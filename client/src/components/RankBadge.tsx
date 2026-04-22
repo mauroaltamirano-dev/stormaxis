@@ -19,10 +19,10 @@ const SIZE_MAP = {
 } as const;
 
 const GLOW_MAP = {
-  off: { haloInset: 0, haloOpacity: 0, haloBlur: 0, shadow: 0, imgShadow: 0 },
-  soft: { haloInset: 5, haloOpacity: 0.22, haloBlur: 8, shadow: 6, imgShadow: 7 },
-  medium: { haloInset: 6, haloOpacity: 0.34, haloBlur: 10, shadow: 8, imgShadow: 9 },
-  strong: { haloInset: 8, haloOpacity: 0.48, haloBlur: 14, shadow: 11, imgShadow: 12 },
+  off:    { haloInset: 0, haloOpacity: 0,    haloBlur: 0,  shadow: 0,  imgShadow: 0  },
+  soft:   { haloInset: 2, haloOpacity: 0.12, haloBlur: 5,  shadow: 5,  imgShadow: 5  },
+  medium: { haloInset: 3, haloOpacity: 0.18, haloBlur: 7,  shadow: 6,  imgShadow: 7  },
+  strong: { haloInset: 3, haloOpacity: 0.28, haloBlur: 10, shadow: 8,  imgShadow: 9  },
 } as const;
 
 export function RankBadge({
@@ -40,7 +40,8 @@ export function RankBadge({
   const sizing = SIZE_MAP[size];
   const glowMeta = GLOW_MAP[glow];
   const isHighRank = meta.level >= 9;
-  const haloOpacity = glow === "off" ? 0 : glowMeta.haloOpacity + (meta.level >= 7 ? 0.08 : 0);
+  const haloOpacity =
+    glow === "off" ? 0 : glowMeta.haloOpacity + (meta.level >= 7 ? 0.08 : 0);
   const haloInset = glowMeta.haloInset + (meta.level >= 9 ? 1 : 0);
   const haloBlur = glowMeta.haloBlur + (meta.level >= 9 ? 2 : 0);
   const shadowSize = glowMeta.shadow + Math.max(0, meta.level - 7) * 2;
@@ -77,7 +78,9 @@ export function RankBadge({
               opacity: haloOpacity,
               zIndex: -1,
               filter: `blur(${haloBlur}px)`,
-              animation: shouldPulse ? "pulseGlow 2s infinite ease-in-out" : undefined,
+              animation: shouldPulse
+                ? "rankBadgeShimmer 6s ease-in-out infinite"
+                : undefined,
             }}
           />
         )}
@@ -104,6 +107,8 @@ export function RankBadge({
           <img
             src={meta.iconSrc}
             alt={meta.label}
+            loading="lazy"
+            decoding="async"
             onError={() => setIconFailed(true)}
             style={{
               width: sizing.icon,

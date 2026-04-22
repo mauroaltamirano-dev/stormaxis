@@ -118,14 +118,14 @@ export function isDiscordConfigured() {
 }
 
 export function getClientUrl() {
-  const preferred = process.env.CLIENT_URL
-  if (preferred) return preferred
-
   const fromList = process.env.CLIENT_URLS
     ?.split(',')
     .map((origin) => origin.trim())
     .find(Boolean)
   if (fromList) return fromList
+
+  const preferred = process.env.CLIENT_URL
+  if (preferred) return preferred
 
   return 'http://localhost:5173'
 }

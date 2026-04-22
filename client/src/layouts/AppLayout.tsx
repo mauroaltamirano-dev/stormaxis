@@ -28,7 +28,6 @@ import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { useSocketStore } from "../stores/socket.store";
 import { useMatchmakingStore } from "../stores/matchmaking.store";
-import { RankBadge } from "../components/RankBadge";
 import { getRoleIconSources, getRoleMeta } from "../lib/roles";
 import { getRankMeta } from "../lib/ranks";
 import {
@@ -36,6 +35,7 @@ import {
   getQueueLifecycleMeta,
   type MatchLifecycleStatus,
 } from "../lib/competitiveStatus";
+import { MAP_ID_BY_NAME } from "@nexusgg/shared";
 
 const LEVEL_BANDS = [
   { level: 1, min: 0, max: 199 },
@@ -131,6 +131,23 @@ function formatMatchDate(value: string) {
   });
 }
 
+function formatMatchRelativeTime(value: string) {
+  const diffMs = Date.now() - new Date(value).getTime();
+  const minutes = Math.max(1, Math.floor(diffMs / 60_000));
+  if (minutes < 60) return `${minutes} min atrás`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours} h atrás`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days} d atrás`;
+  return formatMatchDate(value);
+}
+
+function getMatchMapImage(selectedMap: string | null) {
+  if (!selectedMap) return null;
+  const mapId = MAP_ID_BY_NAME[selectedMap];
+  return mapId ? `/maps/${mapId}.webp` : null;
+}
+
 function formatQueueTime(seconds: number) {
   const minutes = Math.floor(seconds / 60)
     .toString()
@@ -147,7 +164,11 @@ function winrate(wins: number, losses: number) {
 
 export function AppLayout() {
   const { user, accessToken, logout, updateUser } = useAuthStore();
-  const { status: socketStatus, reconnectAttempts, lastError } = useSocketStore();
+  const {
+    status: socketStatus,
+    reconnectAttempts,
+    lastError,
+  } = useSocketStore();
   const {
     status: matchmakingStatus,
     searchStartedAt,
@@ -180,18 +201,21 @@ export function AppLayout() {
   const level = levelMeta.level;
   const rankMeta = getRankMeta(level);
   const rankColor = rankMeta.color;
+  const nextRankMeta = getRankMeta(Math.min(10, level + 1));
+  const nextRankColor = level >= 10 ? rankColor : nextRankMeta.color;
   const pointsToNextLevel =
     !user || levelMeta.nextLevelAt == null
       ? 0
       : Math.max(0, levelMeta.nextLevelAt - user.mmr);
   const socketMeta = getSocketMeta(socketStatus);
   const isSearchingMatch = matchmakingStatus === "searching";
-  const isMatchFound = matchmakingStatus === "found" || matchmakingStatus === "accepting";
+  const isMatchFound =
+    matchmakingStatus === "found" || matchmakingStatus === "accepting";
   const hasTrackedActiveMatch = Boolean(
     activeMatchSnapshot &&
-      ["VETOING", "PLAYING", "VOTING", "COMPLETED", "CANCELLED"].includes(
-        activeMatchSnapshot.status,
-      ),
+    ["VETOING", "PLAYING", "VOTING", "COMPLETED", "CANCELLED"].includes(
+      activeMatchSnapshot.status,
+    ),
   );
 
   useEffect(() => {
@@ -201,7 +225,9 @@ export function AppLayout() {
     }
 
     const tick = () => {
-      setQueueElapsed(Math.max(0, Math.floor((Date.now() - searchStartedAt) / 1000)));
+      setQueueElapsed(
+        Math.max(0, Math.floor((Date.now() - searchStartedAt) / 1000)),
+      );
     };
     tick();
     const interval = window.setInterval(tick, 1000);
@@ -236,7 +262,9 @@ export function AppLayout() {
 
     async function loadActiveMatchSnapshot() {
       try {
-        const { data } = await api.get<{ match: any | null }>("/matchmaking/active");
+        const { data } = await api.get<{ match: any | null }>(
+          "/matchmaking/active",
+        );
         if (cancelled) return;
 
         const match = data.match;
@@ -422,10 +450,15 @@ export function AppLayout() {
         `/admin/users/${user.id}/mmr`,
         { mmr: nextMmr },
       );
+      const nextLevelMeta = getLevelMeta(data.mmr);
 
       updateUser({
         mmr: data.mmr,
         rank: data.rank,
+        level: nextLevelMeta.level,
+        levelProgressPct: nextLevelMeta.progressPct,
+        nextLevelAt: nextLevelMeta.nextLevelAt,
+        displayLevel: getRankMeta(nextLevelMeta.level).label,
       });
     } catch (err: any) {
       setAdminMmrError(
@@ -452,9 +485,12 @@ export function AppLayout() {
     <div style={styles.shell}>
       <aside style={styles.commandRail}>
         <Link to="/dashboard" style={styles.brandLockup}>
-          <div style={styles.brandMarkWrap}>
-            <img src="/brand/logo.png" alt="NexusGG" style={styles.brandMark} />
-          </div>
+          <img
+            src="/brand/logo.webp"
+            alt="NexusGG"
+            decoding="async"
+            style={styles.brandMark}
+          />
           <div>
             <div style={styles.brandName}>NexusGG</div>
             <div style={styles.brandSubline}>HOTS SA Command</div>
@@ -487,11 +523,21 @@ export function AppLayout() {
                     onClick={() => openPlayer(player.username)}
                     style={styles.searchResultButton}
                   >
-                    <Avatar username={player.username} avatar={player.avatar} size={32} />
+                    <Avatar
+                      username={player.username}
+                      avatar={player.avatar}
+                      size={32}
+                    />
                     <div style={{ minWidth: 0, flex: 1 }}>
-                      <div style={styles.searchResultName}>{player.username}</div>
+                      <div style={styles.searchResultName}>
+                        {player.username}
+                      </div>
                       <div style={styles.searchResultMeta}>
-                        {(player.displayLevel ?? getRankMeta(player.level ?? getLevelMeta(player.mmr).level).label)} · {player.mmr} MMR
+                        {player.displayLevel ??
+                          getRankMeta(
+                            player.level ?? getLevelMeta(player.mmr).level,
+                          ).label}{" "}
+                        · {player.mmr} MMR
                       </div>
                     </div>
                     <ChevronRight size={15} color="rgba(232,244,255,0.45)" />
@@ -527,7 +573,11 @@ export function AppLayout() {
 
         <RailSection eyebrow="Cuenta">
           {accountNav.map((item) => (
-            <RailItem key={item.label} item={item} active={isNavActive(pathname, item)} />
+            <RailItem
+              key={item.label}
+              item={item}
+              active={isNavActive(pathname, item)}
+            />
           ))}
         </RailSection>
 
@@ -549,7 +599,11 @@ export function AppLayout() {
             </a>
           </div>
 
-          <button type="button" onClick={handleLogout} style={styles.logoutButton}>
+          <button
+            type="button"
+            onClick={handleLogout}
+            style={styles.logoutButton}
+          >
             <LogOut size={15} />
             Cerrar sesión
           </button>
@@ -567,42 +621,171 @@ export function AppLayout() {
               <div style={styles.panelEyebrow}>Player spine</div>
               <div style={styles.panelTitle}>Estado competitivo</div>
             </div>
-            <div style={{ ...styles.connectionPill, borderColor: `${socketMeta.color}55` }}>
-              <span style={{ ...styles.connectionDot, background: socketMeta.color }} />
+            <div
+              style={{
+                ...styles.connectionPill,
+                borderColor: `${socketMeta.color}55`,
+              }}
+            >
+              <span
+                style={{
+                  ...styles.connectionDot,
+                  background: socketMeta.color,
+                }}
+              />
               {socketMeta.label}
             </div>
           </div>
 
-          <button type="button" onClick={openOwnProfile} style={styles.identityButton}>
-            <div style={styles.identityBlock}>
-              <div style={styles.identityAvatarWrap}>
-                <Avatar username={user.username} avatar={user.avatar} size={72} />
+          <button
+            type="button"
+            onClick={openOwnProfile}
+            style={styles.identityButton}
+          >
+            {/* Hex avatar + floating rank icon */}
+            <div
+              style={{
+                display: "flex",
+                justifyContent: "center",
+                marginBottom: "2px",
+              }}
+            >
+              <div style={{ position: "relative" }}>
+                <div
+                  style={{
+                    width: "82px",
+                    height: "82px",
+                    clipPath:
+                      "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
+                    background: `linear-gradient(135deg, ${rankColor}, ${rankColor}44)`,
+                    display: "grid",
+                    placeItems: "center",
+                  }}
+                >
+                  <div
+                    style={{
+                      width: "76px",
+                      height: "76px",
+                      clipPath:
+                        "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
+                      overflow: "hidden",
+                      display: "grid",
+                      placeItems: "center",
+                      background: "rgba(4,10,20,0.95)",
+                      color: rankColor,
+                      fontFamily: "var(--font-display)",
+                      fontWeight: 900,
+                      fontSize: "22px",
+                    }}
+                  >
+                    <Avatar
+                      username={user.username}
+                      avatar={user.avatar}
+                      size={76}
+                    />
+                  </div>
+                </div>
+                <img
+                  src={rankMeta.iconSrc}
+                  alt={rankMeta.label}
+                  loading="lazy"
+                  decoding="async"
+                  style={{
+                    position: "absolute",
+                    right: "-8px",
+                    bottom: "-4px",
+                    width: "30px",
+                    height: "30px",
+                    objectFit: "contain",
+                    filter: `drop-shadow(0 0 10px ${rankColor})`,
+                  }}
+                />
               </div>
-              <div style={{ minWidth: 0 }}>
-                <div style={styles.username}>{user.username}</div>
-                <div style={{ ...styles.rankLine, color: rankColor }}>
-                  {rankMeta.label} · {user.mmr.toLocaleString("es-AR")} MMR
-                </div>
-                <div style={{ marginTop: "0.6rem" }}>
-                  <RankBadge
-                    level={level}
-                    mmr={user.mmr}
-                    size="md"
-                    glow="medium"
-                  />
-                </div>
-                <div style={styles.roleRow}>
-                  <RoleBadge role={user.mainRole as PlayerRole | null | undefined} fallback="Main sin definir" />
-                  <RoleBadge role={user.secondaryRole as PlayerRole | null | undefined} fallback="Alt sin definir" muted />
-                </div>
+            </div>
+
+            {/* Username + server tag */}
+            <div style={{ textAlign: "center", display: "grid", gap: "3px" }}>
+              <div
+                style={{
+                  fontFamily: "var(--font-display)",
+                  fontSize: "18px",
+                  fontWeight: 900,
+                  letterSpacing: "0.8px",
+                  color: "var(--nexus-text)",
+                  lineHeight: 1,
+                }}
+              >
+                {user.username}
               </div>
+              <div
+                style={{
+                  color: "rgba(232,244,255,0.28)",
+                  fontSize: "9.5px",
+                  fontWeight: 800,
+                  letterSpacing: "1.6px",
+                  textTransform: "uppercase",
+                }}
+              >
+                NexusGG · SA Server
+              </div>
+            </div>
+
+            {/* Rank + MMR */}
+            <div
+              style={{
+                textAlign: "center",
+                borderTop: `1px solid ${rankColor}22`,
+                paddingTop: "12px",
+                display: "grid",
+                gap: "3px",
+              }}
+            >
+              <div
+                style={{
+                  color: rankColor,
+                  fontFamily: "var(--font-display)",
+                  fontSize: "14px",
+                  fontWeight: 900,
+                  letterSpacing: "1.4px",
+                  textTransform: "uppercase",
+                  textShadow: `0 0 14px ${rankColor}44`,
+                }}
+              >
+                {rankMeta.label}
+              </div>
+              <div
+                style={{
+                  color: "rgba(232,244,255,0.48)",
+                  fontFamily: "var(--font-display)",
+                  fontSize: "12px",
+                  fontWeight: 800,
+                  letterSpacing: "0.8px",
+                }}
+              >
+                {user.mmr.toLocaleString("es-AR")} MMR
+              </div>
+            </div>
+
+            {/* Roles */}
+            <div style={styles.roleRow}>
+              <RoleBadge
+                role={user.mainRole as PlayerRole | null | undefined}
+                fallback="Main sin definir"
+              />
+              <RoleBadge
+                role={user.secondaryRole as PlayerRole | null | undefined}
+                fallback="Alt sin definir"
+                muted
+              />
             </div>
           </button>
 
           <div style={styles.progressHeader}>
             <span>Progreso al próximo rango</span>
             <strong style={{ color: rankColor }}>
-              {levelMeta.nextLevelAt == null ? "Rango máximo" : `+${pointsToNextLevel}`}
+              {levelMeta.nextLevelAt == null
+                ? "Rango máximo"
+                : `+${pointsToNextLevel}`}
             </strong>
           </div>
           <div style={styles.progressTrack}>
@@ -610,7 +793,7 @@ export function AppLayout() {
               style={{
                 ...styles.progressFill,
                 width: `${levelMeta.progressPct}%`,
-                background: `linear-gradient(90deg, ${rankColor}, #00c8ff)`,
+                background: `linear-gradient(90deg, ${rankColor}, ${nextRankColor})`,
               }}
             />
             <div style={styles.progressGrid} />
@@ -619,7 +802,11 @@ export function AppLayout() {
           <div style={styles.statsGrid}>
             <SpineStat label="Wins" value={user.wins} tone="#4ade80" />
             <SpineStat label="Losses" value={user.losses} tone="#fb7185" />
-            <SpineStat label="WR" value={`${winrate(user.wins, user.losses)}%`} tone="#38bdf8" />
+            <SpineStat
+              label="WR"
+              value={`${winrate(user.wins, user.losses)}%`}
+              tone="#38bdf8"
+            />
           </div>
 
           {user.role === "ADMIN" && (
@@ -653,14 +840,19 @@ export function AppLayout() {
                         action.delta > 0
                           ? "rgba(34,197,94,0.10)"
                           : "rgba(239,68,68,0.10)",
-                      opacity: adminMmrBusy != null && adminMmrBusy !== action.delta ? 0.65 : 1,
+                      opacity:
+                        adminMmrBusy != null && adminMmrBusy !== action.delta
+                          ? 0.65
+                          : 1,
                     }}
                   >
                     {adminMmrBusy === action.delta ? "..." : action.label}
                   </button>
                 ))}
               </div>
-              {adminMmrError && <div style={styles.adminMmrError}>{adminMmrError}</div>}
+              {adminMmrError && (
+                <div style={styles.adminMmrError}>{adminMmrError}</div>
+              )}
             </div>
           )}
         </section>
@@ -675,12 +867,17 @@ export function AppLayout() {
               <Swords size={16} color="var(--nexus-accent)" />
               <div>
                 <div style={styles.panelTitle}>Historial rápido</div>
-                <div style={styles.panelSubline}>Últimas partidas guardadas</div>
+                <div style={styles.panelSubline}>
+                  Últimas partidas guardadas
+                </div>
               </div>
             </div>
             <ChevronDown
               size={16}
-              style={{ transform: isHistoryOpen ? "rotate(180deg)" : "rotate(0deg)", transition: "160ms" }}
+              style={{
+                transform: isHistoryOpen ? "rotate(180deg)" : "rotate(0deg)",
+                transition: "160ms",
+              }}
             />
           </button>
 
@@ -707,10 +904,23 @@ export function AppLayout() {
           </div>
           <div style={styles.telemetryList}>
             <TelemetryRow icon={Users} label="Amigos" value="Pendiente" />
-            <TelemetryRow icon={Bell} label="Notificaciones" value="Próximamente" />
-            <TelemetryRow icon={Shield} label="Anti-smurf" value="Planificado" />
+            <TelemetryRow
+              icon={Bell}
+              label="Notificaciones"
+              value="Próximamente"
+            />
+            <TelemetryRow
+              icon={Shield}
+              label="Anti-smurf"
+              value="Planificado"
+            />
             {socketStatus === "reconnecting" && (
-              <TelemetryRow icon={Zap} label="Realtime" value={`${reconnectAttempts} reintentos`} warn />
+              <TelemetryRow
+                icon={Zap}
+                label="Realtime"
+                value={`${reconnectAttempts} reintentos`}
+                warn
+              />
             )}
             {socketStatus === "error" && lastError && (
               <div style={styles.errorNote}>{lastError}</div>
@@ -724,19 +934,27 @@ export function AppLayout() {
 
 function isNavActive(pathname: string, item: NavItem) {
   if (!item.to) return false;
-  if (item.to === "/profile") return pathname === "/profile" || pathname.startsWith("/profile/");
+  if (item.to === "/profile")
+    return pathname === "/profile" || pathname.startsWith("/profile/");
   return pathname === item.to;
 }
 
 function getSocketMeta(status: string) {
   if (status === "connected") return { label: "Online", color: "#4ade80" };
   if (status === "connecting") return { label: "Conectando", color: "#38bdf8" };
-  if (status === "reconnecting") return { label: "Reconectando", color: "#facc15" };
+  if (status === "reconnecting")
+    return { label: "Reconectando", color: "#facc15" };
   if (status === "error") return { label: "Error", color: "#fb7185" };
   return { label: "Idle", color: "#94a3b8" };
 }
 
-function RailSection({ eyebrow, children }: { eyebrow: string; children: React.ReactNode }) {
+function RailSection({
+  eyebrow,
+  children,
+}: {
+  eyebrow: string;
+  children: React.ReactNode;
+}) {
   return (
     <section style={styles.railSection}>
       <div style={styles.railEyebrow}>{eyebrow}</div>
@@ -802,11 +1020,25 @@ function RailItem({
   );
 }
 
-function Avatar({ username, avatar, size }: { username: string; avatar: string | null; size: number }) {
+function Avatar({
+  username,
+  avatar,
+  size,
+}: {
+  username: string;
+  avatar: string | null;
+  size: number;
+}) {
   return (
     <div style={{ ...styles.avatar, width: size, height: size }}>
       {avatar ? (
-        <img src={avatar} alt={username} style={styles.avatarImage} />
+        <img
+          src={avatar}
+          alt={username}
+          loading="lazy"
+          decoding="async"
+          style={styles.avatarImage}
+        />
       ) : (
         <span>{username.slice(0, 2).toUpperCase()}</span>
       )}
@@ -839,8 +1071,14 @@ function RoleBadge({
         <img
           src={iconSources?.primary}
           alt=""
+          loading="lazy"
+          decoding="async"
           onError={(event) => {
-            if (!iconSources?.fallback || event.currentTarget.dataset.fallbackApplied === "1") return;
+            if (
+              !iconSources?.fallback ||
+              event.currentTarget.dataset.fallbackApplied === "1"
+            )
+              return;
             event.currentTarget.dataset.fallbackApplied = "1";
             event.currentTarget.src = iconSources.fallback;
           }}
@@ -857,7 +1095,15 @@ function RoleBadge({
   );
 }
 
-function SpineStat({ label, value, tone }: { label: string; value: string | number; tone: string }) {
+function SpineStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone: string;
+}) {
   return (
     <div style={styles.spineStat}>
       <div style={{ ...styles.spineStatValue, color: tone }}>{value}</div>
@@ -870,6 +1116,8 @@ function MatchHistoryItem({ entry }: { entry: MatchHistoryEntry }) {
   const won = entry.match.winner === entry.team;
   const delta = entry.mmrDelta ?? 0;
   const deltaColor = delta >= 0 ? "#4ade80" : "#fb7185";
+  const resultColor = won ? "#4ade80" : "#fb7185";
+  const mapImage = getMatchMapImage(entry.match.selectedMap);
 
   return (
     <Link
@@ -877,17 +1125,41 @@ function MatchHistoryItem({ entry }: { entry: MatchHistoryEntry }) {
       params={{ matchId: entry.match.id }}
       style={styles.historyItem}
     >
-      <div style={{ ...styles.resultStamp, color: won ? "#4ade80" : "#fb7185" }}>
-        {won ? "W" : "L"}
+      <div style={styles.historyThumb}>
+        {mapImage ? (
+          <img
+            src={mapImage}
+            alt=""
+            style={styles.historyThumbImage}
+            loading="lazy"
+            decoding="async"
+          />
+        ) : (
+          <div style={styles.historyThumbFallback}>
+            {entry.match.selectedMap?.slice(0, 2).toUpperCase() ?? "?"}
+          </div>
+        )}
+        <div
+          style={{
+            ...styles.historyThumbShade,
+            boxShadow: `inset 0 0 0 1px ${resultColor}26`,
+          }}
+        />
       </div>
       <div style={{ minWidth: 0 }}>
-        <div style={styles.historyMap}>{entry.match.selectedMap ?? "Mapa pendiente"}</div>
-        <div style={styles.historyMeta}>
-          {formatMatchDate(entry.match.createdAt)} · {entry.match.status.toLowerCase()}
+        <div style={styles.historyMap}>
+          {entry.match.selectedMap ?? "Mapa pendiente"}
+        </div>
+        <div style={{ ...styles.historyMeta, color: resultColor }}>
+          {won ? "Victoria" : "Derrota"}
+          <span style={styles.historyTime}>
+            {" "}
+            · {formatMatchRelativeTime(entry.match.createdAt)}
+          </span>
         </div>
       </div>
       <div style={{ ...styles.historyDelta, color: deltaColor }}>
-        {entry.mmrDelta != null ? `${delta > 0 ? "+" : ""}${delta}` : "—"}
+        {entry.mmrDelta != null ? `${delta > 0 ? "+" : ""}${delta} ELO` : "—"}
       </div>
     </Link>
   );
@@ -908,7 +1180,9 @@ function TelemetryRow({
     <div style={styles.telemetryRow}>
       <Icon size={15} color={warn ? "#facc15" : "rgba(232,244,255,0.45)"} />
       <span>{label}</span>
-      <strong style={{ color: warn ? "#facc15" : "rgba(232,244,255,0.62)" }}>{value}</strong>
+      <strong style={{ color: warn ? "#facc15" : "rgba(232,244,255,0.62)" }}>
+        {value}
+      </strong>
     </div>
   );
 }
@@ -964,15 +1238,16 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "22px",
   },
   brandMarkWrap: {
-    width: "42px",
-    height: "42px",
+    width: "78px",
+    height: "78px",
     display: "grid",
     placeItems: "center",
     border: "1px solid rgba(0,200,255,0.30)",
-    background: "linear-gradient(135deg, rgba(0,200,255,0.18), rgba(124,77,255,0.10))",
+    background:
+      "linear-gradient(135deg, rgba(0,200,255,0.18), rgba(124,77,255,0.10))",
     clipPath: "polygon(12% 0, 100% 0, 100% 78%, 82% 100%, 0 100%, 0 18%)",
   },
-  brandMark: { width: "30px", height: "30px", objectFit: "contain" },
+  brandMark: { width: "50px", height: "50px", objectFit: "contain" },
   brandName: {
     fontFamily: "var(--font-display)",
     fontSize: "20px",
@@ -1046,7 +1321,11 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "left",
     cursor: "pointer",
   },
-  searchResultName: { fontWeight: 800, fontSize: "13px", color: "var(--nexus-text)" },
+  searchResultName: {
+    fontWeight: 800,
+    fontSize: "13px",
+    color: "var(--nexus-text)",
+  },
   searchResultMeta: {
     marginTop: "3px",
     color: "var(--nexus-muted)",
@@ -1086,7 +1365,8 @@ const styles: Record<string, React.CSSProperties> = {
   railItemActive: {
     borderColor: "rgba(0,200,255,0.42)",
     borderLeftColor: "var(--nexus-accent)",
-    background: "linear-gradient(90deg, rgba(0,200,255,0.18), rgba(0,200,255,0.035))",
+    background:
+      "linear-gradient(90deg, rgba(0,200,255,0.18), rgba(0,200,255,0.035))",
     color: "#e0f7ff",
     boxShadow: "0 0 22px rgba(0,200,255,0.08)",
   },
@@ -1148,7 +1428,8 @@ const styles: Record<string, React.CSSProperties> = {
     gap: "10px",
     padding: "12px",
     border: "1px solid rgba(88,101,242,0.26)",
-    background: "linear-gradient(135deg, rgba(88,101,242,0.15), rgba(0,200,255,0.04))",
+    background:
+      "linear-gradient(135deg, rgba(88,101,242,0.15), rgba(0,200,255,0.04))",
   },
   discordTitle: {
     color: "#c7d2fe",
@@ -1158,7 +1439,11 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: "1px",
     textTransform: "uppercase",
   },
-  discordText: { marginTop: "2px", color: "rgba(232,244,255,0.42)", fontSize: "11px" },
+  discordText: {
+    marginTop: "2px",
+    color: "rgba(232,244,255,0.42)",
+    fontSize: "11px",
+  },
   discordButton: {
     width: "30px",
     height: "30px",
@@ -1203,7 +1488,8 @@ const styles: Record<string, React.CSSProperties> = {
   playerCorePanel: {
     padding: "16px",
     border: "1px solid rgba(0,200,255,0.15)",
-    background: "linear-gradient(180deg, rgba(17,25,39,0.92), rgba(8,12,20,0.80))",
+    background:
+      "linear-gradient(180deg, rgba(17,25,39,0.92), rgba(8,12,20,0.80))",
     clipPath: "polygon(0 0, 100% 0, 100% 94%, 94% 100%, 0 100%)",
   },
   spinePanel: {
@@ -1219,7 +1505,7 @@ const styles: Record<string, React.CSSProperties> = {
     marginBottom: "16px",
   },
   panelEyebrow: {
-    color: "rgba(232,244,255,0.28)",
+    color: "rgba(194, 194, 194, 0.623)",
     fontFamily: "var(--font-display)",
     fontSize: "10px",
     fontWeight: 900,
@@ -1234,7 +1520,11 @@ const styles: Record<string, React.CSSProperties> = {
     letterSpacing: "1.2px",
     textTransform: "uppercase",
   },
-  panelSubline: { marginTop: "2px", color: "var(--nexus-muted)", fontSize: "11px" },
+  panelSubline: {
+    marginTop: "2px",
+    color: "var(--nexus-muted)",
+    fontSize: "11px",
+  },
   connectionPill: {
     display: "flex",
     alignItems: "center",
@@ -1249,6 +1539,7 @@ const styles: Record<string, React.CSSProperties> = {
   },
   connectionDot: { width: "7px", height: "7px", borderRadius: "999px" },
   identityButton: {
+    width: "100%",
     border: "none",
     padding: 0,
     background: "transparent",
@@ -1256,15 +1547,29 @@ const styles: Record<string, React.CSSProperties> = {
     textAlign: "left",
     cursor: "pointer",
   },
-  identityBlock: { display: "flex", alignItems: "center", gap: "14px" },
+  identityStack: {
+    display: "flex",
+    justifyItems: "center",
+    gap: "9px",
+    alignItems: "center",
+  },
+  identitySummary: {
+    display: "grid",
+    justifyItems: "center",
+    textAlign: "center",
+  },
+  identityRankBlock: {
+    display: "flex",
+    alignItems: "center",
+    margin: "25px 0",
+    gap: "5px",
+  },
   identityAvatarWrap: {
-    width: "78px",
-    height: "78px",
+    width: "56px",
+    height: "56px",
     borderRadius: "999px",
-    border: "1px solid rgba(232,244,255,0.12)",
     display: "grid",
     placeItems: "center",
-    background: "linear-gradient(180deg, rgba(15,23,42,0.92), rgba(2,6,14,0.96))",
     flexShrink: 0,
   },
   levelOrb: {
@@ -1297,7 +1602,8 @@ const styles: Record<string, React.CSSProperties> = {
     placeItems: "center",
     overflow: "hidden",
     borderRadius: "999px",
-    background: "linear-gradient(135deg, rgba(0,200,255,0.20), rgba(124,77,255,0.18))",
+    background:
+      "linear-gradient(135deg, rgba(0,200,255,0.20), rgba(124,77,255,0.18))",
     color: "var(--nexus-accent)",
     fontFamily: "var(--font-display)",
     fontWeight: 900,
@@ -1306,19 +1612,33 @@ const styles: Record<string, React.CSSProperties> = {
   username: {
     color: "var(--nexus-text)",
     fontFamily: "var(--font-display)",
-    fontSize: "23px",
+    fontSize: "24px",
     fontWeight: 900,
     lineHeight: 1,
   },
-  rankLine: {
-    marginTop: "6px",
-    color: "rgba(232,244,255,0.56)",
-    fontSize: "12px",
-    fontWeight: 800,
-    letterSpacing: "1px",
+  identityRankName: {
+    marginTop: "2px",
+    fontFamily: "var(--font-display)",
+    fontSize: "16px",
+    fontWeight: 900,
+    lineHeight: 1,
+    letterSpacing: "1.1px",
     textTransform: "uppercase",
   },
-  roleRow: { marginTop: "10px", display: "flex", flexWrap: "wrap", gap: "6px" },
+  identityRankMmr: {
+    color: "var(--nexus-text)",
+    fontFamily: "var(--font-display)",
+    fontSize: "12px",
+    fontWeight: 900,
+    letterSpacing: "1px",
+    lineHeight: 1,
+  },
+  roleRow: {
+    display: "flex",
+    flexWrap: "wrap",
+    justifyContent: "center",
+    gap: "8px",
+  },
   roleBadge: {
     display: "inline-flex",
     alignItems: "center",
@@ -1353,14 +1673,21 @@ const styles: Record<string, React.CSSProperties> = {
   progressGrid: {
     position: "absolute",
     inset: 0,
-    backgroundImage: "linear-gradient(90deg, rgba(2,6,14,0.35) 1px, transparent 1px)",
+    backgroundImage:
+      "linear-gradient(90deg, rgba(2,6,14,0.35) 1px, transparent 1px)",
     backgroundSize: "14px 100%",
   },
-  statsGrid: { marginTop: "14px", display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "8px" },
+  statsGrid: {
+    marginTop: "14px",
+    display: "grid",
+    gridTemplateColumns: "repeat(3, 1fr)",
+    gap: "8px",
+  },
   adminMmrPanel: {
     marginTop: "14px",
     border: "1px solid rgba(192,132,252,0.18)",
-    background: "linear-gradient(180deg, rgba(76,29,149,0.10), rgba(2,6,14,0.56))",
+    background:
+      "linear-gradient(180deg, rgba(76,29,149,0.10), rgba(2,6,14,0.56))",
     padding: "10px",
     display: "grid",
     gap: "10px",
@@ -1402,7 +1729,12 @@ const styles: Record<string, React.CSSProperties> = {
     border: "1px solid rgba(232,244,255,0.06)",
     background: "rgba(255,255,255,0.025)",
   },
-  spineStatValue: { fontFamily: "var(--font-display)", fontSize: "18px", fontWeight: 900, lineHeight: 1 },
+  spineStatValue: {
+    fontFamily: "var(--font-display)",
+    fontSize: "18px",
+    fontWeight: 900,
+    lineHeight: 1,
+  },
   spineStatLabel: {
     marginTop: "4px",
     color: "rgba(232,244,255,0.30)",
@@ -1428,28 +1760,80 @@ const styles: Record<string, React.CSSProperties> = {
   historyList: { marginTop: "12px", display: "grid", gap: "8px" },
   historyItem: {
     display: "grid",
-    gridTemplateColumns: "34px minmax(0, 1fr) auto",
+    gridTemplateColumns: "54px minmax(0, 1fr) auto",
     alignItems: "center",
     gap: "10px",
-    padding: "9px",
+    minHeight: "60px",
+    padding: "7px 9px 7px 7px",
     textDecoration: "none",
     color: "inherit",
-    border: "1px solid rgba(232,244,255,0.055)",
-    background: "rgba(2,6,14,0.34)",
+    border: "1px solid rgba(69,87,116,0.35)",
+    background:
+      "linear-gradient(180deg, rgba(7,14,27,0.92), rgba(3,8,18,0.94))",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035)",
   },
-  resultStamp: {
-    height: "28px",
+  historyThumb: {
+    position: "relative",
+    width: "50px",
+    height: "42px",
+    overflow: "hidden",
+    border: "1px solid rgba(232,244,255,0.08)",
+    background: "rgba(2,6,14,0.65)",
+  },
+  historyThumbImage: {
+    width: "100%",
+    height: "100%",
+    objectFit: "cover",
+    display: "block",
+  },
+  historyThumbFallback: {
+    width: "100%",
+    height: "100%",
     display: "grid",
     placeItems: "center",
-    border: "1px solid rgba(232,244,255,0.08)",
     fontFamily: "var(--font-display)",
-    fontSize: "14px",
+    fontSize: "13px",
+    fontWeight: 900,
+    color: "rgba(232,244,255,0.45)",
+  },
+  historyThumbShade: {
+    position: "absolute",
+    inset: 0,
+    background:
+      "linear-gradient(135deg, rgba(255,255,255,0.08), transparent 44%, rgba(0,0,0,0.42))",
+  },
+  historyMap: {
+    color: "var(--nexus-text)",
+    fontSize: "12px",
+    fontWeight: 800,
+    whiteSpace: "nowrap",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+  },
+  historyMeta: {
+    marginTop: "2px",
+    fontSize: "10px",
+    textTransform: "uppercase",
+    letterSpacing: "0.8px",
     fontWeight: 900,
   },
-  historyMap: { color: "var(--nexus-text)", fontSize: "12px", fontWeight: 800, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" },
-  historyMeta: { marginTop: "2px", color: "rgba(232,244,255,0.28)", fontSize: "10px", textTransform: "uppercase", letterSpacing: "0.8px" },
-  historyDelta: { fontFamily: "var(--font-display)", fontSize: "14px", fontWeight: 900 },
-  panelHeaderRow: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" },
+  historyTime: {
+    color: "rgba(232,244,255,0.34)",
+    fontWeight: 800,
+  },
+  historyDelta: {
+    fontFamily: "var(--font-display)",
+    fontSize: "12px",
+    fontWeight: 900,
+    whiteSpace: "nowrap",
+    letterSpacing: "0.7px",
+  },
+  panelHeaderRow: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "10px",
+  },
   telemetryList: { marginTop: "12px", display: "grid", gap: "8px" },
   telemetryRow: {
     display: "grid",

@@ -6,10 +6,13 @@ import { db } from './infrastructure/database/client'
 import { redis } from './infrastructure/redis/client'
 import { scheduleTryFormMatch } from './modules/matchmaking/matchmaking.service'
 import { logger } from './infrastructure/logging/logger'
+import { validateEnv } from './shared/env'
 
 const PORT = Number(process.env.PORT) || 3000
 
 async function bootstrap() {
+  validateEnv()
+
   // Verify DB connection
   await db.$connect()
   logger.info('PostgreSQL connected')

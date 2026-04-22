@@ -58,7 +58,7 @@ Notas:
 
 - El build frontend fue reparado en esta auditoría.
 - Vite avisa que el bundle principal supera 500 kB. No bloquea, pero sugiere code splitting más adelante.
-- Este directorio no parece ser repo git inicializado actualmente (`.git` no existe en la raíz).
+- El directorio **sí** está inicializado como repo git (`.git` presente en la raíz).
 
 ---
 
@@ -462,9 +462,13 @@ Debe incluir:
 - [x] Confirmar typecheck backend.
 - [ ] Crear `.env.example` actualizado.
 - [ ] Actualizar docs para reflejar repo actual.
-- [ ] Inicializar git si este será el repo real.
+- [x] Inicializar git si este será el repo real.
 - [ ] Agregar script root `typecheck` o `check`.
 - [ ] Agregar lint/build combinado.
+- [ ] Reparar higiene de migraciones Prisma:
+  - `prisma migrate deploy` falla porque existe el directorio `server/prisma/migrations/20260421201000_add_user_onboarding_state/` sin `migration.sql`.
+  - Decidir si restaurar ese `migration.sql`, borrar el directorio vacío/incompleto, o crear una migración de reconciliación.
+  - MVP voting ya fue sincronizado en Neon con `prisma db push`, pero hay que dejar `migrate deploy` funcional antes de seguir acumulando cambios de DB.
 
 ### Fase 1 — Layout y sistema visual
 
@@ -498,6 +502,40 @@ Debe incluir:
 - [ ] Mostrar live testers/logs.
 - [ ] Mejorar accept modal.
 - [ ] Mejorar empty/active/completed states.
+- [x] Mostrar partidas live en Dashboard con acceso a matchroom.
+- [x] Permitir modo espectador readonly en MatchRoom.
+- [x] Corregir realtime de espectadores para vetos/fases/votos.
+- [x] Agregar votación MVP posterior a votación de ganador.
+- [ ] Probar end-to-end con bots:
+  - cola → accept → veto → playing → ready → finish → voto ganador → voto MVP → completed.
+  - verificar espectador observando cambios live sin recargar.
+
+### Fase 3.5 — Discord competitivo por match
+
+- [x] Crear configuración Discord en `.env.example` y `server/.env`:
+  - `DISCORD_BOT_TOKEN`
+  - `DISCORD_GUILD_ID`
+  - `DISCORD_STAFF_ROLE_ID`
+  - `DISCORD_MATCH_CATEGORY_PARENT_ID` si se usa categoría raíz.
+  - `DISCORD_MATCH_CHANNEL_TTL_MINUTES`
+- [x] Crear servicio backend Discord REST:
+  - crear categoría temporal por match.
+  - crear 2 voice channels privados: Team Azul y Team Rojo.
+  - generar invites/links.
+  - aplicar permission overwrites para `@everyone`, staff y miembros del equipo.
+- [ ] Definir requisito de cuenta Discord vinculada:
+  - si un jugador no tiene `discordId`, mostrar warning y CTA `Vincular Discord`.
+  - permitir jugar sin voice como fallback durante MVP cerrado.
+- [x] Persistir metadata Discord del match:
+  - categoría/channel IDs.
+  - invite URLs.
+  - estado de cleanup.
+- [x] Mostrar en MatchRoom:
+  - botón `Entrar voz equipo azul/rojo` sólo para participantes de ese equipo.
+  - espectadores no ven links privados.
+- [x] Cleanup automático:
+  - al completar/cancelar match, borrar canales/categoría después del TTL.
+  - agregar comando admin/manual para limpiar recursos huérfanos.
 
 ### Fase 4 — Admin panel real
 
@@ -518,11 +556,76 @@ Debe incluir:
 - [ ] Cache y normalización.
 - [ ] Stats reales.
 - [ ] Hero pool.
+
+### Próximo paso pactado (jueves, 2026-04-23)
+
+- [ ] Spike técnico: implementar **Battle.net linking** (start/callback, guardar identidad Battle.net y mapping con usuario interno).
 - [ ] Replay import/snapshots.
 
 ---
 
-## 10. Próximo paso recomendado
+## 10. Runbook inmediato / siguientes pasos
+
+### Prioridad 0 — Performance de imágenes (CRÍTICO, en curso)
+
+Estado: **EN PROGRESO** (bloqueante para carga rápida vía Cloudflare).
+
+1. [x] Convertir imágenes pesadas de `public/images`, `public/ranked` y `public/brand` a **WebP/AVIF**.
+2. [x] Definir variantes por asset (`thumb` + `full`) para evitar descargar tamaño completo en cards/historial.
+3. [x] Aplicar `loading=\"lazy\"` + `decoding=\"async\"` en listas e historial.
+4. [x] Ajustar cache para estáticos (`Cache-Control: public, max-age=31536000, immutable` en assets versionados).
+5. [ ] Activar y validar optimizaciones de Cloudflare (Polish/WebP/AVIF + cache rules).
+6. [x] Fijar presupuesto de peso y objetivo: bajar el transfer inicial de imágenes de ~45 MB a <10 MB.
+
+Notas de avance (2026-04-22):
+- Script agregado: `npm run assets:optimize` (`scripts/optimize-assets.mjs`) genera `*.webp`, `*.avif`, `*.thumb.webp`, `*.thumb.avif`.
+- Resultado inicial de conversión: **22 assets procesados**, fuente ~41.79 MB → WebP ~4.55 MB / AVIF ~2.09 MB.
+- Se migraron referencias críticas del frontend a WebP/Thumb y se añadió `public/_headers` para cache larga en Cloudflare Pages.
+- Presupuesto operativo agregado: `npm run assets:budget` (límite por defecto: total referenciado <= **10 MB**, asset individual <= **2 MB**). Resultado actual: **1.26 MB** total referenciado (PASS).
+- Checklist de validación Cloudflare agregado: `npm run cf:verify-images -- https://TU_DOMINIO` para revisar `cf-cache-status`, `cache-control` y `cf-polished` sobre assets reales en edge.
+
+7. [x] Mejorar persistencia en tiempo real de BUSCANDO AHORA y el número de jugadores
+   - 2026-04-22: agregado broadcast socket público `matchmaking:queue_public_update` + persistencia local en store + polling continuo de snapshot en Dashboard.
+
+### Prioridad 1 — Dejar DB/migraciones sanas
+
+1. [x] Revisar `server/prisma/migrations/20260421201000_add_user_onboarding_state/`.
+2. [x] Restaurar o eliminar la migración incompleta.
+3. [x] Confirmar que `npm run db:migrate:prod --workspace=server` vuelve a pasar.
+4. [x] No seguir agregando cambios de schema hasta resolver esto.
+   - 2026-04-22: se creó migración de reconciliación no-op faltante y se hizo idempotente `20260422172000_add_mvp_votes`; deploy validado en Neon.
+
+### Prioridad 2 — Probar flujo competitivo actual
+
+1. Levantar Redis.
+2. Levantar server/client.
+3. Completar cola con bots/admin tools.
+4. Validar:
+   - accept modal.
+   - veto.
+   - matchroom playing.
+   - ready/finalizar.
+   - voto ganador.
+   - voto MVP.
+   - completed con MMR/MVP.
+   - espectador recibiendo updates live.
+
+### Prioridad 3 — Discord match voice
+
+1. Crear app/bot Discord y agregarlo al server con permisos de gestión de canales/invites.
+2. Añadir env vars.
+3. Implementar servicio Discord.
+4. Crear canales por match al pasar de accept a veto/playing.
+5. Mostrar links por equipo en MatchRoom.
+6. Programar cleanup.
+
+### Prioridad 4 — Battle.net
+
+Mantener el spike de **Battle.net linking** marcado para jueves 2026-04-23, después de estabilizar migraciones y Discord básico.
+
+---
+
+## 11. Próximo paso recomendado histórico
 
 Después de esta auditoría, el próximo trabajo de código debería ser:
 

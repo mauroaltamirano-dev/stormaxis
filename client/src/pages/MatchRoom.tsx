@@ -14,6 +14,16 @@ function upsertVote(votes: Array<{ userId: string; winner: 1 | 2 }>, userId: str
   return next
 }
 
+function upsertMvpVote(
+  votes: Array<{ userId: string; nomineeUserId: string }>,
+  userId: string,
+  nomineeUserId: string,
+) {
+  const next = votes.filter((vote) => vote.userId !== userId)
+  next.push({ userId, nomineeUserId })
+  return next
+}
+
 type MatchChatMessage = {
   id: string
   userId: string
@@ -209,6 +219,7 @@ export function MatchRoom() {
             team2Votes: payload.team2Votes,
             total: payload.total,
           },
+          mvpVoteCounts: prev.runtime?.mvpVoteCounts ?? [],
         },
       }))
     }
@@ -218,6 +229,7 @@ export function MatchRoom() {
         runtime: {
           ...(prev.runtime ?? {}),
           voteCounts: payload,
+          mvpVoteCounts: prev.runtime?.mvpVoteCounts ?? [],
         },
       }))
     }
@@ -232,6 +244,31 @@ export function MatchRoom() {
             team2Votes: payload.team2Votes,
             total: payload.total,
           },
+          mvpVoting: payload.mvpVoting ?? prev.runtime?.mvpVoting ?? null,
+          mvpVoteCounts: prev.runtime?.mvpVoteCounts ?? [],
+        },
+      }))
+    }
+    const onMvpStart = (payload: any) => {
+      syncMatch((prev) => ({
+        ...prev,
+        winner: payload.winner ?? prev.winner,
+        runtime: {
+          ...(prev.runtime ?? {}),
+          mvpVoting: {
+            expiresAt: payload.expiresAt,
+            totalPlayers: payload.totalPlayers,
+          },
+          mvpVoteCounts: payload.counts ?? [],
+        },
+      }))
+    }
+    const onMvpUpdate = (payload: any) => {
+      syncMatch((prev) => ({
+        ...prev,
+        runtime: {
+          ...(prev.runtime ?? {}),
+          mvpVoteCounts: payload.counts ?? [],
         },
       }))
     }
@@ -240,6 +277,7 @@ export function MatchRoom() {
         ...prev,
         status: 'COMPLETED',
         winner: payload.winner,
+        mvpUserId: payload.mvpUserId ?? prev.mvpUserId ?? null,
         duration: payload.duration,
         players: prev.players.map((player: any) => ({
           ...player,
@@ -275,6 +313,8 @@ export function MatchRoom() {
     socket.on('vote:start', onVoteStart)
     socket.on('vote:update', onVoteUpdate)
     socket.on('vote:result', onVoteResult)
+    socket.on('mvp:start', onMvpStart)
+    socket.on('mvp:update', onMvpUpdate)
     socket.on('match:complete', onMatchComplete)
     socket.on('match:cancel:update', onCancelUpdate)
     socket.on('match:cancelled', onCancelled)
@@ -314,6 +354,8 @@ export function MatchRoom() {
       socket.off('vote:start', onVoteStart)
       socket.off('vote:update', onVoteUpdate)
       socket.off('vote:result', onVoteResult)
+      socket.off('mvp:start', onMvpStart)
+      socket.off('mvp:update', onMvpUpdate)
       socket.off('match:complete', onMatchComplete)
       socket.off('match:cancel:update', onCancelUpdate)
       socket.off('match:cancelled', onCancelled)
@@ -370,6 +412,13 @@ export function MatchRoom() {
         setMatch((prev: any) => ({
           ...prev,
           votes: upsertVote(prev?.votes ?? [], user.id, winner),
+        }))
+      }}
+      onMvpVote={(nomineeUserId) => {
+        getSocket().emit('mvp:cast', { matchId: match.id, nomineeUserId })
+        setMatch((prev: any) => ({
+          ...prev,
+          mvpVotes: upsertMvpVote(prev?.mvpVotes ?? [], user.id, nomineeUserId),
         }))
       }}
       onCancelMatch={() => getSocket().emit('match:cancel_request', { matchId: match.id })}

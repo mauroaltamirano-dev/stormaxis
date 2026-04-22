@@ -9,16 +9,16 @@ export type RankMeta = {
 };
 
 export const RANKS: RankMeta[] = [
-  { level: 1, label: "Recruit", color: "#cccccc", slug: "recruit", iconSrc: "/ranked/recruit.png" },
-  { level: 2, label: "Mercenary", color: "#57534e", slug: "mercenary", iconSrc: "/ranked/mercenary.png" },
-  { level: 3, label: "Gladiator", color: "#374151", slug: "gladiator", iconSrc: "/ranked/gladiator.png" },
-  { level: 4, label: "Veteran", color: "#22c55e", slug: "veteran", iconSrc: "/ranked/veteran.png" },
-  { level: 5, label: "Champion", color: "#facc15", slug: "champion", iconSrc: "/ranked/champion.png" },
-  { level: 6, label: "Elite", color: "#38bdf8", slug: "elite", iconSrc: "/ranked/elite.png" },
-  { level: 7, label: "Warlord", color: "#818cf8", slug: "warlord", iconSrc: "/ranked/warlord.png" },
-  { level: 8, label: "Mythic", color: "#c084fc", slug: "mythic", iconSrc: "/ranked/mythic.png" },
-  { level: 9, label: "Legend", color: "#fb923c", slug: "legend", iconSrc: "/ranked/legend.png" },
-  { level: 10, label: "Immortal", color: "#f43f5e", slug: "immortal", iconSrc: "/ranked/immortal.png" },
+  { level: 1, label: "Recruit", color: "#cccccc", slug: "recruit", iconSrc: "/ranked/recruit.thumb.webp" },
+  { level: 2, label: "Mercenary", color: "#57534e", slug: "mercenary", iconSrc: "/ranked/mercenary.thumb.webp" },
+  { level: 3, label: "Gladiator", color: "#374151", slug: "gladiator", iconSrc: "/ranked/gladiator.thumb.webp" },
+  { level: 4, label: "Veteran", color: "#22c55e", slug: "veteran", iconSrc: "/ranked/veteran.thumb.webp" },
+  { level: 5, label: "Champion", color: "#facc15", slug: "champion", iconSrc: "/ranked/champion.thumb.webp" },
+  { level: 6, label: "Elite", color: "#38bdf8", slug: "elite", iconSrc: "/ranked/elite.thumb.webp" },
+  { level: 7, label: "Warlord", color: "#818cf8", slug: "warlord", iconSrc: "/ranked/warlord.thumb.webp" },
+  { level: 8, label: "Mythic", color: "#c084fc", slug: "mythic", iconSrc: "/ranked/mythic.thumb.webp" },
+  { level: 9, label: "Legend", color: "#fb923c", slug: "legend", iconSrc: "/ranked/legend.thumb.webp" },
+  { level: 10, label: "Immortal", color: "#f43f5e", slug: "immortal", iconSrc: "/ranked/immortal.thumb.webp" },
 ];
 
 export const LEVEL_BANDS = [

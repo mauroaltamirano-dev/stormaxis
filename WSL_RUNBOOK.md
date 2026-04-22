@@ -21,6 +21,50 @@ npm run db:generate --workspace=server
 npm run dev
 ```
 
+## Pendientes inmediatos del proyecto
+
+Ver también `PROJECT_AUDIT.md`, sección **Runbook inmediato / siguientes pasos**.
+
+### 1. Estado de migraciones Prisma (actualizado 2026-04-22)
+
+✅ Quedó reconciliado:
+
+- Se agregó `migration.sql` no-op en `server/prisma/migrations/20260421201000_add_user_onboarding_state/`.
+- Se volvió idempotente `20260422172000_add_mvp_votes` para convivir con cambios que ya estaban en Neon por `db push`.
+- Se ejecutó `prisma migrate resolve --rolled-back 20260422172000_add_mvp_votes` y luego deploy exitoso.
+
+Verificación:
+
+```bash
+npm run db:migrate:prod --workspace=server
+```
+
+### 2. Probar flujo competitivo completo
+
+Validar con bots/admin tools:
+
+```text
+cola → accept → veto → playing → ready → finish → voto ganador → voto MVP → completed
+```
+
+También validar que un espectador en MatchRoom recibe fases/vetos/votos en vivo sin recargar.
+
+### 3. Discord match voice
+
+Siguiente feature grande:
+
+- crear bot/app Discord.
+- configurar env vars:
+  - `DISCORD_BOT_TOKEN`
+  - `DISCORD_GUILD_ID`
+  - `DISCORD_STAFF_ROLE_ID`
+  - `DISCORD_MATCH_CATEGORY_PARENT_ID`
+  - `DISCORD_MATCH_CHANNEL_TTL_MINUTES`
+- crear categoría temporal por match.
+- crear voice channel privado para Team Azul y Team Rojo.
+- mostrar links por equipo en MatchRoom.
+- cleanup automático al finalizar/cancelar.
+
 ## Redis / Docker
 
 El `docker-compose.yml` del proyecto levanta Redis local en `6379`:
@@ -60,6 +104,41 @@ https://extraction-alone-europe-avoiding.trycloudflare.com
 ```
 
 Si se usa un quick tunnel nuevo, Cloudflare suele generar otra URL; agregarla también a `CLIENT_URLS` y ajustar OAuth callbacks si aplica.
+
+## Cloudflare Images (Prioridad 0)
+
+### 1) Activar en dashboard
+
+En la zona productiva:
+
+1. **Speed > Optimization > Polish**: activar `Lossy` + `WebP`.
+2. (Opcional avanzado) **Cache > Configuration Rules** o API de **Vary for Images** si se quiere manejo explícito de variantes `jpeg/jpg -> webp,avif`.
+3. Purgar cache luego de activar (`Caching > Configuration > Purge Everything`) para evitar respuestas viejas.
+
+### 2) Validar headers desde terminal
+
+```bash
+cd /home/tuki/projects/hots
+npm run cf:verify-images -- https://TU_DOMINIO
+```
+
+Se espera ver, para assets estáticos:
+
+- `cache-control: public, max-age=31536000, immutable` (definido en `public/_headers`)
+- `cf-cache-status: HIT` (al menos en segundas requests)
+- `cf-polished: ...` cuando Polish aplica sobre el asset
+
+### 3) Validar presupuesto de imágenes en repo
+
+```bash
+cd /home/tuki/projects/hots
+npm run assets:budget
+```
+
+Presupuesto actual configurado:
+
+- Total assets referenciados <= `10 MB`
+- Asset individual <= `2 MB`
 
 ## Estado verificado el 2026-04-21
 

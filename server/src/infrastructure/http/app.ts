@@ -26,6 +26,11 @@ export function createApp() {
   const app = express()
   const allowedOrigins = resolveAllowedOrigins()
 
+  // Vite dev proxy, Cloudflare quick tunnels and most deployment proxies set
+  // X-Forwarded-For. Trust only loopback by default so local proxies can pass
+  // the real client IP without allowing arbitrary direct spoofing.
+  app.set('trust proxy', process.env.TRUST_PROXY || 'loopback')
+
   // Security
   app.use(
     helmet({

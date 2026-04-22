@@ -39,6 +39,7 @@ type MatchState = {
   status: MatchStatus;
   selectedMap?: string | null;
   winner?: 1 | 2 | null;
+  mvpUserId?: string | null;
   duration?: number | null;
   players: Player[];
   vetoes: Array<{
@@ -49,9 +50,18 @@ type MatchState = {
     order: number;
   }>;
   votes?: Array<{ userId: string; winner: 1 | 2 }>;
+  mvpVotes?: Array<{ userId: string; nomineeUserId: string }>;
+  discordVoice?: {
+    enabled: boolean;
+    status: "disabled" | "spectator" | "missing_link" | "pending" | "ready";
+    hasLinkedDiscord: boolean;
+    team: 1 | 2 | null;
+    teamInviteUrl: string | null;
+  };
   runtime?: {
     ready: { readyBy: string[]; totalPlayers: number } | null;
     voting: { expiresAt: number; totalPlayers: number } | null;
+    mvpVoting: { expiresAt: number; totalPlayers: number } | null;
     finish: { captainIds: string[]; requestedBy: string[] } | null;
     veto: {
       remainingMaps: string[];
@@ -63,6 +73,7 @@ type MatchState = {
     } | null;
     cancel: { captainIds: string[]; requestedBy: string[] } | null;
     voteCounts: { team1Votes: number; team2Votes: number; total: number };
+    mvpVoteCounts: Array<{ nomineeUserId: string; votes: number }>;
   } | null;
 };
 
@@ -84,6 +95,7 @@ type Props = {
   onReady: () => void;
   onFinishMatch: () => void;
   onVote: (winner: 1 | 2) => void;
+  onMvpVote: (nomineeUserId: string) => void;
   onCancelMatch: () => void;
   onBack: () => void;
 };
@@ -145,6 +157,7 @@ export function ActiveMatchRoom({
   onReady,
   onFinishMatch,
   onVote,
+  onMvpVote,
   onCancelMatch,
   onBack,
 }: Props) {
@@ -180,11 +193,16 @@ export function ActiveMatchRoom({
   const currentPlayer = match.players.find(
     (player) => player.userId === currentUserId,
   );
+  const isParticipant = Boolean(currentPlayer && !currentPlayer.isBot);
+  const isSpectator = !isParticipant;
   const humanPlayersCount = match.players.filter(
     (player) => !player.isBot,
   ).length;
   const currentVote =
     match.votes?.find((vote) => vote.userId === currentUserId)?.winner ?? null;
+  const currentMvpVote =
+    match.mvpVotes?.find((vote) => vote.userId === currentUserId)?.nomineeUserId ??
+    null;
   const readyBy = match.runtime?.ready?.readyBy ?? [];
   const isReady = readyBy.includes(currentUserId);
   const totalReadyPlayers =
@@ -196,6 +214,8 @@ export function ActiveMatchRoom({
     total: 0,
   };
   const votingExpiresAt = match.runtime?.voting?.expiresAt ?? null;
+  const mvpVotingExpiresAt = match.runtime?.mvpVoting?.expiresAt ?? null;
+  const mvpVoteCounts = match.runtime?.mvpVoteCounts ?? [];
   const vetoState = match.runtime?.veto ?? null;
   const finishState = match.runtime?.finish ?? null;
   const finishApprovals = finishState?.requestedBy.length ?? 0;
@@ -207,19 +227,26 @@ export function ActiveMatchRoom({
   const votingSeconds = votingExpiresAt
     ? Math.max(0, Math.round((votingExpiresAt - now) / 1000))
     : null;
+  const mvpVotingSeconds = mvpVotingExpiresAt
+    ? Math.max(0, Math.round((mvpVotingExpiresAt - now) / 1000))
+    : null;
   const selectedMap = match.selectedMap ?? getSelectedMapFromVeto(match);
   const isCaptainTurn = Boolean(
+    isParticipant &&
     match.status === "VETOING" &&
     currentPlayer?.isCaptain &&
     currentPlayer.userId === vetoTurn?.captainId,
   );
   const cancelState = match.runtime?.cancel;
   const canRequestCancel =
+    isParticipant &&
     currentPlayer?.isCaptain &&
     ["VETOING", "PLAYING", "VOTING"].includes(match.status);
   const cancelRequestedByMe =
     cancelState?.requestedBy.includes(currentUserId) ?? false;
-  const canSendChat = match.status !== "CANCELLED";
+  const canSendChat =
+    isParticipant &&
+    ["ACCEPTING", "VETOING", "PLAYING", "VOTING"].includes(match.status);
   const chatRemainingChars = 500 - chatInput.length;
   const statusMeta = getMatchLifecycleMeta(match.status, allConnected);
   const isTablet = viewportWidth < 1320;
@@ -236,7 +263,9 @@ export function ActiveMatchRoom({
   const stageTimer =
     match.status === "VETOING"
       ? vetoSeconds
-      : match.status === "VOTING"
+      : match.status === "VOTING" && match.winner
+        ? mvpVotingSeconds
+        : match.status === "VOTING"
         ? votingSeconds
         : null;
 
@@ -308,7 +337,9 @@ export function ActiveMatchRoom({
             ))}
           </div>
           <small style={{ color: "#94a3b8" }}>
-            {isCaptainTurn
+            {isSpectator
+              ? "Modo espectador: podés seguir el veto en vivo, sin intervenir."
+              : isCaptainTurn
               ? "Te toca vetar. Si expira el timer, el sistema banea un mapa al azar."
               : "Solo el capitán del turno puede vetar."}
           </small>
@@ -351,6 +382,41 @@ export function ActiveMatchRoom({
                 }
               />
               <MapSelectedCard mapName={selectedMap} compact={isNarrow} />
+              {match.discordVoice?.enabled && (
+                <StageCallout
+                  tone="#5865F2"
+                  label="Discord por equipo"
+                  title={
+                    match.discordVoice.status === "ready"
+                      ? `Voice listo para Team ${match.discordVoice.team}`
+                      : match.discordVoice.status === "missing_link"
+                        ? "Vinculá tu Discord para entrar a voz"
+                        : match.discordVoice.status === "spectator"
+                          ? "Modo espectador: links privados ocultos"
+                          : "Voice en preparación"
+                  }
+                  description={
+                    match.discordVoice.status === "ready"
+                      ? "Entrá al canal privado de tu team para coordinar la partida."
+                      : match.discordVoice.status === "missing_link"
+                        ? "Podés seguir jugando sin voice, pero no vas a recibir enlace privado."
+                        : "El sistema solo expone enlace al jugador participante de ese equipo."
+                  }
+                  rightSlot={
+                    match.discordVoice.status === "ready" &&
+                    match.discordVoice.teamInviteUrl ? (
+                      <a
+                        href={match.discordVoice.teamInviteUrl}
+                        target="_blank"
+                        rel="noreferrer"
+                        style={primaryButtonStyle}
+                      >
+                        Entrar al voice
+                      </a>
+                    ) : null
+                  }
+                />
+              )}
               <ProgressRail
                 label="Operatividad de lobby"
                 value={connectedCount}
@@ -358,7 +424,7 @@ export function ActiveMatchRoom({
                 color={allConnected ? "#4ade80" : "#38bdf8"}
               />
 
-              {!allConnected && (
+              {!allConnected && isParticipant && (
                 <button
                   onClick={onReady}
                   disabled={isReady}
@@ -396,15 +462,19 @@ export function ActiveMatchRoom({
 
               {allConnected && (
                 <>
-                  <button
-                    onClick={onFinishMatch}
-                    disabled={!isCaptain || alreadyRequestedFinish}
-                    style={finishButtonStyle(!isCaptain || alreadyRequestedFinish)}
-                  >
-                    ✓ Finalizar partida
-                  </button>
+                  {isParticipant && (
+                    <button
+                      onClick={onFinishMatch}
+                      disabled={!isCaptain || alreadyRequestedFinish}
+                      style={finishButtonStyle(!isCaptain || alreadyRequestedFinish)}
+                    >
+                      ✓ Finalizar partida
+                    </button>
+                  )}
                   <div style={{ color: "#94a3b8", fontSize: "0.86rem" }}>
-                    {alreadyRequestedFinish
+                    {isSpectator
+                      ? "Modo espectador: esperando cierre por capitanes."
+                      : alreadyRequestedFinish
                       ? "Ya marcaste tu confirmación. Falta el otro capitán."
                       : isCaptain
                         ? `Requiere confirmación de ambos capitanes: ${finishApprovals}/${finishNeeded}`
@@ -416,7 +486,112 @@ export function ActiveMatchRoom({
           );
         })()}
 
-      {match.status === "VOTING" && (
+      {match.status === "VOTING" && match.winner && (
+        <StageCard
+          title="Votación MVP"
+          subtitle={`Resultado definido: victoria ${match.winner === 1 ? teams.left.name : teams.right.name}`}
+          tone="#facc15"
+        >
+          <StageCallout
+            tone="#facc15"
+            label={currentMvpVote ? "MVP registrado" : "Elegí al mejor jugador"}
+            title={
+              isSpectator
+                ? "Votación MVP en curso"
+                : currentMvpVote
+                  ? `Votaste a ${getPlayerNameById(match, currentMvpVote)}`
+                  : "Marcá al jugador más determinante"
+            }
+            description={
+              isSpectator
+                ? "Estás observando la elección del MVP. Sólo los jugadores del match pueden votar."
+                : "No podés votarte a vos mismo. El MVP queda guardado junto al resultado final."
+            }
+            rightSlot={
+              <div
+                style={timerBadgeStyle(
+                  mvpVotingSeconds != null && mvpVotingSeconds <= 20,
+                )}
+              >
+                {mvpVotingSeconds != null
+                  ? `${Math.floor(mvpVotingSeconds / 60)}:${String(mvpVotingSeconds % 60).padStart(2, "0")}`
+                  : "—"}
+              </div>
+            }
+          />
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: isNarrow
+                ? "1fr"
+                : "repeat(2, minmax(0, 1fr))",
+              gap: "0.65rem",
+            }}
+          >
+            {match.players
+              .filter((player) => !player.isBot && player.userId)
+              .map((player) => {
+                const votes =
+                  mvpVoteCounts.find((entry) => entry.nomineeUserId === player.userId)
+                    ?.votes ?? 0;
+                const selected = currentMvpVote === player.userId;
+                const disabled =
+                  !isParticipant || player.userId === currentUserId;
+                return (
+                  <button
+                    key={player.userId}
+                    type="button"
+                    onClick={() => player.userId && onMvpVote(player.userId)}
+                    disabled={disabled}
+                    style={mvpCandidateStyle(
+                      selected,
+                      disabled,
+                      TEAM_COLORS[player.team].accent,
+                    )}
+                  >
+                    <AvatarCell
+                      username={player.user.username}
+                      avatar={player.user.avatar}
+                      size={34}
+                    />
+                    <span style={{ minWidth: 0, textAlign: "left" }}>
+                      <strong
+                        style={{
+                          display: "block",
+                          color: selected ? "#020617" : "#e2e8f0",
+                          whiteSpace: "nowrap",
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                        }}
+                      >
+                        {player.user.username}
+                      </strong>
+                      <small
+                        style={{
+                          color: selected
+                            ? "rgba(2,6,23,0.7)"
+                            : "rgba(226,232,240,0.46)",
+                        }}
+                      >
+                        Team {player.team} · {votes} voto{votes === 1 ? "" : "s"}
+                        {player.userId === currentUserId ? " · vos" : ""}
+                      </small>
+                    </span>
+                  </button>
+                );
+              })}
+          </div>
+          <ProgressRail
+            label="Participación MVP"
+            value={mvpVoteCounts.reduce((sum, entry) => sum + entry.votes, 0)}
+            total={match.runtime?.mvpVoting?.totalPlayers ?? humanPlayersCount}
+            color="#facc15"
+          />
+        </StageCard>
+      )}
+
+      {match.status === "VOTING" && !match.winner && (
         <StageCard
           title="Votación de ganador"
           subtitle="Votan todos los jugadores reales del test"
@@ -426,11 +601,17 @@ export function ActiveMatchRoom({
             tone="#c084fc"
             label={currentVote ? "Voto registrado" : "Decisión pendiente"}
             title={
-              currentVote
+              isSpectator
+                ? "Votación de resultado en curso"
+                : currentVote
                 ? `Marcaste ganador para ${currentVote === 1 ? teams.left.name : teams.right.name}`
                 : "Todavía no emitiste tu voto"
             }
-            description="Cada voto cuenta para cerrar el match. El objetivo es validar rápido y evitar ambigüedad en el resultado."
+            description={
+              isSpectator
+                ? "Estás observando el cierre competitivo. Sólo los jugadores del match pueden emitir voto."
+                : "Cada voto cuenta para cerrar el match. El objetivo es validar rápido y evitar ambigüedad en el resultado."
+            }
             rightSlot={
               <div
                 style={timerBadgeStyle(votingSeconds != null && votingSeconds <= 20)}
@@ -476,26 +657,28 @@ export function ActiveMatchRoom({
             total={match.runtime?.voting?.totalPlayers ?? humanPlayersCount}
             color="#c084fc"
           />
-          <div
-            style={{
-              display: "grid",
-              gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
-              gap: "0.75rem",
-            }}
-          >
-            <button
-              onClick={() => onVote(1)}
-              style={voteButtonStyle(1, currentVote === 1)}
+          {isParticipant && (
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
+                gap: "0.75rem",
+              }}
             >
-              Gana {teams.left.name}
-            </button>
-            <button
-              onClick={() => onVote(2)}
-              style={voteButtonStyle(2, currentVote === 2)}
-            >
-              Gana {teams.right.name}
-            </button>
-          </div>
+              <button
+                onClick={() => onVote(1)}
+                style={voteButtonStyle(1, currentVote === 1)}
+              >
+                Gana {teams.left.name}
+              </button>
+              <button
+                onClick={() => onVote(2)}
+                style={voteButtonStyle(2, currentVote === 2)}
+              >
+                Gana {teams.right.name}
+              </button>
+            </div>
+          )}
           <div
             style={{
               display: "grid",
@@ -542,6 +725,11 @@ export function ActiveMatchRoom({
           >
             Ganó {match.winner === 1 ? teams.left.name : teams.right.name}
           </div>
+          {match.mvpUserId && (
+            <div style={winnerBannerStyle("#facc15")}>
+              MVP · {getPlayerNameById(match, match.mvpUserId)}
+            </div>
+          )}
           <ResultList match={match} />
         </StageCard>
       )}
@@ -570,7 +758,7 @@ export function ActiveMatchRoom({
         subtitle={
           canSendChat
             ? "Coordinación en tiempo real entre jugadores"
-            : "Chat deshabilitado porque la partida está cancelada"
+            : "Chat en solo lectura: disponible únicamente mientras el match está activo"
         }
         tone={canSendChat ? "#38bdf8" : "#94a3b8"}
       >
@@ -680,6 +868,13 @@ export function ActiveMatchRoom({
           status={match.status}
           allConnected={allConnected}
         />
+
+        {isSpectator && (
+          <div style={infoBannerStyle}>
+            Modo espectador activo: podés observar el matchroom completo, pero
+            las acciones de jugador, chat, veto y votación están bloqueadas.
+          </div>
+        )}
 
         {cancelState &&
           cancelState.requestedBy.length > 0 &&
@@ -1672,6 +1867,13 @@ function getSelectedMapFromVeto(match: MatchState) {
   return remaining.length === 1 ? remaining[0] : "Mapa pendiente";
 }
 
+function getPlayerNameById(match: MatchState, userId: string) {
+  return (
+    match.players.find((player) => player.userId === userId)?.user.username ??
+    "Jugador"
+  );
+}
+
 function getMapNameFromId(mapId: string) {
   return MAP_NAME_BY_ID[mapId];
 }
@@ -2307,6 +2509,31 @@ function voteButtonStyle(team: 1 | 2, selected: boolean): CSSProperties {
     color: "#fff",
     cursor: "pointer",
     fontWeight: 800,
+  };
+}
+
+function mvpCandidateStyle(
+  selected: boolean,
+  disabled: boolean,
+  accent: string,
+): CSSProperties {
+  return {
+    border: `1px solid ${
+      selected ? "#facc15" : disabled ? "rgba(148,163,184,0.14)" : `${accent}55`
+    }`,
+    background: selected
+      ? "linear-gradient(90deg, #facc15, #fde68a)"
+      : disabled
+        ? "rgba(148,163,184,0.06)"
+        : `${accent}12`,
+    color: selected ? "#020617" : "#e2e8f0",
+    padding: "0.75rem",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.7rem",
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled && !selected ? 0.58 : 1,
+    textAlign: "left",
   };
 }
 
