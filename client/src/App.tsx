@@ -5,10 +5,12 @@ import { api } from './lib/api'
 import { useAuthStore } from './stores/auth.store'
 
 export function App() {
-  const { setAuth, setAccessToken, logout, isLoading, accessToken } = useAuthStore()
+  const { setAuth, setAccessToken, logout, isLoading, accessToken, hasHydrated } = useAuthStore()
 
   // Silent session restore on mount
   useEffect(() => {
+    if (!hasHydrated) return
+
     const restoreFromRefresh = () =>
       api.post<{ accessToken: string }>('/auth/refresh')
         .then((r) => {
@@ -37,9 +39,9 @@ export function App() {
     }
 
     void restore()
-  }, [accessToken, logout, setAccessToken, setAuth])
+  }, [accessToken, hasHydrated, logout, setAccessToken, setAuth])
 
-  if (isLoading) {
+  if (isLoading || !hasHydrated) {
     return (
       <div style={{
         minHeight: '100vh',

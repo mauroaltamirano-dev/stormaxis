@@ -1398,6 +1398,7 @@ function StageCallout({
           alignItems: "start",
           justifyContent: "space-between",
           gap: "0.75rem",
+          flexWrap: "wrap",
         }}
       >
         <div style={{ display: "grid", gap: "0.2rem", position: "relative", zIndex: 1 }}>
@@ -1432,7 +1433,18 @@ function StageCallout({
             {description}
           </div>
         </div>
-        {rightSlot ? <div style={{ position: "relative", zIndex: 1 }}>{rightSlot}</div> : null}
+        {rightSlot ? (
+          <div
+            style={{
+              position: "relative",
+              zIndex: 1,
+              flexShrink: 0,
+              maxWidth: "100%",
+            }}
+          >
+            {rightSlot}
+          </div>
+        ) : null}
       </div>
     </div>
   );
@@ -2353,13 +2365,18 @@ function MapVetoCard({
 const primaryButtonStyle: CSSProperties = {
   border: "1px solid rgba(0, 200, 255, 0.4)",
   borderRadius: "0",
-  padding: "0.95rem 1rem",
+  padding: "0.72rem 0.86rem",
   background: "linear-gradient(90deg, #00c8ff, #38bdf8)",
   color: "#020617",
   fontWeight: 800,
   cursor: "pointer",
   textTransform: "uppercase",
   letterSpacing: "0.08em",
+  fontSize: "0.74rem",
+  display: "inline-flex",
+  alignItems: "center",
+  justifyContent: "center",
+  whiteSpace: "nowrap",
 };
 
 function finishButtonStyle(disabled: boolean): CSSProperties {

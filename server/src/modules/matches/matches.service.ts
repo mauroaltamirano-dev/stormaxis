@@ -3,7 +3,7 @@ import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
 import { getIO } from '../../infrastructure/socket/server'
 import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
-import { scheduleDiscordMatchVoiceCleanup } from './discord-match-voice.service'
+import { cleanupDiscordMatchVoiceNow } from './discord-match-voice.service'
 
 const VOTING_TIMEOUT_MS = 2 * 60_000
 const MVP_VOTING_TIMEOUT_MS = 90_000
@@ -285,7 +285,7 @@ export async function requestMatchCancellation(matchId: string, userId: string) 
       reason: 'captains_cancelled',
       requestedBy: state.requestedBy,
     })
-    void scheduleDiscordMatchVoiceCleanup(matchId, 'match_cancelled')
+    void cleanupDiscordMatchVoiceNow(matchId, 'match_cancelled')
   }
 }
 
@@ -579,7 +579,7 @@ async function finalizeMatch(
     duration: durationSeconds,
     eloDeltas,
   })
-  void scheduleDiscordMatchVoiceCleanup(matchId, 'match_completed')
+  void cleanupDiscordMatchVoiceNow(matchId, 'match_completed')
 
   for (const player of humanPlayers) {
     const delta = eloDeltas[player.userId as string]

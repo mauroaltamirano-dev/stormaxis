@@ -5,7 +5,11 @@ import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
 import { HOTS_MAPS } from '@nexusgg/shared'
 import { logger } from '../../infrastructure/logging/logger'
-import { ensureDiscordMatchVoice, scheduleDiscordMatchVoiceCleanup } from '../matches/discord-match-voice.service'
+import {
+  cleanupDiscordMatchVoiceNow,
+  emitDiscordVoiceAccessUpdates,
+  ensureDiscordMatchVoice,
+} from '../matches/discord-match-voice.service'
 
 function toPositiveInt(value: string | undefined, fallback: number) {
   const parsed = Number(value)
@@ -598,11 +602,12 @@ export async function tryFormMatch() {
 
   const humans = players.filter((player) => !player.isBot && player.userId)
   if (humans.length < 2) return null
+  const hasBots = players.some((player) => player.isBot)
 
   // Check MMR spread
   const minMMR = players[0].mmr
   const maxMMR = players[players.length - 1].mmr
-  if (!IGNORE_MMR_BALANCE) {
+  if (!IGNORE_MMR_BALANCE && !hasBots) {
     const tolerance = await getDynamicMMRTolerance(players)
     if (maxMMR - minMMR > tolerance) return null // Not balanced enough yet
   }
@@ -828,8 +833,8 @@ async function cancelMatch(matchId: string, reason: string) {
   await redis.del(REDIS_KEYS.matchCancelState(matchId))
 
   await db.match.update({ where: { id: matchId }, data: { status: 'CANCELLED' } })
-  void scheduleDiscordMatchVoiceCleanup(matchId, 'match_cancelled').catch((err) => {
-    logger.warn('Failed to schedule Discord voice cleanup after cancellation', {
+  void cleanupDiscordMatchVoiceNow(matchId, 'match_cancelled').catch((err) => {
+    logger.warn('Failed to cleanup Discord voice after cancellation', {
       matchId,
       reason,
       error: err instanceof Error ? err.message : String(err),
@@ -1029,8 +1034,8 @@ export async function performVeto(
     await redis.del(REDIS_KEYS.matchVetoState(matchId))
 
     io.to(`match:${matchId}`).emit('veto:complete', { selectedMap: selectedMapName })
-    void ensureDiscordMatchVoice(matchId).catch((err) => {
-      logger.warn('Failed to create Discord match voice channels', {
+    void ensureDiscordMatchVoice(matchId).then(() => emitDiscordVoiceAccessUpdates(matchId)).catch((err) => {
+      logger.warn('Failed to create or broadcast Discord match voice channels', {
         matchId,
         error: err instanceof Error ? err.message : String(err),
       })

@@ -302,6 +302,13 @@ export function MatchRoom() {
       if (!normalized) return
       setChatMessages((prev) => mergeChatMessages(prev, [normalized]))
     }
+    const onDiscordVoice = (payload: any) => {
+      if (!payload || payload.matchId !== matchId) return
+      syncMatch((prev) => ({
+        ...prev,
+        discordVoice: payload.discordVoice ?? prev.discordVoice ?? null,
+      }))
+    }
 
     socket.on('match:state', onMatchState)
     socket.on('veto:start', onVetoStart)
@@ -320,6 +327,7 @@ export function MatchRoom() {
     socket.on('match:cancelled', onCancelled)
     socket.on('matchmaking:cancelled', onCancelled)
     socket.on('chat:message', onChatMessage)
+    socket.on('match:discord_voice', onDiscordVoice)
 
     api
       .get(`/matches/${matchId}`)
@@ -361,6 +369,7 @@ export function MatchRoom() {
       socket.off('match:cancelled', onCancelled)
       socket.off('matchmaking:cancelled', onCancelled)
       socket.off('chat:message', onChatMessage)
+      socket.off('match:discord_voice', onDiscordVoice)
       socket.off('connect', joinMatchRoom)
     }
   }, [matchId, navigate, user])

@@ -37,11 +37,13 @@ interface AuthState {
   user: AuthUser | null
   accessToken: string | null
   isLoading: boolean
+  hasHydrated: boolean
 
   setAuth: (user: AuthUser, token: string) => void
   setAccessToken: (token: string) => void
   updateUser: (partial: Partial<AuthUser>) => void
   logout: () => void
+  setHasHydrated: (value: boolean) => void
 }
 
 export const useAuthStore = create<AuthState>()(
@@ -50,6 +52,7 @@ export const useAuthStore = create<AuthState>()(
       user: null,
       accessToken: null,
       isLoading: true,
+      hasHydrated: false,
 
       setAuth: (user, token) => {
         set({ user, accessToken: token, isLoading: false })
@@ -72,6 +75,10 @@ export const useAuthStore = create<AuthState>()(
         useMatchmakingStore.getState().resetMatchmaking()
         set({ user: null, accessToken: null, isLoading: false })
       },
+
+      setHasHydrated: (value) => {
+        set({ hasHydrated: value })
+      },
     }),
     {
       name: 'nexusgg-auth',
@@ -80,6 +87,9 @@ export const useAuthStore = create<AuthState>()(
         user: state.user,
         accessToken: state.accessToken,
       }),
+      onRehydrateStorage: () => (state) => {
+        state?.setHasHydrated(true)
+      },
     },
   ),
 )

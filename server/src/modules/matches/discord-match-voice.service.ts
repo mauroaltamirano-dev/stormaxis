@@ -1,6 +1,7 @@
 import { db } from '../../infrastructure/database/client'
 import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
 import { logger } from '../../infrastructure/logging/logger'
+import { getIO } from '../../infrastructure/socket/server'
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
 const DISCORD_VOICE_ALLOW = '3146752' // VIEW_CHANNEL + CONNECT + SPEAK
@@ -44,6 +45,17 @@ type DiscordVoiceAccess = {
   hasLinkedDiscord: boolean
   team: 1 | 2 | null
   teamInviteUrl: string | null
+}
+
+function toDiscordSafeLabel(input: string | null | undefined, fallback: string) {
+  const base = (input ?? '')
+    .trim()
+    .replace(/[^a-zA-Z0-9 _-]/g, '')
+    .replace(/\s+/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 48)
+
+  return base.length > 0 ? base : fallback
 }
 
 function getMatchVoiceConfig() {
@@ -156,12 +168,23 @@ export async function ensureDiscordMatchVoice(matchId: string): Promise<DiscordM
     include: {
       players: {
         include: {
-          user: { select: { discordId: true } },
+          user: { select: { discordId: true, username: true } },
         },
       },
     },
   })
   if (!match) return null
+
+  const team1Captain = match.players.find(
+    (player) => !player.isBot && player.team === 1 && player.isCaptain,
+  )
+  const team2Captain = match.players.find(
+    (player) => !player.isBot && player.team === 2 && player.isCaptain,
+  )
+
+  const teamBlueName = toDiscordSafeLabel(team1Captain?.user?.username, 'TeamBlue')
+  const teamRedName = toDiscordSafeLabel(team2Captain?.user?.username, 'TeamRed')
+  const categoryName = toDiscordSafeLabel(`Match-${teamBlueName}-vs-${teamRedName}`, `Match-${match.id.slice(-8)}`)
 
   const team1DiscordIds = match.players
     .filter((player) => !player.isBot && player.team === 1)
@@ -189,7 +212,7 @@ export async function ensureDiscordMatchVoice(matchId: string): Promise<DiscordM
 
   try {
     const category = await createChannel(config.botToken, config.guildId, {
-      name: `match-${match.id.slice(-8)}`,
+      name: categoryName,
       type: 4,
       parent_id: config.categoryParentId,
       permission_overwrites: [everyoneDeny, staffAllow],
@@ -217,14 +240,14 @@ export async function ensureDiscordMatchVoice(matchId: string): Promise<DiscordM
 
     const [team1Channel, team2Channel] = await Promise.all([
       createChannel(config.botToken, config.guildId, {
-        name: `team-azul-${match.id.slice(-4)}`,
+        name: teamBlueName,
         type: 2,
         parent_id: categoryId,
         permission_overwrites: team1Overwrites,
         user_limit: 5,
       }),
       createChannel(config.botToken, config.guildId, {
-        name: `team-rojo-${match.id.slice(-4)}`,
+        name: teamRedName,
         type: 2,
         parent_id: categoryId,
         permission_overwrites: team2Overwrites,
@@ -370,4 +393,65 @@ export async function scheduleDiscordMatchVoiceCleanup(
       })
     }
   }, Math.max(1000, cleanupScheduledAt - Date.now()))
+}
+
+export async function cleanupDiscordMatchVoiceNow(
+  matchId: string,
+  reason: 'match_completed' | 'match_cancelled',
+) {
+  const config = getMatchVoiceConfig()
+  if (!config.enabled) return
+
+  const meta = await loadMeta(matchId)
+  if (!meta || meta.cleanedAt) return
+
+  try {
+    await Promise.allSettled([
+      deleteChannel(config.botToken, meta.team1ChannelId),
+      deleteChannel(config.botToken, meta.team2ChannelId),
+    ])
+    await deleteChannel(config.botToken, meta.categoryId)
+  } catch (err) {
+    logger.warn('Discord match voice immediate cleanup failed', {
+      matchId,
+      reason,
+      error: err instanceof Error ? err.message : String(err),
+    })
+    throw err
+  }
+
+  await saveMeta(matchId, {
+    ...meta,
+    cleanupScheduledAt: Date.now(),
+    cleanedAt: Date.now(),
+  })
+
+  logger.info('Discord match voice cleaned immediately', { matchId, reason })
+}
+
+export async function emitDiscordVoiceAccessUpdates(matchId: string) {
+  let io: ReturnType<typeof getIO> | null = null
+  try {
+    io = getIO()
+  } catch {
+    return
+  }
+  if (!io) return
+
+  const participants = await db.matchPlayer.findMany({
+    where: { matchId, isBot: false, userId: { not: null } },
+    select: { userId: true },
+  })
+
+  await Promise.all(
+    participants.map(async (participant) => {
+      const participantUserId = participant.userId
+      if (!participantUserId) return
+      const discordVoice = await getDiscordVoiceAccessForUser(matchId, participantUserId)
+      io?.to(`user:${participantUserId}`).emit('match:discord_voice', {
+        matchId,
+        discordVoice,
+      })
+    }),
+  )
 }
