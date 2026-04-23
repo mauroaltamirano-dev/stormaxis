@@ -12,6 +12,7 @@ export function AuthCallback() {
   const error = search.get('error')
   const provider = search.get('provider') ?? 'discord'
   const mode = search.get('mode')
+  const callbackAccessToken = search.get('accessToken')
 
   useEffect(() => {
     if (isLoading) return
@@ -19,6 +20,10 @@ export function AuthCallback() {
     if (error) {
       navigate({ to: user ? '/profile' : '/login' })
       return
+    }
+
+    if (callbackAccessToken) {
+      useAuthStore.getState().setAccessToken(callbackAccessToken)
     }
 
     api
@@ -43,7 +48,7 @@ export function AuthCallback() {
 
         navigate({ to: nextTarget })
       })
-  }, [accessToken, error, isLoading, mode, navigate, setAuth, updateUser, user])
+  }, [accessToken, callbackAccessToken, error, isLoading, mode, navigate, setAuth, updateUser, user])
 
   return (
     <div

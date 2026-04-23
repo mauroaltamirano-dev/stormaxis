@@ -392,12 +392,16 @@ authRouter.get('/discord/callback', async (req, res) => {
       return redirectToClient({ provider: 'discord', error: 'user_banned' }, clientOrigin)
     }
 
+    const accessToken = signAccessToken(user.id, user.role)
     const { token: refreshToken, jti } = signRefreshToken(user.id)
     await saveRefreshToken(user.id, jti)
 
     clearOAuthCookies()
     res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
-    return redirectToClient({ provider: 'discord', mode: 'login', access: 'granted' }, clientOrigin)
+    return redirectToClient(
+      { provider: 'discord', mode: 'login', access: 'granted', accessToken },
+      clientOrigin,
+    )
   } catch {
     clearOAuthCookies()
     return redirectToClient({ provider: 'discord', error: 'discord_auth_failed' })
