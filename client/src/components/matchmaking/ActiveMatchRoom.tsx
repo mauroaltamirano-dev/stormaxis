@@ -331,7 +331,7 @@ export function ActiveMatchRoom({
     currentPlayer?.isCaptain &&
     ["VETOING", "PLAYING", "VOTING"].includes(match.status);
   const canUploadReplay =
-    ["VOTING", "COMPLETED"].includes(match.status) &&
+    match.status === "COMPLETED" &&
     (currentUserRole === "ADMIN" ||
       (isParticipant && Boolean(currentPlayer?.isCaptain)));
   const cancelRequestedByMe =
@@ -357,7 +357,7 @@ export function ActiveMatchRoom({
   const isNarrow = viewportWidth < 720;
   const showDiscordVoicePanel =
     Boolean(match.discordVoice?.enabled) &&
-    ["PLAYING", "VOTING"].includes(match.status);
+    match.status === "PLAYING";
   const mapCards = useMemo(() => {
     return HOTS_MAPS.map((map) => {
       const veto = match.vetoes.find(
@@ -366,15 +366,6 @@ export function ActiveMatchRoom({
       return { mapId: map.id, mapName: map.name, veto };
     });
   }, [match.vetoes]);
-  const stageTimer =
-    match.status === "VETOING"
-      ? vetoSeconds
-      : match.status === "VOTING" && match.winner
-        ? mvpVotingSeconds
-        : match.status === "VOTING"
-          ? votingSeconds
-          : null;
-
   function handleSendChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSendChat) return;
@@ -518,13 +509,20 @@ export function ActiveMatchRoom({
               />
             ))}
           </div>
-          <small style={{ color: "#94a3b8" }}>
-            {isSpectator
-              ? "Modo espectador: podés seguir el veto en vivo, sin intervenir."
-              : isCaptainTurn
-                ? "Te toca vetar. Si expira el timer, el sistema banea un mapa al azar."
-                : "Solo el capitán del turno puede vetar."}
-          </small>
+          <div style={vetoHintStripStyle}>
+            <span style={vetoHintChipStyle("#7dd3fc")}>
+              {isSpectator
+                ? "Observación en vivo"
+                : isCaptainTurn
+                  ? "Turno activo"
+                  : "Esperando capitán"}
+            </span>
+            <span style={vetoHintChipStyle("#fbbf24")}>
+              {isCaptainTurn
+                ? "Si vence el timer, cae auto-ban"
+                : "Sólo el capitán del turno puede vetar"}
+            </span>
+          </div>
         </StageCard>
       )}
 
@@ -564,8 +562,13 @@ export function ActiveMatchRoom({
                     ? "Cuando la partida termine, ambos capitanes deben confirmar 'Partida terminada' para abrir la votación de ganador y MVP."
                     : "Cada jugador debe marcar Comenzar partida. Cuando todos entren, la sala queda lista para jugar sin perder el acceso al panel de Discord."
                 }
+                compact
               />
-              <MapSelectedCard mapName={selectedMap} compact={isNarrow} />
+              <MapSelectedCard
+                mapName={selectedMap}
+                compact={isNarrow}
+                dense
+              />
               <ProgressRail
                 label="Operatividad de lobby"
                 value={connectedCount}
@@ -669,6 +672,7 @@ export function ActiveMatchRoom({
                   : "—"}
               </div>
             }
+            compact
           />
 
           <div
@@ -744,7 +748,7 @@ export function ActiveMatchRoom({
         </StageCard>
       )}
 
-      {["VOTING", "COMPLETED"].includes(match.status) && (
+      {match.status === "COMPLETED" && (
         <ReplayUploadCard
           uploads={match.replayUploads ?? []}
           canUpload={canUploadReplay}
@@ -792,6 +796,7 @@ export function ActiveMatchRoom({
                   : "—"}
               </div>
             }
+            compact
           />
           <div
             style={{
@@ -891,7 +896,7 @@ export function ActiveMatchRoom({
             accent={
               match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent
             }
-            compact={isNarrow}
+            compact
           />
           {mvpPlayer && (
             <StageCallout
@@ -1001,49 +1006,6 @@ export function ActiveMatchRoom({
               </button>
             )}
           </div>
-        </div>
-
-        <div style={opsGridStyle(isMobile)}>
-          <OpsPill
-            label="Fase"
-            value={statusMeta.stage ?? "Standby"}
-            tone={statusMeta.tone}
-          />
-          <OpsPill
-            label="Mapa"
-            value={selectedMap ?? "Pendiente"}
-            tone="#e2e8f0"
-          />
-          <OpsPill
-            label="Jugadores"
-            value={`${humanPlayersCount}/10`}
-            tone="#7dd3fc"
-          />
-          <OpsPill
-            label={
-              stageTimer != null
-                ? "Timer activo"
-                : match.status === "PLAYING"
-                  ? "Conectados"
-                  : "Señal"
-            }
-            value={
-              stageTimer != null
-                ? `00:${String(stageTimer).padStart(2, "0")}`
-                : match.status === "PLAYING"
-                  ? `${readyBy.length}/${totalReadyPlayers}`
-                  : statusMeta.signal
-            }
-            tone={
-              stageTimer != null && stageTimer <= 10
-                ? "#fda4af"
-                : match.status === "PLAYING"
-                  ? allConnected
-                    ? "#4ade80"
-                    : "#fbbf24"
-                  : "#cbd5e1"
-            }
-          />
         </div>
 
         <MatchTimeline status={match.status} allConnected={allConnected} />
@@ -1405,55 +1367,6 @@ function MatchTimeline({
   );
 }
 
-function OpsPill({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string;
-  tone: string;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid rgba(232,244,255,0.08)",
-        background: "rgba(2,6,14,0.48)",
-        padding: "0.52rem 0.62rem",
-        minWidth: 0,
-      }}
-    >
-      <div
-        style={{
-          color: "rgba(232,244,255,0.36)",
-          fontSize: "0.56rem",
-          fontWeight: 900,
-          letterSpacing: "0.14em",
-          textTransform: "uppercase",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          marginTop: "0.16rem",
-          color: tone,
-          fontFamily: "var(--font-display)",
-          fontSize: "0.86rem",
-          fontWeight: 900,
-          letterSpacing: "0.04em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {value}
-      </div>
-    </div>
-  );
-}
-
 function TeamColumn({
   team,
   teamNumber,
@@ -1801,12 +1714,14 @@ function StageCallout({
   title,
   description,
   rightSlot,
+  compact = false,
 }: {
   tone: string;
   label: string;
   title: string;
   description: string;
   rightSlot?: ReactNode;
+  compact?: boolean;
 }) {
   return (
     <div
@@ -1815,7 +1730,7 @@ function StageCallout({
         overflow: "hidden",
         border: `1px solid ${tone}36`,
         background: `linear-gradient(135deg, ${tone}18, rgba(15,23,42,0.78))`,
-        padding: "0.95rem 1rem",
+        padding: compact ? "0.72rem 0.8rem" : "0.95rem 1rem",
         display: "grid",
         gap: "0.35rem",
       }}
@@ -1850,9 +1765,9 @@ function StageCallout({
           <div
             style={{
               color: tone,
-              fontSize: "0.64rem",
+              fontSize: compact ? "0.58rem" : "0.64rem",
               fontWeight: 900,
-              letterSpacing: "0.18em",
+              letterSpacing: compact ? "0.16em" : "0.18em",
               textTransform: "uppercase",
             }}
           >
@@ -1862,7 +1777,7 @@ function StageCallout({
             style={{
               color: "#f8fafc",
               fontFamily: "var(--font-display)",
-              fontSize: "1.02rem",
+              fontSize: compact ? "0.94rem" : "1.02rem",
               letterSpacing: "0.05em",
             }}
           >
@@ -1871,8 +1786,8 @@ function StageCallout({
           <div
             style={{
               color: "rgba(226,232,240,0.72)",
-              fontSize: "0.86rem",
-              lineHeight: 1.5,
+              fontSize: compact ? "0.79rem" : "0.86rem",
+              lineHeight: compact ? 1.42 : 1.5,
             }}
           >
             {description}
@@ -2497,8 +2412,8 @@ function teamsGridStyle(isTablet: boolean): CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns: isTablet
-      ? "minmax(230px, 0.92fr) minmax(320px, 1.12fr) minmax(230px, 0.92fr)"
-      : "minmax(280px, 1fr) minmax(390px, 470px) minmax(280px, 1fr)",
+      ? "minmax(230px, 0.94fr) minmax(300px, 1.04fr) minmax(230px, 0.94fr)"
+      : "minmax(280px, 1fr) minmax(360px, 440px) minmax(280px, 1fr)",
     gap: isTablet ? "0.72rem" : "0.82rem",
     alignItems: "stretch",
   };
@@ -2509,16 +2424,6 @@ function mobileTeamGridStyle(isNarrow: boolean): CSSProperties {
     display: "grid",
     gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
     gap: "1rem",
-  };
-}
-
-function opsGridStyle(isMobile: boolean): CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: isMobile
-      ? "repeat(2, minmax(0, 1fr))"
-      : "repeat(4, minmax(0, 1fr))",
-    gap: "0.55rem",
   };
 }
 
@@ -2976,12 +2881,33 @@ function replayPlayerPillStyle(team: 1 | 2): CSSProperties {
   };
 }
 
+const vetoHintStripStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.45rem",
+  flexWrap: "wrap",
+};
+
+function vetoHintChipStyle(tone: string): CSSProperties {
+  return {
+    display: "inline-flex",
+    alignItems: "center",
+    minHeight: "28px",
+    padding: "0.28rem 0.5rem",
+    border: `1px solid ${tone}2e`,
+    background: `${tone}10`,
+    color: tone,
+    fontSize: "0.68rem",
+    fontWeight: 800,
+    letterSpacing: "0.06em",
+  };
+}
+
 function mapGridStyle(isNarrow: boolean): CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
     gap: "0.6rem",
-    maxHeight: isNarrow ? "none" : "398px",
+    maxHeight: isNarrow ? "none" : "560px",
     overflowY: isNarrow ? "visible" : "auto",
     paddingRight: isNarrow ? 0 : "0.12rem",
   };
@@ -2990,9 +2916,11 @@ function mapGridStyle(isNarrow: boolean): CSSProperties {
 function MapSelectedCard({
   mapName,
   compact = false,
+  dense = false,
 }: {
   mapName: string;
   compact?: boolean;
+  dense?: boolean;
 }) {
   const [imgFailed, setImgFailed] = useState(false);
   const imageUrl = getMapImageUrl(mapName);
@@ -3004,7 +2932,7 @@ function MapSelectedCard({
     <div
       style={{
         position: "relative",
-        minHeight: compact ? "150px" : "180px",
+        minHeight: compact ? "138px" : dense ? "154px" : "180px",
         borderRadius: "2px",
         overflow: "hidden",
         border: "1px solid rgba(148,163,184,0.18)",
@@ -3048,7 +2976,7 @@ function MapSelectedCard({
         style={{
           position: "relative",
           zIndex: 1,
-          padding: "1rem 1.1rem",
+          padding: compact || dense ? "0.82rem 0.92rem" : "1rem 1.1rem",
           display: "flex",
           flexDirection: "column",
           gap: "0.2rem",
@@ -3056,9 +2984,9 @@ function MapSelectedCard({
       >
         <div
           style={{
-            fontSize: "0.68rem",
+            fontSize: compact || dense ? "0.62rem" : "0.68rem",
             textTransform: "uppercase",
-            letterSpacing: "0.22em",
+            letterSpacing: compact || dense ? "0.18em" : "0.22em",
             color: "rgba(203,213,225,0.75)",
             fontWeight: 700,
           }}
@@ -3068,7 +2996,7 @@ function MapSelectedCard({
         <div
           style={{
             fontFamily: "var(--font-display)",
-            fontSize: "1.6rem",
+            fontSize: compact ? "1.22rem" : dense ? "1.34rem" : "1.6rem",
             fontWeight: 900,
             lineHeight: 1.1,
             textShadow: "0 2px 12px rgba(0,0,0,0.8)",
@@ -3242,7 +3170,7 @@ function MapVetoCard({
         padding: 0,
         overflow: "hidden",
         cursor: active && !isBanned ? "pointer" : "not-allowed",
-        aspectRatio: "16/4.35",
+        aspectRatio: "16/6.6",
         background: "#0d1422",
         transition: "border-color 0.15s, box-shadow 0.12s, filter 0.12s",
         boxShadow: isBanning
@@ -3347,11 +3275,12 @@ function MapVetoCard({
         >
           <span
             style={{
-              fontSize: "1.8rem",
+              fontSize: "1.08rem",
               fontWeight: 900,
               color: "#fff",
-              textShadow: "0 0 16px rgba(248,113,113,1)",
+              textShadow: "0 0 14px rgba(248,113,113,0.9)",
               lineHeight: 1,
+              opacity: 0.95,
             }}
           >
             ✕

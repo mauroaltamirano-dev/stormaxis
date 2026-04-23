@@ -583,7 +583,8 @@ Debe incluir:
   - [x] métricas más claras de matchmaking y tiempos de espera.
 - [x] Battle.net linking (start/callback, identidad y mapping interno).
 - [x] Replay upload/snapshot MVP.
-- [ ] Usar replay parseado para cerrar/validar automáticamente el resultado de la partida StormAxis.
+- [x] Usar replay parseado para cerrar/validar automáticamente el resultado de la partida StormAxis.
+  - 2026-04-23: si el replay matchea mapa + roster mínimo y trae ganador, el backend fija automáticamente el winner en `VOTING` y abre MVP voting; si el resultado no coincide con un winner ya resuelto, queda marcada discrepancia en el summary del replay.
 
 ---
 
@@ -658,15 +659,17 @@ Estado: **BASE CERRADA** (2026-04-23).
 
 ### Prioridad 5 — Replay import propio
 
-Estado: **MVP DE UPLOAD CREADO** (2026-04-23).
+Estado: **MVP + AUTO-VALIDACIÓN BASE** (2026-04-23).
 
 - [x] Modelo/migración `MatchReplayUpload`.
 - [x] Endpoint `POST /api/matches/:matchId/replays` con archivo `.StormReplay`.
 - [x] Permisos: capitán del match o admin; disponible en `VOTING`/`COMPLETED`.
 - [x] Parser backend con `hots-parser` y resumen de mapa, modo, duración, ganador, jugadores/héroes y validación básica contra match.
 - [x] Card visual en MatchRoom para subir/ver el replay oficial.
+- [x] Tabla post-partida con stats por jugador traídas del replay (hero, team, W/L, takedowns, K/D/A, damage, healing, XP).
 - [ ] Validar con replays reales recientes de HOTS.
-- [ ] Usar el replay para resolver ganador automáticamente o levantar discrepancia.
+- [x] Usar el replay para resolver ganador automáticamente o levantar discrepancia.
+- [ ] Afinar reglas de confianza del replay con casos reales (smurfs, BattleTag ausente, aliases/nombres distintos).
 - [ ] Endurecer storage para producción Render: disco persistente externo/S3/R2 antes de depender del filesystem efímero.
 
 ---
@@ -711,5 +714,9 @@ Esto crea la base visual y de navegación para ordenar todo lo demás.
 21. [ ] Aclarar que los slots de invitar aliados, no es para jugar juntos, sino para que busque en la misma cola, pero no quiere decir que vaya a estar en tu equipo. Si no que va a buscar con tus aliados pero no es asegurado que van a jugar en el mismo equipo, pueden pero es como si buscaran por separado, el buscar juntos no influye en ponerlos juntos.
 22. [x] En el panel de admin, el panel User tools, estira toda la pantalla y por lo tanto estira los paneles de qeueu monitor y match monitor.
    - 2026-04-23: se limitó la columna derecha del war room y se corrigieron mínimos de ancho internos para que User tools no empuje Queue/Match monitor.
-
 23. [ ] Retocar UI del matchactive, panel del centro en las vistas posteriores al veto de mapa, veto de mapas muy grande la X
+   - 2026-04-23: primer pase aplicado: centro post-veto más compacto, chips operativos en veto y overlay de ban reducido; falta revisar si hace falta otro pulido visual.
+
+## URGENTES
+
+Cuando logueamos con discord nos manda a un /admin y sino nos loguea pero nos deja en /login, nos debe mandar al dashboard.
