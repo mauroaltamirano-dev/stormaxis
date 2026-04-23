@@ -25,11 +25,9 @@ export function AuthCallback() {
       .get('/auth/me')
       .then((response) => {
         const nextUser = response.data
-        if (user && accessToken) {
-          setAuth(nextUser, accessToken)
-        } else {
-          updateUser(nextUser)
-        }
+        const token = useAuthStore.getState().accessToken
+        if (token) setAuth(nextUser, token)
+        else updateUser(nextUser)
       })
       .catch(() => {})
       .finally(() => {
