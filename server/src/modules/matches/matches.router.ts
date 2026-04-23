@@ -5,11 +5,11 @@ import path from 'path'
 import fs from 'fs'
 import { authenticate, AuthRequest } from '../../shared/middlewares/authenticate'
 import { db } from '../../infrastructure/database/client'
-import { castMvpVote, castVote, markPlayerReady, getRealtimeMatchMeta } from './matches.service'
+import { applyReplayWinnerResolution, castMvpVote, castVote, markPlayerReady, getRealtimeMatchMeta } from './matches.service'
 import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
 import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
-import { ingestMatchReplay, listMatchReplayUploads } from './replay-processor.service'
+import { ingestMatchReplay, listMatchReplayUploads, persistReplayUploadSummary } from './replay-processor.service'
 
 export const matchesRouter = Router()
 
@@ -252,7 +252,35 @@ matchesRouter.post('/:matchId/replays', replayUpload.single('replay'), async (re
       fileSize: uploadedFile.size,
     })
 
-    res.status(result.duplicate ? 200 : 201).json(result)
+    const normalizedSummary =
+      result.upload.parsedSummary && typeof result.upload.parsedSummary === 'object' && !Array.isArray(result.upload.parsedSummary)
+        ? result.upload.parsedSummary
+        : null
+
+    const replayDecision = await applyReplayWinnerResolution(match.id, {
+      status: result.upload.status,
+      parsedWinnerTeam:
+        result.upload.parsedWinnerTeam === 1 || result.upload.parsedWinnerTeam === 2
+          ? result.upload.parsedWinnerTeam
+          : null,
+      parsedSummary: normalizedSummary as { validation?: { mapMatches?: boolean; expectedHumanPlayers?: number; matchedPlayers?: number; minimumMatchedPlayers?: number } } | null,
+    })
+    if (normalizedSummary) {
+      const nextSummary = {
+        ...normalizedSummary,
+        resolution: replayDecision,
+      }
+      await persistReplayUploadSummary(result.upload.id, nextSummary)
+      result.upload = {
+        ...result.upload,
+        parsedSummary: nextSummary,
+      }
+    }
+
+    res.status(result.duplicate ? 200 : 201).json({
+      ...result,
+      replayDecision,
+    })
   } catch (err) {
     if (uploadedFile?.path) fs.promises.unlink(uploadedFile.path).catch(() => {})
     next(err)

@@ -56,6 +56,35 @@ type MvpVoteCount = {
   votes: number
 }
 
+type ReplayValidationSummary = {
+  mapMatches?: boolean
+  expectedHumanPlayers?: number
+  matchedPlayers?: number
+  minimumMatchedPlayers?: number
+}
+
+type ReplayDecisionStatus =
+  | 'auto_result_applied'
+  | 'verified_existing_result'
+  | 'winner_mismatch'
+  | 'awaiting_manual_vote'
+  | 'insufficient_data'
+  | 'parser_failed'
+
+type ReplayDecision = {
+  status: ReplayDecisionStatus
+  message: string
+  autoApplied: boolean
+  replayWinner: 1 | 2 | null
+  existingWinner: 1 | 2 | null
+  mapMatches: boolean
+  matchedPlayers: number
+  expectedHumanPlayers: number
+  minimumMatchedPlayers: number
+  eligibleForAutoWinner: boolean
+  decidedAt: string
+}
+
 export async function markPlayerReady(matchId: string, userId: string) {
   const match = await db.match.findUnique({
     where: { id: matchId },
@@ -129,6 +158,115 @@ export async function finishMatch(matchId: string, userId: string) {
 
   if (finishState.requestedBy.length === finishState.captainIds.length) {
     await openVoting(matchId, humanPlayers.length)
+  }
+}
+
+export async function applyReplayWinnerResolution(matchId: string, upload: {
+  status: string
+  parsedWinnerTeam: 1 | 2 | null
+  parsedSummary?: { validation?: ReplayValidationSummary | null } | null
+}): Promise<ReplayDecision> {
+  const validation = upload.parsedSummary?.validation ?? null
+  const mapMatches = validation?.mapMatches === true
+  const expectedHumanPlayers = Math.max(0, validation?.expectedHumanPlayers ?? 0)
+  const matchedPlayers = Math.max(0, validation?.matchedPlayers ?? 0)
+  const minimumMatchedPlayers = expectedHumanPlayers > 0
+    ? Math.max(4, validation?.minimumMatchedPlayers ?? Math.ceil(expectedHumanPlayers * 0.6))
+    : 0
+  const enoughPlayers = expectedHumanPlayers === 0 ? matchedPlayers > 0 : matchedPlayers >= minimumMatchedPlayers
+  const eligibleForAutoWinner = Boolean(upload.parsedWinnerTeam && mapMatches && enoughPlayers)
+
+  const match = await db.match.findUnique({
+    where: { id: matchId },
+    select: {
+      status: true,
+      winner: true,
+      players: { select: { userId: true, isBot: true } },
+    },
+  })
+  if (!match) throw Errors.NOT_FOUND('Match')
+
+  const decidedAt = new Date().toISOString()
+  const existingWinner =
+    match.winner === 1 || match.winner === 2
+      ? (match.winner as 1 | 2)
+      : null
+  const baseDecision = {
+    autoApplied: false,
+    replayWinner: upload.parsedWinnerTeam,
+    existingWinner,
+    mapMatches,
+    matchedPlayers,
+    expectedHumanPlayers,
+    minimumMatchedPlayers,
+    eligibleForAutoWinner,
+    decidedAt,
+  }
+
+  if (upload.status !== 'PARSED') {
+    return {
+      ...baseDecision,
+      status: 'parser_failed',
+      message: 'El replay quedó guardado, pero el parser no pudo validarlo todavía.',
+    }
+  }
+
+  if (!upload.parsedWinnerTeam) {
+    return {
+      ...baseDecision,
+      status: 'insufficient_data',
+      message: 'El replay no trae un ganador confiable; se mantiene la validación manual.',
+    }
+  }
+
+  if (!mapMatches) {
+    return {
+      ...baseDecision,
+      status: 'awaiting_manual_vote',
+      message: 'El mapa del replay no coincide con el match; dejamos la resolución manual.',
+    }
+  }
+
+  if (!enoughPlayers) {
+    return {
+      ...baseDecision,
+      status: 'awaiting_manual_vote',
+      message: `El replay sólo matcheó ${matchedPlayers}/${expectedHumanPlayers || '?'} jugadores; dejamos la resolución manual.`,
+    }
+  }
+
+  const totalPlayers = match.players.filter((entry) => !entry.isBot && entry.userId).length
+
+  if (match.status === 'VOTING' && !match.winner) {
+    await openMvpVoting(matchId, upload.parsedWinnerTeam, totalPlayers, 'replay')
+    return {
+      ...baseDecision,
+      autoApplied: true,
+      status: 'auto_result_applied',
+      message: `Replay validado: Team ${upload.parsedWinnerTeam} quedó cargado automáticamente como ganador.`,
+    }
+  }
+
+  if (match.winner === upload.parsedWinnerTeam) {
+    return {
+      ...baseDecision,
+      status: 'verified_existing_result',
+      message: `Replay validado: confirma que Team ${upload.parsedWinnerTeam} fue el ganador.`,
+    }
+  }
+
+  if (match.winner === 1 || match.winner === 2) {
+    return {
+      ...baseDecision,
+      status: 'winner_mismatch',
+      message: `Discrepancia detectada: el match marca Team ${match.winner}, pero el replay indica Team ${upload.parsedWinnerTeam}.`,
+    }
+  }
+
+  return {
+    ...baseDecision,
+    status: 'insufficient_data',
+    message: 'El replay se procesó, pero todavía no alcanzó para resolver el resultado automáticamente.',
   }
 }
 
@@ -359,7 +497,7 @@ async function openMvpVoting(
   matchId: string,
   winnerTeam: 1 | 2,
   totalPlayers: number,
-  resolution: 'votes' | 'timeout',
+  resolution: 'votes' | 'timeout' | 'replay',
 ) {
   const current = await db.match.findUnique({
     where: { id: matchId },

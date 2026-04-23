@@ -78,6 +78,13 @@ export type ReplayUploadResult = {
   duplicate: boolean
 }
 
+type ReplaySummary = {
+  validation?: Record<string, unknown>
+  match?: Record<string, unknown>
+  players?: Array<Record<string, unknown>>
+  resolution?: Record<string, unknown>
+}
+
 const GAME_MODE_NAMES: Record<number, string> = {
   50021: 'Versus AI',
   50041: 'Practice',
@@ -180,6 +187,15 @@ export function serializeReplayUpload(upload: StoredReplayUpload) {
     parsedSummary: upload.parsedSummary,
     createdAt: upload.createdAt,
   }
+}
+
+export async function persistReplayUploadSummary(uploadId: string, parsedSummary: ReplaySummary | null) {
+  await db.$executeRaw`
+    UPDATE "MatchReplayUpload"
+    SET "parsedSummary" = ${parsedSummary ? JSON.stringify(parsedSummary) : null}::jsonb,
+        "updatedAt" = NOW()
+    WHERE "id" = ${uploadId}
+  `
 }
 
 async function findReplayUploadBySha(sha256: string) {
@@ -290,6 +306,8 @@ function buildReplaySummary(parsed: ParsedReplayResult, expectedMatch: ExpectedM
       replayMap: parsed.match?.map ?? null,
       expectedHumanPlayers: expectedHumans.length,
       matchedPlayers: matchedPlayers.length,
+      minimumMatchedPlayers: expectedHumans.length > 0 ? Math.max(4, Math.ceil(expectedHumans.length * 0.6)) : 0,
+      winnerDetected: toStormAxisTeam(parsed.match?.winner),
     },
     match: {
       map: parsed.match?.map ?? null,

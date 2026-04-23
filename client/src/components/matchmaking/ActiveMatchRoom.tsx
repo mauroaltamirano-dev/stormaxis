@@ -78,6 +78,14 @@ type MatchState = {
   } | null;
 };
 
+type ReplayResolutionStatus =
+  | "auto_result_applied"
+  | "verified_existing_result"
+  | "winner_mismatch"
+  | "awaiting_manual_vote"
+  | "insufficient_data"
+  | "parser_failed";
+
 type ReplayUpload = {
   id: string;
   status: "UPLOADED" | "PARSED" | "FAILED" | string;
@@ -94,6 +102,17 @@ type ReplayUpload = {
       mapMatches?: boolean;
       expectedHumanPlayers?: number;
       matchedPlayers?: number;
+      minimumMatchedPlayers?: number;
+      winnerDetected?: 1 | 2 | null;
+    };
+    resolution?: {
+      status?: ReplayResolutionStatus;
+      message?: string;
+      autoApplied?: boolean;
+      replayWinner?: 1 | 2 | null;
+      existingWinner?: 1 | 2 | null;
+      eligibleForAutoWinner?: boolean;
+      decidedAt?: string;
     };
     players?: Array<{
       name: string;
@@ -101,6 +120,14 @@ type ReplayUpload = {
       hero: string | null;
       team: 1 | 2 | null;
       won: boolean;
+      takedowns?: number | null;
+      kills?: number | null;
+      deaths?: number | null;
+      assists?: number | null;
+      heroDamage?: number | null;
+      siegeDamage?: number | null;
+      healing?: number | null;
+      experience?: number | null;
     }>;
   } | null;
   uploadedBy?: { id: string; username: string } | null;
@@ -368,12 +395,17 @@ export function ActiveMatchRoom({
     });
     try {
       const upload = await onUploadReplay(file);
+      const resolutionStatus = upload.parsedSummary?.resolution?.status;
+      const resolutionMessage = upload.parsedSummary?.resolution?.message;
       setReplayUploadState({
-        status: upload.status === "FAILED" ? "error" : "success",
+        status:
+          upload.status === "FAILED" || resolutionStatus === "winner_mismatch"
+            ? "error"
+            : "success",
         message:
           upload.status === "FAILED"
             ? upload.parseError ?? "El archivo se subió, pero el parser no pudo leerlo."
-            : "Replay procesado. Ya tenemos metadata real de la partida.",
+            : resolutionMessage ?? "Replay procesado. Ya tenemos metadata real de la partida.",
       });
     } catch (err) {
       setReplayUploadState({
@@ -1102,14 +1134,29 @@ function ReplayUploadCard({
   onChooseFile: () => void;
 }) {
   const latest = uploads[0] ?? null;
-  const parsedPlayers = latest?.parsedSummary?.players ?? [];
+  const parsedPlayers = [...(latest?.parsedSummary?.players ?? [])].sort((a, b) => {
+    const teamA = a.team ?? 3;
+    const teamB = b.team ?? 3;
+    if (teamA !== teamB) return teamA - teamB;
+    if (a.won !== b.won) return a.won ? -1 : 1;
+    return (b.takedowns ?? -1) - (a.takedowns ?? -1);
+  });
   const validation = latest?.parsedSummary?.validation;
+  const resolution = latest?.parsedSummary?.resolution;
   const statusTone =
     latest?.status === "PARSED"
       ? "#4ade80"
       : latest?.status === "FAILED"
         ? "#f87171"
         : "#fbbf24";
+  const resolutionTone =
+    resolution?.status === "winner_mismatch"
+      ? "#f87171"
+      : resolution?.status === "auto_result_applied"
+        ? "#4ade80"
+        : resolution?.status === "verified_existing_result"
+          ? "#38bdf8"
+          : "#fbbf24";
 
   return (
     <StageCard
@@ -1171,6 +1218,22 @@ function ReplayUploadCard({
         </div>
       )}
 
+      {resolution?.message && (
+        <div
+          style={{
+            ...replayUploadNoticeStyle(resolution?.status === "winner_mismatch"),
+            borderColor: `${resolutionTone}55`,
+            color: resolutionTone,
+            background:
+              resolution?.status === "winner_mismatch"
+                ? "rgba(127, 29, 29, 0.22)"
+                : "rgba(15, 23, 42, 0.78)",
+          }}
+        >
+          {resolution.message}
+        </div>
+      )}
+
       {latest && (
         <div style={replayMetaGridStyle}>
           <StatusTile label="Parser" value={latest.parserStatus ?? latest.status} tone={statusTone} />
@@ -1193,18 +1256,80 @@ function ReplayUploadCard({
             }
             tone="#4ade80"
           />
+          <StatusTile
+            label="Resolución"
+            value={getReplayResolutionLabel(resolution?.status)}
+            tone={resolutionTone}
+          />
         </div>
       )}
 
       {parsedPlayers.length > 0 && (
-        <div style={replayPlayersStripStyle}>
-          {parsedPlayers.slice(0, 10).map((player, index) => (
-            <div key={`${player.name}-${index}`} style={replayPlayerPillStyle(player.team ?? 1)}>
-              <strong>{player.hero ?? "Hero"}</strong>
-              <span>{player.battleTag ?? player.name}</span>
+        <>
+          <div style={replayPlayersStripStyle}>
+            {parsedPlayers.slice(0, 10).map((player, index) => (
+              <div key={`${player.name}-${index}`} style={replayPlayerPillStyle(player.team ?? 1)}>
+                <strong>{player.hero ?? "Hero"}</strong>
+                <span>{player.battleTag ?? player.name}</span>
+              </div>
+            ))}
+          </div>
+
+          <div style={replayStatsWrapStyle}>
+            <div style={replayStatsHeaderStyle}>
+              Stats del mapa · {latest?.parsedMap ?? "Mapa detectado"}
             </div>
-          ))}
-        </div>
+            <div style={replayStatsTableScrollStyle}>
+              <table style={replayStatsTableStyle}>
+                <thead>
+                  <tr>
+                    <th style={replayStatsHeadCellStyle}>Jugador</th>
+                    <th style={replayStatsHeadCellStyle}>Héroe</th>
+                    <th style={replayStatsHeadCellStyle}>Team</th>
+                    <th style={replayStatsHeadCellStyle}>W/L</th>
+                    <th style={replayStatsHeadCellStyle}>TD</th>
+                    <th style={replayStatsHeadCellStyle}>K</th>
+                    <th style={replayStatsHeadCellStyle}>D</th>
+                    <th style={replayStatsHeadCellStyle}>A</th>
+                    <th style={replayStatsHeadCellStyle}>Hero Dmg</th>
+                    <th style={replayStatsHeadCellStyle}>Siege</th>
+                    <th style={replayStatsHeadCellStyle}>Healing</th>
+                    <th style={replayStatsHeadCellStyle}>XP</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parsedPlayers.map((player, index) => (
+                    <tr key={`${player.name}-${index}`} style={replayStatsRowStyle(player.team ?? 1, player.won)}>
+                      <td style={replayStatsBodyCellStyle(true)}>
+                        <div style={{ display: "grid", gap: "0.16rem" }}>
+                          <strong style={{ color: "#f8fafc" }}>{player.battleTag ?? player.name}</strong>
+                          <span style={{ color: "rgba(191,219,254,0.72)", fontSize: "0.72rem" }}>
+                            {player.name}
+                          </span>
+                        </div>
+                      </td>
+                      <td style={replayStatsBodyCellStyle()}>{player.hero ?? "—"}</td>
+                      <td style={replayStatsBodyCellStyle()}>{player.team ? `Team ${player.team}` : "—"}</td>
+                      <td style={replayStatsBodyCellStyle()}>
+                        <span style={{ color: player.won ? "#4ade80" : "#f87171", fontWeight: 800 }}>
+                          {player.won ? "W" : "L"}
+                        </span>
+                      </td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.takedowns)}</td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.kills)}</td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.deaths)}</td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.assists)}</td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.heroDamage)}</td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.siegeDamage)}</td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.healing)}</td>
+                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.experience)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </>
       )}
     </StageCard>
   );
@@ -2303,6 +2428,30 @@ function formatDuration(totalSeconds: number) {
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
+function getReplayResolutionLabel(status?: ReplayResolutionStatus) {
+  switch (status) {
+    case "auto_result_applied":
+      return "Auto-cierre"
+    case "verified_existing_result":
+      return "Verificado"
+    case "winner_mismatch":
+      return "Discrepancia"
+    case "awaiting_manual_vote":
+      return "Manual"
+    case "parser_failed":
+      return "Parser falló"
+    case "insufficient_data":
+      return "Insuficiente"
+    default:
+      return "Pendiente"
+  }
+}
+
+function formatReplayNumber(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  return new Intl.NumberFormat("es-AR").format(value);
+}
+
 function formatChatTime(value: string) {
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return "--:--";
@@ -2756,6 +2905,62 @@ const replayPlayersStripStyle: CSSProperties = {
   overflowX: "auto",
   paddingBottom: "0.1rem",
 };
+
+const replayStatsWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.45rem",
+  border: "1px solid rgba(148,163,184,0.18)",
+  background: "rgba(2,6,23,0.62)",
+  padding: "0.75rem",
+};
+
+const replayStatsHeaderStyle: CSSProperties = {
+  color: "#cbd5e1",
+  fontSize: "0.74rem",
+  fontWeight: 900,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+};
+
+const replayStatsTableScrollStyle: CSSProperties = {
+  overflowX: "auto",
+};
+
+const replayStatsTableStyle: CSSProperties = {
+  width: "100%",
+  minWidth: "920px",
+  borderCollapse: "collapse",
+};
+
+const replayStatsHeadCellStyle: CSSProperties = {
+  textAlign: "left",
+  color: "#7dd3fc",
+  fontSize: "0.68rem",
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+  fontWeight: 900,
+  padding: "0.55rem 0.6rem",
+  borderBottom: "1px solid rgba(125,211,252,0.16)",
+  whiteSpace: "nowrap",
+};
+
+function replayStatsRowStyle(team: 1 | 2, won: boolean): CSSProperties {
+  const tone = TEAM_COLORS[team].accent;
+  return {
+    background: won ? `${tone}08` : "rgba(15,23,42,0.55)",
+    borderBottom: `1px solid ${tone}18`,
+  };
+}
+
+function replayStatsBodyCellStyle(emphasis = false): CSSProperties {
+  return {
+    padding: "0.58rem 0.6rem",
+    color: emphasis ? "#e2e8f0" : "#cbd5e1",
+    fontSize: "0.78rem",
+    whiteSpace: "nowrap",
+    verticalAlign: "middle",
+  };
+}
 
 function replayPlayerPillStyle(team: 1 | 2): CSSProperties {
   const tone = TEAM_COLORS[team].accent;

@@ -5,6 +5,7 @@ import { performVeto } from '../matchmaking/matchmaking.service'
 import { castMvpVote, castVote, finishMatch, getRealtimeMatchMeta, markPlayerReady, requestMatchCancellation } from './matches.service'
 import { calculateRank } from '../users/player-progression'
 import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
+import { listMatchReplayUploads } from './replay-processor.service'
 
 export function registerMatchHandlers(io: Server, socket: Socket) {
   const userId = socket.data.userId as string
@@ -70,7 +71,7 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
           LIMIT 80
         `
       : []
-    const [mvpVotes, mvpRecord, discordVoice] = match
+    const [mvpVotes, mvpRecord, discordVoice, replayUploads] = match
       ? await Promise.all([
           db.$queryRaw<Array<{ userId: string; nomineeUserId: string }>>`
             SELECT "userId", "nomineeUserId" FROM "MvpVote" WHERE "matchId" = ${matchId}
@@ -79,8 +80,9 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
             SELECT "mvpUserId" FROM "Match" WHERE "id" = ${matchId}
           `,
           getDiscordVoiceAccessForUser(matchId, userId),
+          listMatchReplayUploads(matchId, 3),
         ])
-      : [[], [], null]
+      : [[], [], null, []]
 
     socket.emit('match:state', match
       ? {
@@ -88,6 +90,7 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
           mvpUserId: mvpRecord[0]?.mvpUserId ?? null,
           mvpVotes,
           discordVoice,
+          replayUploads,
           runtime,
           messages: visibleMessages.map((message) => ({
             id: message.id,
