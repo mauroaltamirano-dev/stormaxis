@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { createJSONStorage, persist } from 'zustand/middleware'
 import { initSocket, disconnectSocket, setSocketAuthToken } from '../lib/socket'
 import { useMatchmakingStore } from './matchmaking.store'
 
@@ -43,30 +44,42 @@ interface AuthState {
   logout: () => void
 }
 
-export const useAuthStore = create<AuthState>((set, get) => ({
-  user: null,
-  accessToken: null,
-  isLoading: true,
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set, get) => ({
+      user: null,
+      accessToken: null,
+      isLoading: true,
 
-  setAuth: (user, token) => {
-    set({ user, accessToken: token, isLoading: false })
-    initSocket(token)
-  },
+      setAuth: (user, token) => {
+        set({ user, accessToken: token, isLoading: false })
+        initSocket(token)
+      },
 
-  setAccessToken: (token) => {
-    set({ accessToken: token })
-    setSocketAuthToken(token)
-  },
+      setAccessToken: (token) => {
+        set({ accessToken: token })
+        setSocketAuthToken(token)
+      },
 
-  updateUser: (partial) => {
-    const current = get().user
-    if (!current) return
-    set({ user: { ...current, ...partial } })
-  },
+      updateUser: (partial) => {
+        const current = get().user
+        if (!current) return
+        set({ user: { ...current, ...partial } })
+      },
 
-  logout: () => {
-    disconnectSocket()
-    useMatchmakingStore.getState().resetMatchmaking()
-    set({ user: null, accessToken: null, isLoading: false })
-  },
-}))
+      logout: () => {
+        disconnectSocket()
+        useMatchmakingStore.getState().resetMatchmaking()
+        set({ user: null, accessToken: null, isLoading: false })
+      },
+    }),
+    {
+      name: 'nexusgg-auth',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        user: state.user,
+        accessToken: state.accessToken,
+      }),
+    },
+  ),
+)

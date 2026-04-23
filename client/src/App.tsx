@@ -5,21 +5,39 @@ import { api } from './lib/api'
 import { useAuthStore } from './stores/auth.store'
 
 export function App() {
-  const { setAuth, setAccessToken, logout, isLoading } = useAuthStore()
+  const { setAuth, setAccessToken, logout, isLoading, accessToken } = useAuthStore()
 
   // Silent session restore on mount
   useEffect(() => {
-    api.post<{ accessToken: string }>('/auth/refresh')
-      .then((r) => {
-        setAccessToken(r.data.accessToken)
-        return api.get('/auth/me').then((me) => {
-          setAuth(me.data, r.data.accessToken)
+    const restoreFromRefresh = () =>
+      api.post<{ accessToken: string }>('/auth/refresh')
+        .then((r) => {
+          setAccessToken(r.data.accessToken)
+          return api.get('/auth/me').then((me) => {
+            setAuth(me.data, r.data.accessToken)
+          })
         })
-      })
-      .catch(() => {
-        logout()
-      })
-  }, [])
+
+    const restore = async () => {
+      try {
+        if (accessToken) {
+          const me = await api.get('/auth/me')
+          setAuth(me.data, accessToken)
+          return
+        }
+
+        await restoreFromRefresh()
+      } catch {
+        try {
+          await restoreFromRefresh()
+        } catch {
+          logout()
+        }
+      }
+    }
+
+    void restore()
+  }, [accessToken, logout, setAccessToken, setAuth])
 
   if (isLoading) {
     return (
