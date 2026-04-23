@@ -220,6 +220,13 @@ function median(values: number[]) {
   return ordered[mid]
 }
 
+function percentile(values: number[], p: number) {
+  if (values.length === 0) return null
+  const ordered = [...values].sort((a, b) => a - b)
+  const index = Math.min(ordered.length - 1, Math.max(0, Math.ceil((p / 100) * ordered.length) - 1))
+  return ordered[index]
+}
+
 async function getRecentQueueEtaConfig() {
   const [cycleRaw, waitRaw] = await Promise.all([
     redis.lrange(REDIS_KEYS.matchmakingCycleHistory(REGION), 0, ETA_HISTORY_SIZE - 1),
@@ -561,6 +568,186 @@ export async function getQueueSnapshot() {
   )
 
   return { count: players.length, players }
+}
+
+export async function getMatchmakingAdminMetrics() {
+  const queueKey = REDIS_KEYS.matchmakingQueue(REGION)
+  const now = Date.now()
+  const entries = await redis.zrange(queueKey, 0, -1, 'WITHSCORES')
+
+  const players: QueueCandidate[] = []
+  let staleEntries = 0
+
+  for (let index = 0; index < entries.length; index += 2) {
+    const queueId = entries[index]
+    const mmr = Number(entries[index + 1])
+    const metaRaw = await redis.get(REDIS_KEYS.userInQueue(queueId))
+
+    if (!metaRaw) {
+      staleEntries += 1
+      continue
+    }
+
+    let meta: Record<string, unknown> = {}
+    try {
+      meta = JSON.parse(metaRaw) as Record<string, unknown>
+    } catch {
+      meta = {}
+    }
+
+    const isBot = Boolean(meta.isBot) || isBotQueueId(queueId)
+    players.push({
+      queueId,
+      userId: isBot ? null : queueId,
+      mmr,
+      isBot,
+      botName: isBot ? String(meta.botName ?? 'TestBot') : null,
+      joinedAt: typeof meta.joinedAt === 'number' ? meta.joinedAt : null,
+    })
+  }
+
+  const humans = players.filter((player) => !player.isBot)
+  const bots = players.filter((player) => player.isBot)
+  const humanWaits = humans
+    .filter((player) => player.joinedAt != null)
+    .map((player) => Math.max(0, Math.round((now - Number(player.joinedAt)) / 1000)))
+  const mmrs = players.map((player) => player.mmr).filter((mmr) => Number.isFinite(mmr))
+  const averageWaitSeconds = humanWaits.length
+    ? Math.round(humanWaits.reduce((sum, wait) => sum + wait, 0) / humanWaits.length)
+    : null
+  const oldestWaitSeconds = humanWaits.length ? Math.max(...humanWaits) : null
+  const eta = await getRecentQueueEtaConfig()
+
+  const cycleRaw = await redis.lrange(REDIS_KEYS.matchmakingCycleHistory(REGION), 0, ETA_HISTORY_SIZE - 1)
+  const waitRaw = await redis.lrange(REDIS_KEYS.matchmakingWaitHistory(REGION), 0, ETA_HISTORY_SIZE - 1)
+  const cycleSamples = cycleRaw
+    .map((sample) => safeParsePositiveInt(sample))
+    .filter((value): value is number => value != null && value <= 600)
+  const waitSamples = waitRaw
+    .map((sample) => safeParsePositiveInt(sample))
+    .filter((value): value is number => value != null && value <= 3600)
+
+  let bestWindow: null | {
+    startIndex: number
+    spread: number
+    tolerance: number | null
+    withinTolerance: boolean
+    waitedSeconds: number | null
+    totalDiff: number
+    pairingGap: number
+    hasBots: boolean
+  } = null
+
+  if (players.length >= MATCH_SIZE) {
+    const windows = await Promise.all(
+      Array.from({ length: players.length - MATCH_SIZE + 1 }, async (_, startIndex) => {
+        const windowPlayers = players.slice(startIndex, startIndex + MATCH_SIZE)
+        const humansInWindow = windowPlayers.filter((player) => !player.isBot && player.userId)
+        if (humansInWindow.length < 2) return null
+
+        const hasBots = windowPlayers.some((player) => player.isBot)
+        const spread = windowPlayers[windowPlayers.length - 1].mmr - windowPlayers[0].mmr
+        const tolerance = IGNORE_MMR_BALANCE || hasBots ? null : await getDynamicMMRTolerance(windowPlayers)
+        const balanced = buildBestBalancedTeams(windowPlayers)
+        if (!balanced) return null
+
+        const joinedAts = windowPlayers
+          .filter((player) => !player.isBot && player.joinedAt != null)
+          .map((player) => Number(player.joinedAt))
+        const waitedSeconds = joinedAts.length ? Math.round((now - Math.min(...joinedAts)) / 1000) : null
+
+        return {
+          startIndex,
+          spread,
+          tolerance,
+          withinTolerance: tolerance == null ? true : spread <= tolerance,
+          waitedSeconds,
+          totalDiff: balanced.totalDiff,
+          pairingGap: balanced.pairingGap,
+          hasBots,
+        }
+      }),
+    )
+
+    const validWindows = windows.filter((window): window is NonNullable<typeof window> => window != null)
+    bestWindow = validWindows.sort((left, right) => {
+      if (left.withinTolerance !== right.withinTolerance) return left.withinTolerance ? -1 : 1
+      if (left.totalDiff !== right.totalDiff) return left.totalDiff - right.totalDiff
+      if (left.pairingGap !== right.pairingGap) return left.pairingGap - right.pairingGap
+      if (left.spread !== right.spread) return left.spread - right.spread
+      return left.startIndex - right.startIndex
+    })[0] ?? null
+  }
+
+  const canForceRelax =
+    !IGNORE_MMR_BALANCE &&
+    players.length >= MATCH_SIZE &&
+    players.length <= SMALL_POPULATION_QUEUE_LIMIT &&
+    (oldestWaitSeconds ?? 0) * 1000 >= FORCE_RELAX_MMR_AFTER_MS
+
+  const status = players.length < MATCH_SIZE
+    ? 'waiting_for_players'
+    : bestWindow?.withinTolerance
+      ? 'ready'
+      : canForceRelax
+        ? 'force_relax_ready'
+        : 'blocked_by_spread'
+
+  const missingPlayers = Math.max(0, MATCH_SIZE - players.length)
+  const estimatedFillSeconds = missingPlayers > 0
+    ? Math.max(DEFAULT_ETA_FLOOR_SECONDS, missingPlayers * eta.secondsPerPlayer)
+    : Math.max(DEFAULT_ETA_FLOOR_SECONDS, eta.cycleSeconds)
+
+  return {
+    region: REGION,
+    status,
+    config: {
+      matchSize: MATCH_SIZE,
+      baseMmrTolerance: BASE_MMR_TOLERANCE,
+      maxMmrTolerance: MAX_MMR_TOLERANCE,
+      toleranceStep: MMR_TOLERANCE_STEP,
+      toleranceStepSeconds: Math.round(MMR_TOLERANCE_STEP_MS / 1000),
+      forceRelaxAfterSeconds: Math.round(FORCE_RELAX_MMR_AFTER_MS / 1000),
+      smallPopulationQueueLimit: SMALL_POPULATION_QUEUE_LIMIT,
+      ignoreMmrBalance: IGNORE_MMR_BALANCE,
+    },
+    queue: {
+      total: players.length,
+      humans: humans.length,
+      bots: bots.length,
+      missingPlayers,
+      staleEntries,
+      oldestWaitSeconds,
+      averageWaitSeconds,
+      medianWaitSeconds: median(humanWaits),
+      p90WaitSeconds: percentile(humanWaits, 90),
+      mmrMin: mmrs.length ? Math.min(...mmrs) : null,
+      mmrMax: mmrs.length ? Math.max(...mmrs) : null,
+      mmrSpread: mmrs.length ? Math.max(...mmrs) - Math.min(...mmrs) : null,
+      waitBands: {
+        under30: humanWaits.filter((wait) => wait < 30).length,
+        under60: humanWaits.filter((wait) => wait >= 30 && wait < 60).length,
+        under120: humanWaits.filter((wait) => wait >= 60 && wait < 120).length,
+        over120: humanWaits.filter((wait) => wait >= 120).length,
+      },
+    },
+    eta: {
+      cycleSeconds: eta.cycleSeconds,
+      secondsPerPlayer: eta.secondsPerPlayer,
+      estimatedFillSeconds,
+      recentCycleMedianSeconds: median(cycleSamples),
+      recentWaitMedianSeconds: median(waitSamples),
+      cycleSamples: cycleSamples.length,
+      waitSamples: waitSamples.length,
+    },
+    formation: {
+      bestWindow,
+      canForceRelax,
+      secondsUntilForceRelax: players.length >= MATCH_SIZE
+        ? Math.max(0, Math.ceil((FORCE_RELAX_MMR_AFTER_MS - (oldestWaitSeconds ?? 0) * 1000) / 1000))
+        : null,
+    },
+  }
 }
 
 export async function scheduleTryFormMatch() {

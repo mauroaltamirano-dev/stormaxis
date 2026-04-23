@@ -4,6 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   AlertTriangle,
   Bot,
+  Clock3,
   Cpu,
   Gauge,
   RefreshCw,
@@ -17,6 +18,7 @@ import { useAuthStore } from "../stores/auth.store";
 
 type AdminStats = {
   totalUsers: number;
+  suspectUsers?: number;
   activeMatches: number;
   completedMatches: number;
   playersInQueue: number;
@@ -35,6 +37,64 @@ type QueuePlayer = {
 type QueueResponse = {
   count: number;
   players: QueuePlayer[];
+};
+
+type MatchmakingMetrics = {
+  region: string;
+  status: "waiting_for_players" | "ready" | "force_relax_ready" | "blocked_by_spread";
+  config: {
+    matchSize: number;
+    baseMmrTolerance: number;
+    maxMmrTolerance: number;
+    toleranceStep: number;
+    toleranceStepSeconds: number;
+    forceRelaxAfterSeconds: number;
+    smallPopulationQueueLimit: number;
+    ignoreMmrBalance: boolean;
+  };
+  queue: {
+    total: number;
+    humans: number;
+    bots: number;
+    missingPlayers: number;
+    staleEntries: number;
+    oldestWaitSeconds: number | null;
+    averageWaitSeconds: number | null;
+    medianWaitSeconds: number | null;
+    p90WaitSeconds: number | null;
+    mmrMin: number | null;
+    mmrMax: number | null;
+    mmrSpread: number | null;
+    waitBands: {
+      under30: number;
+      under60: number;
+      under120: number;
+      over120: number;
+    };
+  };
+  eta: {
+    cycleSeconds: number;
+    secondsPerPlayer: number;
+    estimatedFillSeconds: number;
+    recentCycleMedianSeconds: number | null;
+    recentWaitMedianSeconds: number | null;
+    cycleSamples: number;
+    waitSamples: number;
+  };
+  formation: {
+    canForceRelax: boolean;
+    secondsUntilForceRelax: number | null;
+    bestWindow: null | {
+      startIndex: number;
+      spread: number;
+      tolerance: number | null;
+      withinTolerance: boolean;
+      waitedSeconds: number | null;
+      totalDiff: number;
+      pairingGap: number;
+      hasBots: boolean;
+    };
+  };
 };
 
 type AdminMatch = {
@@ -62,7 +122,17 @@ type AdminUser = {
   losses: number;
   isBanned: boolean;
   isSuspect: boolean;
+  isComputedSuspicious?: boolean;
+  suspicionScore?: number;
+  suspicionLevel?: "clear" | "watch" | "suspicious" | "critical";
+  suspicionSignals?: Array<{
+    code: string;
+    label: string;
+    detail: string;
+    severity: "low" | "medium" | "high";
+  }>;
   discordUsername?: string | null;
+  bnetBattletag?: string | null;
   createdAt: string;
 };
 
@@ -88,6 +158,23 @@ type ClientErrorsResponse = {
   events: ClientErrorEvent[];
 };
 
+type AdminAuditLog = {
+  id: string;
+  action: string;
+  entityType: string;
+  entityId?: string | null;
+  summary: string;
+  metadata?: Record<string, unknown> | null;
+  createdAt: string;
+  actor?: { id: string; username: string } | null;
+  targetUser?: { id: string; username: string } | null;
+};
+
+type AdminAuditLogsResponse = {
+  count: number;
+  logs: AdminAuditLog[];
+};
+
 function formatDateTime(value?: string | number | null) {
   if (!value) return "—";
   const date = new Date(value);
@@ -108,10 +195,40 @@ function formatElapsed(joinedAt?: number | null) {
   return `${minutes}:${String(rest).padStart(2, "0")}`;
 }
 
+function formatSeconds(value?: number | null) {
+  if (value == null) return "—";
+  const seconds = Math.max(0, Math.round(value));
+  const minutes = Math.floor(seconds / 60);
+  const rest = seconds % 60;
+  if (minutes <= 0) return `${rest}s`;
+  return `${minutes}m ${String(rest).padStart(2, "0")}s`;
+}
+
 function winrate(wins: number, losses: number) {
   const total = wins + losses;
   if (!total) return 0;
   return Math.round((wins / total) * 100);
+}
+
+function suspicionTone(level?: AdminUser["suspicionLevel"]) {
+  if (level === "critical") return "#fb7185";
+  if (level === "suspicious") return "#facc15";
+  if (level === "watch") return "#fdba74";
+  return "#94a3b8";
+}
+
+function suspicionLabel(level?: AdminUser["suspicionLevel"]) {
+  if (level === "critical") return "Crítico";
+  if (level === "suspicious") return "Sospechoso";
+  if (level === "watch") return "Watch";
+  return "Limpio";
+}
+
+function matchmakingStatusCopy(status?: MatchmakingMetrics["status"]) {
+  if (status === "ready") return { label: "Listo", detail: "Hay una ventana que puede formar match ahora.", tone: "#86efac" };
+  if (status === "force_relax_ready") return { label: "Relax activo", detail: "Cola chica: ya se puede forzar tolerancia por espera.", tone: "#facc15" };
+  if (status === "blocked_by_spread") return { label: "Bloqueado por spread", detail: "Hay 10+, pero el spread supera la tolerancia actual.", tone: "#fb7185" };
+  return { label: "Esperando players", detail: "Todavía falta completar el tamaño mínimo de match.", tone: "#7dd3fc" };
 }
 
 export function Admin() {
@@ -120,43 +237,55 @@ export function Admin() {
 
   const [stats, setStats] = useState<AdminStats | null>(null);
   const [queue, setQueue] = useState<QueueResponse>({ count: 0, players: [] });
+  const [matchmakingMetrics, setMatchmakingMetrics] = useState<MatchmakingMetrics | null>(null);
   const [matches, setMatches] = useState<AdminMatch[]>([]);
   const [usersResponse, setUsersResponse] = useState<AdminUsersResponse | null>(null);
   const [clientErrors, setClientErrors] = useState<ClientErrorEvent[]>([]);
+  const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
   const [userSearch, setUserSearch] = useState("");
+  const [userFilter, setUserFilter] = useState<"all" | "suspicious" | "banned" | "clean">("all");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [queueBusy, setQueueBusy] = useState<"clear" | "fill" | null>(null);
   const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
   const [userBusyId, setUserBusyId] = useState<string | null>(null);
   const [surfaceError, setSurfaceError] = useState<string | null>(null);
 
-  const loadUsers = useCallback(async (search = userSearch) => {
+  const loadUsers = useCallback(async (search = userSearch, filter = userFilter) => {
     const { data } = await api.get<AdminUsersResponse>("/admin/users", {
-      params: search.trim() ? { search: search.trim() } : undefined,
+      params: {
+        ...(search.trim() ? { search: search.trim() } : {}),
+        filter,
+      },
     });
     setUsersResponse(data);
-  }, [userSearch]);
+  }, [userFilter, userSearch]);
 
   const loadAdminSurface = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [statsResponse, queueResponse, matchesResponse, errorsResponse] = await Promise.all([
+      const [statsResponse, queueResponse, metricsResponse, matchesResponse, errorsResponse, auditResponse] = await Promise.all([
         api.get<AdminStats>("/admin/stats"),
         api.get<QueueResponse>("/admin/queue"),
+        api.get<MatchmakingMetrics>("/admin/matchmaking/metrics"),
         api.get<AdminMatch[]>("/admin/matches"),
         api.get<ClientErrorsResponse>("/admin/monitoring/client-errors", {
+          params: { limit: 12 },
+        }),
+        api.get<AdminAuditLogsResponse>("/admin/audit-logs", {
           params: { limit: 12 },
         }),
       ]);
 
       setStats(statsResponse.data);
       setQueue(queueResponse.data);
+      setMatchmakingMetrics(metricsResponse.data);
       setMatches(
         matchesResponse.data.filter((match) =>
           ["PENDING", "ACCEPTING", "VETOING", "PLAYING", "VOTING", "CANCELLED"].includes(match.status),
         ),
       );
       setClientErrors(errorsResponse.data.events);
+      setAuditLogs(auditResponse.data.logs);
       setSurfaceError(null);
     } catch (err: any) {
       setSurfaceError(err?.response?.data?.error?.message ?? "No pude cargar el panel admin.");
@@ -182,7 +311,7 @@ export function Admin() {
   }, [loadAdminSurface, loadUsers, navigate, user]);
 
   const suspectCount = useMemo(
-    () => usersResponse?.users.filter((entry) => entry.isSuspect).length ?? 0,
+    () => usersResponse?.users.filter((entry) => entry.isSuspect || entry.isComputedSuspicious).length ?? 0,
     [usersResponse],
   );
 
@@ -262,7 +391,28 @@ export function Admin() {
     }
   }
 
+  async function handleToggleSuspect(targetUser: AdminUser) {
+    try {
+      setUserBusyId(targetUser.id);
+      await api.patch(`/admin/users/${targetUser.id}/suspect`, {
+        suspect: !targetUser.isSuspect,
+        reason: !targetUser.isSuspect ? "Review manual desde filtros anti-smurf" : undefined,
+      });
+      await Promise.all([loadUsers(), loadAdminSurface()]);
+    } catch (err: any) {
+      setSurfaceError(err?.response?.data?.error?.message ?? "No pude cambiar el flag sospechoso.");
+    } finally {
+      setUserBusyId(null);
+    }
+  }
+
   if (!user || user.role !== "ADMIN") return null;
+
+  const matchmakingStatus = matchmakingStatusCopy(matchmakingMetrics?.status);
+  const waitBands = matchmakingMetrics?.queue.waitBands;
+  const waitBandTotal = waitBands
+    ? Math.max(1, waitBands.under30 + waitBands.under60 + waitBands.under120 + waitBands.over120)
+    : 1;
 
   return (
     <div style={pageStyle}>
@@ -322,14 +472,87 @@ export function Admin() {
         <StatCard
           icon={ShieldAlert}
           label="Suspect flags"
-          value={suspectCount}
+          value={stats?.suspectUsers ?? suspectCount}
           tone="#facc15"
-          detail="Jugadores marcados como sospechosos"
+          detail="Flags persistentes anti-smurf"
         />
       </section>
 
       <section style={mainGridStyle}>
-        <div style={{ display: "grid", gap: "1rem" }}>
+        <div style={mainColumnStyle}>
+          <AdminSection
+            eyebrow="Matchmaking health"
+            title="Tiempos de espera y balance"
+            subtitle="Lectura rápida de si la cola está formando, relajando tolerancia o bloqueada por spread."
+            actions={<Tag tone={matchmakingStatus.tone}>{matchmakingStatus.label}</Tag>}
+          >
+            <div style={healthGridStyle}>
+              <MetricTile
+                label="Espera más vieja"
+                value={formatSeconds(matchmakingMetrics?.queue.oldestWaitSeconds)}
+                detail={`Promedio ${formatSeconds(matchmakingMetrics?.queue.averageWaitSeconds)} · p90 ${formatSeconds(matchmakingMetrics?.queue.p90WaitSeconds)}`}
+                tone="#7dd3fc"
+              />
+              <MetricTile
+                label="Fill estimado"
+                value={formatSeconds(matchmakingMetrics?.eta.estimatedFillSeconds)}
+                detail={`${matchmakingMetrics?.queue.missingPlayers ?? 0} slots faltantes · ${matchmakingMetrics?.eta.secondsPerPlayer ?? "—"}s/player`}
+                tone="#86efac"
+              />
+              <MetricTile
+                label="Spread cola"
+                value={matchmakingMetrics?.queue.mmrSpread ?? "—"}
+                detail={`${matchmakingMetrics?.queue.mmrMin ?? "—"}-${matchmakingMetrics?.queue.mmrMax ?? "—"} ELO`}
+                tone="#facc15"
+              />
+              <MetricTile
+                label="Ventana candidata"
+                value={matchmakingMetrics?.formation.bestWindow?.totalDiff ?? "—"}
+                detail={
+                  matchmakingMetrics?.formation.bestWindow
+                    ? `Spread ${matchmakingMetrics.formation.bestWindow.spread} / tol ${matchmakingMetrics.formation.bestWindow.tolerance ?? "∞"}`
+                    : "Sin ventana de 10 evaluable"
+                }
+                tone={matchmakingMetrics?.formation.bestWindow?.withinTolerance ? "#86efac" : "#fb7185"}
+              />
+            </div>
+
+            <div style={healthNarrativeStyle}>
+              <Clock3 size={16} color={matchmakingStatus.tone} />
+              <span>{matchmakingStatus.detail}</span>
+              {matchmakingMetrics?.formation.secondsUntilForceRelax != null && matchmakingMetrics.status === "blocked_by_spread" ? (
+                <strong style={{ color: "#fde68a" }}>
+                  Relax en {formatSeconds(matchmakingMetrics.formation.secondsUntilForceRelax)}
+                </strong>
+              ) : null}
+            </div>
+
+            {waitBands ? (
+              <div style={waitBandWrapStyle}>
+                <div style={waitBandBarStyle} aria-label="Distribución de espera en cola">
+                  {[
+                    { key: "under30", value: waitBands.under30, color: "#38bdf8" },
+                    { key: "under60", value: waitBands.under60, color: "#86efac" },
+                    { key: "under120", value: waitBands.under120, color: "#facc15" },
+                    { key: "over120", value: waitBands.over120, color: "#fb7185" },
+                  ].map((band) => (
+                    <span
+                      key={band.key}
+                      style={{
+                        width: `${(band.value / waitBandTotal) * 100}%`,
+                        minWidth: band.value > 0 ? "7px" : 0,
+                        background: band.color,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div style={tinyMetaStyle}>
+                  Espera humanos: &lt;30s {waitBands.under30} · 30-60s {waitBands.under60} · 1-2m {waitBands.under120} · +2m {waitBands.over120}
+                </div>
+              </div>
+            ) : null}
+          </AdminSection>
+
           <AdminSection
             eyebrow="Queue monitor"
             title="Cola competitiva"
@@ -451,45 +674,86 @@ export function Admin() {
           </AdminSection>
         </div>
 
-        <div style={{ display: "grid", gap: "1rem" }}>
+        <div style={sideColumnStyle}>
           <AdminSection
             eyebrow="User tools"
             title="Jugadores y ELO tools"
-            subtitle="Buscá usuarios, ajustá MMR y marcá cuentas conflictivas."
+            subtitle="Buscá usuarios, filtrá riesgo anti-smurf, ajustá MMR y marcá cuentas conflictivas."
             actions={
-              <div style={sectionActionRowStyle}>
-                <input
-                  value={userSearch}
-                  onChange={(event) => setUserSearch(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Enter") void loadUsers();
-                  }}
-                  placeholder="Buscar por username o email"
-                  style={searchInputStyle}
-                />
-                <button type="button" onClick={() => void loadUsers()} style={softButtonStyle}>
-                  Buscar
-                </button>
+              <div style={{ display: "grid", gap: "0.55rem" }}>
+                <div style={filterRailStyle}>
+                  {[
+                    ["all", "Todos"],
+                    ["suspicious", "Sospechosos"],
+                    ["banned", "Baneados"],
+                    ["clean", "Limpios"],
+                  ].map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      onClick={() => {
+                        const nextFilter = value as typeof userFilter;
+                        setUserFilter(nextFilter);
+                        void loadUsers(userSearch, nextFilter);
+                      }}
+                      style={userFilter === value ? activeFilterButtonStyle : filterButtonStyle}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                <div style={sectionActionRowStyle}>
+                  <input
+                    value={userSearch}
+                    onChange={(event) => setUserSearch(event.target.value)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter") void loadUsers();
+                    }}
+                    placeholder="Buscar por username o email"
+                    style={searchInputStyle}
+                  />
+                  <button type="button" onClick={() => void loadUsers()} style={softButtonStyle}>
+                    Buscar
+                  </button>
+                </div>
               </div>
             }
           >
             <div style={{ display: "grid", gap: "0.75rem" }}>
               {(usersResponse?.users ?? []).map((entry) => (
-                <div key={entry.id} style={userCardStyle}>
+                <div
+                  key={entry.id}
+                  style={{
+                    ...userCardStyle,
+                    borderColor: `${suspicionTone(entry.suspicionLevel)}33`,
+                  }}
+                >
                   <div style={{ display: "grid", gap: "0.28rem", minWidth: 0 }}>
                     <div style={rowTitleStyle}>
                       {entry.username}
                       <Tag tone={entry.isBanned ? "#f87171" : entry.role === "ADMIN" ? "#7dd3fc" : "#94a3b8"}>
                         {entry.role}
                       </Tag>
-                      {entry.isSuspect ? <Tag tone="#facc15">Suspect</Tag> : null}
+                      <Tag tone={suspicionTone(entry.suspicionLevel)}>
+                        {suspicionLabel(entry.suspicionLevel)} · {entry.suspicionScore ?? 0}
+                      </Tag>
+                      {entry.isSuspect ? <Tag tone="#facc15">Flag manual</Tag> : null}
                     </div>
                     <div style={rowMetaStyle}>
                       {entry.email ?? "Sin email"} · {entry.rank} · {entry.mmr} MMR · WR {winrate(entry.wins, entry.losses)}%
                     </div>
                     <div style={tinyMetaStyle}>
-                      Discord: {entry.discordUsername ?? "sin vincular"} · Alta {formatDateTime(entry.createdAt)}
+                      Discord: {entry.discordUsername ?? "sin vincular"} · BNet: {entry.bnetBattletag ?? "sin vincular"} · Alta {formatDateTime(entry.createdAt)}
                     </div>
+                    {entry.suspicionSignals?.length ? (
+                      <div style={signalListStyle}>
+                        {entry.suspicionSignals.slice(0, 3).map((signal) => (
+                          <span key={signal.code} title={signal.detail} style={signalPillStyle}>
+                            {signal.label}
+                          </span>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
 
                   <div style={userActionsGridStyle}>
@@ -512,9 +776,24 @@ export function Admin() {
                     >
                       {entry.isBanned ? "Desbanear" : "Banear"}
                     </button>
+                    <button
+                      type="button"
+                      disabled={userBusyId === entry.id}
+                      onClick={() => void handleToggleSuspect(entry)}
+                      style={entry.isSuspect ? softButtonStyle : softWarnButtonStyle}
+                    >
+                      {entry.isSuspect ? "Limpiar flag" : "Marcar suspect"}
+                    </button>
                   </div>
                 </div>
               ))}
+              {(usersResponse?.users ?? []).length === 0 ? (
+                <EmptyState
+                  icon={ShieldAlert}
+                  title="Sin usuarios para este filtro"
+                  description="Probá cambiar el filtro anti-smurf o buscar por otro username/email."
+                />
+              ) : null}
             </div>
           </AdminSection>
 
@@ -538,6 +817,39 @@ export function Admin() {
                       {event.context ?? "Sin contexto"} · {formatDateTime(event.createdAt ?? event.timestamp)}
                     </div>
                     {event.url ? <div style={tinyMetaStyle}>{event.url}</div> : null}
+                  </div>
+                ))}
+              </div>
+            )}
+          </AdminSection>
+
+          <AdminSection
+            eyebrow="Audit trail"
+            title="Audit logs"
+            subtitle="Trazabilidad persistente de las acciones operativas del panel admin."
+          >
+            {auditLogs.length === 0 ? (
+              <EmptyState
+                icon={Shield}
+                title="Sin acciones registradas"
+                description="Cuando un admin toque cola, matches o usuarios, la traza persistente aparece acá."
+              />
+            ) : (
+              <div style={{ display: "grid", gap: "0.65rem" }}>
+                {auditLogs.map((entry) => (
+                  <div key={entry.id} style={auditCardStyle}>
+                    <div style={rowTitleStyle}>
+                      <span>{entry.summary}</span>
+                      <Tag tone="#7dd3fc">{entry.action.replaceAll("_", " ")}</Tag>
+                    </div>
+                    <div style={rowMetaStyle}>
+                      {entry.actor?.username ?? "Admin"} · {entry.entityType}
+                      {entry.targetUser?.username ? ` · Target ${entry.targetUser.username}` : ""}
+                    </div>
+                    <div style={tinyMetaStyle}>
+                      {formatDateTime(entry.createdAt)}
+                      {entry.entityId ? ` · ${entry.entityId.slice(0, 12)}` : ""}
+                    </div>
                   </div>
                 ))}
               </div>
@@ -602,6 +914,30 @@ function StatCard({
         {value}
       </div>
       <div style={sectionSubtitleStyle}>{detail}</div>
+    </div>
+  );
+}
+
+function MetricTile({
+  label,
+  value,
+  detail,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  detail: string;
+  tone: string;
+}) {
+  return (
+    <div style={{ ...metricTileStyle, borderColor: `${tone}26` }}>
+      <div style={{ color: "rgba(226,232,240,0.58)", fontSize: "0.66rem", fontWeight: 900, letterSpacing: "0.13em", textTransform: "uppercase" }}>
+        {label}
+      </div>
+      <div style={{ color: tone, fontFamily: "var(--font-display)", fontSize: "1.25rem", letterSpacing: "0.05em" }}>
+        {value}
+      </div>
+      <div style={tinyMetaStyle}>{detail}</div>
     </div>
   );
 }
@@ -747,11 +1083,25 @@ const statCardStyle: CSSProperties = {
 
 const mainGridStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(0, 1.2fr) minmax(340px, 0.95fr)",
+  gridTemplateColumns: "minmax(0, 1fr) minmax(320px, 420px)",
+  gap: "1rem",
+  alignItems: "start",
+};
+
+const mainColumnStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: "1rem",
+};
+
+const sideColumnStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
   gap: "1rem",
 };
 
 const sectionStyle: CSSProperties = {
+  minWidth: 0,
   border: "1px solid rgba(148,163,184,0.12)",
   background: "rgba(4,9,16,0.94)",
   padding: "1rem",
@@ -782,13 +1132,80 @@ const sectionSubtitleStyle: CSSProperties = {
 };
 
 const sectionActionRowStyle: CSSProperties = {
+  minWidth: 0,
   display: "flex",
   gap: "0.55rem",
   flexWrap: "wrap",
 };
 
+const healthGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
+  gap: "0.65rem",
+};
+
+const metricTileStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.35rem",
+  padding: "0.75rem 0.8rem",
+  border: "1px solid rgba(148,163,184,0.12)",
+  background: "rgba(15,23,42,0.38)",
+};
+
+const healthNarrativeStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.5rem",
+  flexWrap: "wrap",
+  border: "1px solid rgba(148,163,184,0.12)",
+  background: "rgba(2,6,23,0.34)",
+  color: "rgba(226,232,240,0.74)",
+  padding: "0.72rem 0.8rem",
+  fontSize: "0.84rem",
+};
+
+const waitBandWrapStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.38rem",
+};
+
+const waitBandBarStyle: CSSProperties = {
+  display: "flex",
+  overflow: "hidden",
+  height: "0.55rem",
+  border: "1px solid rgba(148,163,184,0.14)",
+  background: "rgba(15,23,42,0.72)",
+};
+
+const filterRailStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.4rem",
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+};
+
+const filterButtonStyle: CSSProperties = {
+  border: "1px solid rgba(148,163,184,0.16)",
+  background: "rgba(2,6,23,0.6)",
+  color: "rgba(226,232,240,0.72)",
+  padding: "0.48rem 0.6rem",
+  cursor: "pointer",
+  fontSize: "0.7rem",
+  fontWeight: 900,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const activeFilterButtonStyle: CSSProperties = {
+  ...filterButtonStyle,
+  border: "1px solid rgba(250,204,21,0.34)",
+  background: "rgba(250,204,21,0.13)",
+  color: "#fef08a",
+};
+
 const searchInputStyle: CSSProperties = {
-  minWidth: "240px",
+  minWidth: 0,
+  flex: "1 1 180px",
   border: "1px solid rgba(148,163,184,0.18)",
   background: "rgba(2,6,23,0.72)",
   color: "#e2e8f0",
@@ -907,9 +1324,26 @@ const userCardStyle: CSSProperties = {
 };
 
 const userActionsGridStyle: CSSProperties = {
+  minWidth: 0,
   display: "flex",
   gap: "0.45rem",
   flexWrap: "wrap",
+};
+
+const signalListStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.35rem",
+  flexWrap: "wrap",
+  paddingTop: "0.2rem",
+};
+
+const signalPillStyle: CSSProperties = {
+  border: "1px solid rgba(250,204,21,0.2)",
+  background: "rgba(250,204,21,0.08)",
+  color: "#fde68a",
+  padding: "0.22rem 0.38rem",
+  fontSize: "0.68rem",
+  fontWeight: 800,
 };
 
 const errorCardStyle: CSSProperties = {
@@ -918,6 +1352,14 @@ const errorCardStyle: CSSProperties = {
   padding: "0.8rem 0.85rem",
   border: "1px solid rgba(248,113,113,0.14)",
   background: "rgba(28,10,12,0.34)",
+};
+
+const auditCardStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.32rem",
+  padding: "0.8rem 0.85rem",
+  border: "1px solid rgba(125,211,252,0.14)",
+  background: "rgba(8,20,34,0.4)",
 };
 
 const emptyStateStyle: CSSProperties = {

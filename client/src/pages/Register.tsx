@@ -343,35 +343,64 @@ export function Register() {
               letterSpacing: "0.05em",
             }}
           >
-            Registrate con Discord o completá el formulario
+            Registrate con Battle.net, Discord o completá el formulario
           </p>
 
           {/* OAuth */}
-          <a
-            href={buildApiUrl("/api/auth/discord")}
+          <div
             style={{
-              textDecoration: "none",
-              display: "block",
+              display: "flex",
+              flexDirection: "column",
+              gap: "0.75rem",
               marginBottom: "1.5rem",
             }}
           >
-            <button
-              style={{
-                ...oauthBtn("#5865F2"),
-                border: "1px solid rgba(88,101,242,0.5)",
-              }}
-            >
-              <svg
-                width="18"
-                height="14"
-                viewBox="0 0 71 55"
-                fill="currentColor"
+            <a href={buildApiUrl("/api/auth/bnet")} style={{ textDecoration: "none" }}>
+              <button
+                style={{
+                  ...oauthBtn("linear-gradient(135deg, #0074e0, #00aeff)"),
+                  border: "1px solid rgba(0,174,255,0.55)",
+                }}
               >
-                <path d="M60.1 4.9A58.6 58.6 0 0 0 45.5.4a.2.2 0 0 0-.2.1 40.8 40.8 0 0 0-1.8 3.7 54.1 54.1 0 0 0-16.2 0A37.4 37.4 0 0 0 25.5.5a.2.2 0 0 0-.2-.1A58.5 58.5 0 0 0 10.7 4.9a.2.2 0 0 0-.1.1C1.5 18.1-.9 31-.3 43.6a.2.2 0 0 0 .1.2 58.8 58.8 0 0 0 17.7 8.9.2.2 0 0 0 .2-.1 42 42 0 0 0 3.6-5.9.2.2 0 0 0-.1-.3 38.7 38.7 0 0 1-5.5-2.6.2.2 0 0 1 0-.4l1.1-.9a.2.2 0 0 1 .2 0c11.5 5.3 24 5.3 35.4 0a.2.2 0 0 1 .2 0l1.1.8a.2.2 0 0 1 0 .4 36.1 36.1 0 0 1-5.5 2.6.2.2 0 0 0-.1.3 47.1 47.1 0 0 0 3.6 5.9.2.2 0 0 0 .2.1 58.7 58.7 0 0 0 17.8-8.9.2.2 0 0 0 .1-.2c.7-14.4-2.1-27.2-9.7-38.6a.2.2 0 0 0-.1-.1ZM23.7 36.4c-3.5 0-6.4-3.2-6.4-7.1s2.8-7.1 6.4-7.1c3.6 0 6.5 3.2 6.4 7.1 0 3.9-2.8 7.1-6.4 7.1Zm23.7 0c-3.5 0-6.4-3.2-6.4-7.1s2.8-7.1 6.4-7.1c3.6 0 6.5 3.2 6.4 7.1 0 3.9-2.8 7.1-6.4 7.1Z" />
-              </svg>
-              Registrarse con Discord (recomendado)
-            </button>
-          </a>
+                <span
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    width: "20px",
+                    height: "20px",
+                    border: "1px solid rgba(255,255,255,0.45)",
+                    borderRadius: "999px",
+                    fontFamily: "var(--font-display)",
+                    fontSize: "10px",
+                    fontWeight: 900,
+                    letterSpacing: "0",
+                  }}
+                >
+                  B
+                </span>
+                Registrarse con Battle.net
+              </button>
+            </a>
+
+            <a href={buildApiUrl("/api/auth/discord")} style={{ textDecoration: "none" }}>
+              <button
+                style={{
+                  ...oauthBtn("#5865F2"),
+                  border: "1px solid rgba(88,101,242,0.5)",
+                }}
+              >
+                <svg
+                  width="18"
+                  height="14"
+                  viewBox="0 0 71 55"
+                  fill="currentColor"
+                >
+                  <path d="M60.1 4.9A58.6 58.6 0 0 0 45.5.4a.2.2 0 0 0-.2.1 40.8 40.8 0 0 0-1.8 3.7 54.1 54.1 0 0 0-16.2 0A37.4 37.4 0 0 0 25.5.5a.2.2 0 0 0-.2-.1A58.5 58.5 0 0 0 10.7 4.9a.2.2 0 0 0-.1.1C1.5 18.1-.9 31-.3 43.6a.2.2 0 0 0 .1.2 58.8 58.8 0 0 0 17.7 8.9.2.2 0 0 0 .2-.1 42 42 0 0 0 3.6-5.9.2.2 0 0 0-.1-.3 38.7 38.7 0 0 1-5.5-2.6.2.2 0 0 1 0-.4l1.1-.9a.2.2 0 0 1 .2 0c11.5 5.3 24 5.3 35.4 0a.2.2 0 0 1 .2 0l1.1.8a.2.2 0 0 1 0 .4 36.1 36.1 0 0 1-5.5 2.6.2.2 0 0 0-.1.3 47.1 47.1 0 0 0 3.6 5.9.2.2 0 0 0 .2.1 58.7 58.7 0 0 0 17.8-8.9.2.2 0 0 0 .1-.2c.7-14.4-2.1-27.2-9.7-38.6a.2.2 0 0 0-.1-.1ZM23.7 36.4c-3.5 0-6.4-3.2-6.4-7.1s2.8-7.1 6.4-7.1c3.6 0 6.5 3.2 6.4 7.1 0 3.9-2.8 7.1-6.4 7.1Zm23.7 0c-3.5 0-6.4-3.2-6.4-7.1s2.8-7.1 6.4-7.1c3.6 0 6.5 3.2 6.4 7.1 0 3.9-2.8 7.1-6.4 7.1Z" />
+                </svg>
+                Registrarse con Discord
+              </button>
+            </a>
+          </div>
 
           {/* Divider */}
           <div

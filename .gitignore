@@ -22,6 +22,9 @@ Thumbs.db
 *.log
 npm-debug.log*
 
+# Uploaded match artifacts
+server/uploads/
+
 # Coverage
 coverage/
 

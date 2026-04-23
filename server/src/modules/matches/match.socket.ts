@@ -1,3 +1,4 @@
+import { randomUUID } from 'crypto'
 import { Server, Socket } from 'socket.io'
 import { db } from '../../infrastructure/database/client'
 import { performVeto } from '../matchmaking/matchmaking.service'
@@ -12,7 +13,14 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
   socket.on('match:join', async ({ matchId }: { matchId: string }) => {
     const matchExists = await db.match.findUnique({
       where: { id: matchId },
-      select: { id: true },
+      select: {
+        id: true,
+        players: {
+          where: { userId },
+          select: { team: true, isBot: true },
+          take: 1,
+        },
+      },
     })
 
     if (!matchExists) {
@@ -21,6 +29,10 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
     }
 
     socket.join(`match:${matchId}`)
+    const viewerTeam = matchExists.players[0]?.isBot ? null : matchExists.players[0]?.team ?? null
+    if (viewerTeam === 1 || viewerTeam === 2) {
+      socket.join(`match:${matchId}:team:${viewerTeam}`)
+    }
 
     // Send full match state to the joining player
     const match = await db.match.findUnique({
@@ -31,10 +43,33 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
         },
         vetoes: { orderBy: { order: 'asc' } },
         votes: { select: { userId: true, winner: true } },
-        messages: { orderBy: { createdAt: 'asc' }, take: 50, include: { user: { select: { username: true, avatar: true } } } },
+
       },
     })
     const runtime = match ? await getRealtimeMatchMeta(matchId) : null
+    const visibleMessages = match
+      ? await db.$queryRaw<
+          Array<{
+            id: string
+            userId: string
+            username: string
+            avatar: string | null
+            content: string
+            channel: string
+            team: number | null
+            createdAt: Date
+          }>
+        >`
+          SELECT cm."id", cm."userId", u."username", u."avatar", cm."content",
+                 COALESCE(cm."channel", 'GLOBAL') AS "channel", cm."team", cm."createdAt"
+          FROM "ChatMessage" cm
+          JOIN "User" u ON u."id" = cm."userId"
+          WHERE cm."matchId" = ${matchId}
+            AND (cm."channel" = 'GLOBAL' OR (cm."channel" = 'TEAM' AND cm."team" = ${viewerTeam}))
+          ORDER BY cm."createdAt" ASC
+          LIMIT 80
+        `
+      : []
     const [mvpVotes, mvpRecord, discordVoice] = match
       ? await Promise.all([
           db.$queryRaw<Array<{ userId: string; nomineeUserId: string }>>`
@@ -54,6 +89,16 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
           mvpVotes,
           discordVoice,
           runtime,
+          messages: visibleMessages.map((message) => ({
+            id: message.id,
+            userId: message.userId,
+            username: message.username,
+            avatar: message.avatar,
+            content: message.content,
+            channel: message.channel === 'TEAM' ? 'TEAM' : 'GLOBAL',
+            team: message.team === 1 || message.team === 2 ? message.team : null,
+            timestamp: message.createdAt,
+          })),
           players: match.players.map((player) => ({
             ...player,
             user: player.user
@@ -110,8 +155,10 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
   })
 
   // Chat message
-  socket.on('chat:send', async ({ matchId, content }: { matchId: string; content: string }) => {
+  socket.on('chat:send', async ({ matchId, content, channel }: { matchId: string; content: string; channel?: 'GLOBAL' | 'TEAM' }) => {
     if (!content?.trim() || content.length > 500) return
+
+    const requestedChannel = channel === 'TEAM' ? 'TEAM' : 'GLOBAL'
 
     const match = await db.match.findUnique({
       where: { id: matchId },
@@ -129,19 +176,36 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
     })
 
     if (!player?.user) return
+    if (requestedChannel === 'TEAM' && (player.team !== 1 && player.team !== 2)) {
+      socket.emit('error', { code: 'TEAM_CHAT_UNAVAILABLE', message: 'El chat de equipo requiere participar en un equipo.' })
+      return
+    }
 
-    const message = await db.chatMessage.create({
-      data: { matchId, userId, content: content.trim() },
-    })
+    const team = requestedChannel === 'TEAM' ? player.team : null
+    const messageId = randomUUID()
+    const [message] = await db.$queryRaw<Array<{ id: string; content: string; channel: string; team: number | null; createdAt: Date }>>`
+      INSERT INTO "ChatMessage" ("id", "matchId", "userId", "content", "channel", "team")
+      VALUES (${messageId}, ${matchId}, ${userId}, ${content.trim()}, ${requestedChannel}, ${team})
+      RETURNING "id", "content", "channel", "team", "createdAt"
+    `
 
-    io.to(`match:${matchId}`).emit('chat:message', {
+    const payload = {
       id: message.id,
       userId,
       username: player.user.username,
       avatar: player.user.avatar,
       content: message.content,
+      channel: message.channel === 'TEAM' ? 'TEAM' : 'GLOBAL',
+      team: message.team === 1 || message.team === 2 ? message.team : null,
       timestamp: message.createdAt,
-    })
+    }
+
+    if (requestedChannel === 'TEAM' && team) {
+      io.to(`match:${matchId}:team:${team}`).emit('chat:message', payload)
+      return
+    }
+
+    io.to(`match:${matchId}`).emit('chat:message', payload)
   })
 
   // Vote for winner

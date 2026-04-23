@@ -10,6 +10,7 @@ import {
   BarChart3,
   Bell,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ExternalLink,
   LogOut,
@@ -78,7 +79,7 @@ type NavItem = {
 const primaryNav: NavItem[] = [
   { label: "Jugar", icon: Swords, to: "/dashboard" },
   { label: "Leaderboard", icon: Trophy, to: "/leaderboard" },
-  { label: "Estadísticas", icon: BarChart3, disabled: true, badge: "soon" },
+  { label: "Estadísticas", icon: BarChart3, to: "/stats", badge: "beta" },
   { label: "Noticias", icon: Newspaper, disabled: true, badge: "discord" },
 ];
 
@@ -147,6 +148,10 @@ export function AppLayout() {
 
   const [recentMatches, setRecentMatches] = useState<MatchHistoryEntry[]>([]);
   const [isHistoryOpen, setIsHistoryOpen] = useState(true);
+  const [isPlayerSpineCollapsed, setIsPlayerSpineCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("nexus:player-spine-collapsed") === "1";
+  });
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -187,6 +192,13 @@ export function AppLayout() {
       activeMatchSnapshot.status,
     ),
   );
+
+  useEffect(() => {
+    window.localStorage.setItem(
+      "nexus:player-spine-collapsed",
+      isPlayerSpineCollapsed ? "1" : "0",
+    );
+  }, [isPlayerSpineCollapsed]);
 
   useEffect(() => {
     if (!isSearchingMatch || !searchStartedAt) {
@@ -452,7 +464,14 @@ export function AppLayout() {
   if (!user) return null;
 
   return (
-    <div style={styles.shell}>
+    <div
+      style={{
+        ...styles.shell,
+        gridTemplateColumns: isPlayerSpineCollapsed
+          ? "238px minmax(0, 1fr) 64px"
+          : styles.shell.gridTemplateColumns,
+      }}
+    >
       <aside style={styles.commandRail}>
         <Link to="/dashboard" style={styles.brandLockup}>
           <img
@@ -584,7 +603,78 @@ export function AppLayout() {
         <Outlet />
       </main>
 
-      <aside style={styles.playerSpine}>
+      <aside
+        style={{
+          ...styles.playerSpine,
+          ...(isPlayerSpineCollapsed ? styles.playerSpineCollapsed : {}),
+        }}
+      >
+        <button
+          type="button"
+          onClick={() => setIsPlayerSpineCollapsed((current) => !current)}
+          style={{
+            ...styles.spineCollapseButton,
+            ...(isPlayerSpineCollapsed ? styles.spineCollapseButtonCompact : {}),
+          }}
+          aria-label={
+            isPlayerSpineCollapsed
+              ? "Expandir panel derecho"
+              : "Colapsar panel derecho"
+          }
+          title={
+            isPlayerSpineCollapsed
+              ? "Expandir player spine"
+              : "Colapsar player spine"
+          }
+        >
+          {isPlayerSpineCollapsed ? (
+            <ChevronLeft size={16} />
+          ) : (
+            <ChevronRight size={16} />
+          )}
+          {!isPlayerSpineCollapsed ? <span>Colapsar spine</span> : null}
+        </button>
+
+        {isPlayerSpineCollapsed ? (
+          <div style={styles.collapsedSpineStack}>
+            <button
+              type="button"
+              onClick={openOwnProfile}
+              style={{
+                ...styles.collapsedAvatarButton,
+                borderColor: `${rankColor}66`,
+                boxShadow: `0 0 18px ${rankColor}22`,
+              }}
+              aria-label="Abrir mi perfil"
+            >
+              <Avatar username={user.username} avatar={user.avatar} size={38} />
+            </button>
+            <div
+              style={{
+                ...styles.collapsedRankRail,
+                color: rankColor,
+                borderColor: `${rankColor}55`,
+              }}
+              title={`${rankMeta.label} · ${user.mmr.toLocaleString("es-AR")} MMR`}
+            >
+              {level}
+            </div>
+            <span
+              style={{
+                ...styles.collapsedConnectionDot,
+                background: socketMeta.color,
+                boxShadow: `0 0 12px ${socketMeta.color}`,
+              }}
+              title={socketMeta.label}
+            />
+            {isSearchingMatch || isMatchFound || hasTrackedActiveMatch ? (
+              <span style={styles.collapsedQueueGlyph} title={railStatusMeta.navLabel}>
+                <Swords size={16} />
+              </span>
+            ) : null}
+          </div>
+        ) : (
+          <>
         <section style={styles.playerCorePanel}>
           <div style={styles.spineTopRow}>
             <div>
@@ -687,17 +777,21 @@ export function AppLayout() {
               >
                 {user.username}
               </div>
-              <div
-                style={{
-                  color: "rgba(232,244,255,0.28)",
-                  fontSize: "9.5px",
-                  fontWeight: 800,
-                  letterSpacing: "1.6px",
-                  textTransform: "uppercase",
-                }}
-              >
-                NexusGG · SA Server
-              </div>
+              {user.bnetBattletag ? (
+                <BattleNetMiniTag battletag={user.bnetBattletag} />
+              ) : (
+                <div
+                  style={{
+                    color: "rgba(232,244,255,0.28)",
+                    fontSize: "9.5px",
+                    fontWeight: 800,
+                    letterSpacing: "1.6px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  NexusGG · SA Server
+                </div>
+              )}
             </div>
 
             {/* Rank + MMR */}
@@ -891,6 +985,8 @@ export function AppLayout() {
             )}
           </div>
         </section>
+          </>
+        )}
       </aside>
     </div>
   );
@@ -981,6 +1077,49 @@ function RailItem({
     <Link to={item.to} style={{ textDecoration: "none" }}>
       {content}
     </Link>
+  );
+}
+
+function BattleNetMiniTag({ battletag }: { battletag: string }) {
+  return (
+    <div
+      title="Battle.net ID vinculado"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: "5px",
+        minWidth: 0,
+        color: "#9bd8ff",
+        fontSize: "9.5px",
+        fontWeight: 900,
+        letterSpacing: "1px",
+        textTransform: "uppercase",
+      }}
+    >
+      <span
+        style={{
+          width: "5px",
+          height: "5px",
+          borderRadius: "999px",
+          background: "#00aeff",
+          boxShadow: "0 0 9px #00aeff",
+          flexShrink: 0,
+        }}
+      />
+      <span style={{ color: "rgba(155,216,255,0.50)" }}>B.NET</span>
+      <span
+        style={{
+          overflow: "hidden",
+          textOverflow: "ellipsis",
+          whiteSpace: "nowrap",
+          maxWidth: "150px",
+          color: "#d8f2ff",
+        }}
+      >
+        {battletag}
+      </span>
+    </div>
   );
 }
 
@@ -1177,7 +1316,7 @@ const styles: Record<string, React.CSSProperties> = {
   shell: {
     minHeight: "100vh",
     display: "grid",
-    gridTemplateColumns: "280px minmax(0, 1fr) 340px",
+    gridTemplateColumns: "238px minmax(0, 1fr) 340px",
     background:
       "radial-gradient(circle at 18% 0%, rgba(0,200,255,0.10), transparent 28%), radial-gradient(circle at 100% 12%, rgba(124,77,255,0.10), transparent 30%), var(--nexus-bg)",
     color: "var(--nexus-text)",
@@ -1187,7 +1326,7 @@ const styles: Record<string, React.CSSProperties> = {
     top: 0,
     height: "100vh",
     overflow: "auto",
-    padding: "22px 16px",
+    padding: "20px 12px",
     borderRight: "1px solid rgba(100,200,255,0.10)",
     background:
       "linear-gradient(180deg, rgba(6,11,20,0.96), rgba(8,12,20,0.88)), linear-gradient(90deg, rgba(0,200,255,0.07), transparent 22%)",
@@ -1196,7 +1335,7 @@ const styles: Record<string, React.CSSProperties> = {
   brandLockup: {
     display: "flex",
     alignItems: "center",
-    gap: "12px",
+    gap: "10px",
     textDecoration: "none",
     color: "inherit",
     marginBottom: "22px",
@@ -1211,21 +1350,21 @@ const styles: Record<string, React.CSSProperties> = {
       "linear-gradient(135deg, rgba(0,200,255,0.18), rgba(124,77,255,0.10))",
     clipPath: "polygon(12% 0, 100% 0, 100% 78%, 82% 100%, 0 100%, 0 18%)",
   },
-  brandMark: { width: "50px", height: "50px", objectFit: "contain" },
+  brandMark: { width: "42px", height: "42px", objectFit: "contain" },
   brandName: {
     fontFamily: "var(--font-display)",
-    fontSize: "20px",
+    fontSize: "16px",
     fontWeight: 800,
-    letterSpacing: "2.5px",
+    letterSpacing: "2px",
     textTransform: "uppercase",
     lineHeight: 1,
   },
   brandSubline: {
     marginTop: "4px",
     color: "var(--nexus-muted)",
-    fontSize: "10px",
+    fontSize: "9px",
     fontWeight: 800,
-    letterSpacing: "1.4px",
+    letterSpacing: "1.1px",
     textTransform: "uppercase",
   },
   searchBlock: { position: "relative", marginBottom: "22px" },
@@ -1253,14 +1392,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   searchInput: {
     width: "100%",
-    height: "42px",
-    padding: "0 12px 0 36px",
+    height: "40px",
+    padding: "0 10px 0 34px",
     border: "none",
     outline: "none",
     background: "transparent",
     color: "var(--nexus-text)",
     fontFamily: "var(--font-body)",
-    fontSize: "13px",
+    fontSize: "12px",
   },
   searchResultsPanel: {
     position: "absolute",
@@ -1448,6 +1587,73 @@ const styles: Record<string, React.CSSProperties> = {
     display: "flex",
     flexDirection: "column",
     gap: "14px",
+  },
+  playerSpineCollapsed: {
+    padding: "14px 8px",
+    alignItems: "center",
+    overflow: "hidden",
+    gap: "12px",
+  },
+  spineCollapseButton: {
+    minHeight: "34px",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "7px",
+    border: "1px solid rgba(100,200,255,0.16)",
+    background: "rgba(2,6,14,0.72)",
+    color: "rgba(232,244,255,0.62)",
+    fontFamily: "var(--font-display)",
+    fontSize: "10px",
+    fontWeight: 900,
+    letterSpacing: "1.1px",
+    textTransform: "uppercase",
+    cursor: "pointer",
+  },
+  spineCollapseButtonCompact: {
+    width: "42px",
+    padding: 0,
+  },
+  collapsedSpineStack: {
+    width: "100%",
+    display: "grid",
+    justifyItems: "center",
+    gap: "12px",
+  },
+  collapsedAvatarButton: {
+    width: "44px",
+    height: "44px",
+    display: "grid",
+    placeItems: "center",
+    padding: "2px",
+    border: "1px solid",
+    background: "rgba(2,6,14,0.74)",
+    cursor: "pointer",
+  },
+  collapsedRankRail: {
+    width: "36px",
+    minHeight: "50px",
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid",
+    background: "rgba(255,255,255,0.025)",
+    fontFamily: "var(--font-display)",
+    fontSize: "18px",
+    fontWeight: 900,
+  },
+  collapsedConnectionDot: {
+    width: "9px",
+    height: "9px",
+    borderRadius: "999px",
+  },
+  collapsedQueueGlyph: {
+    width: "36px",
+    height: "36px",
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid rgba(74,222,128,0.32)",
+    background: "rgba(74,222,128,0.10)",
+    color: "#86efac",
   },
   playerCorePanel: {
     padding: "16px",

@@ -321,27 +321,25 @@ export function Login() {
                 Continuar con Discord
               </button>
             </a>
-            <a href={buildApiUrl("/api/auth/google")} style={{ textDecoration: "none" }}>
-              <button style={oauthBtn("#1a1a2e")}>
-                <svg width="18" height="18" viewBox="0 0 48 48">
-                  <path
-                    fill="#FFC107"
-                    d="M43.6 20H24v8h11.3C33.7 33.4 29.3 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.6 29.2 4.8 24 4.8 13.4 4.8 4.8 13.4 4.8 24S13.4 43.2 24 43.2c11 0 20-8 20-19.2 0-1.3-.1-2.7-.4-4z"
-                  />
-                  <path
-                    fill="#FF3D00"
-                    d="M6.3 14.7l6.6 4.8C14.5 15.1 18.9 12 24 12c3 0 5.7 1.1 7.8 2.9l5.7-5.7C33.9 6.6 29.2 4.8 24 4.8c-7.7 0-14.4 4.4-17.7 10.9z"
-                  />
-                  <path
-                    fill="#4CAF50"
-                    d="M24 43.2c5.1 0 9.8-1.7 13.4-4.6l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.5-11.2-8.2l-6.5 5C9.6 38.8 16.3 43.2 24 43.2z"
-                  />
-                  <path
-                    fill="#1976D2"
-                    d="M43.6 20H24v8h11.3c-.9 2.4-2.5 4.4-4.5 5.8l6.2 5.2c-.4.3 6.5-4.7 6.5-15 0-1.3-.1-2.7-.4-4z"
-                  />
-                </svg>
-                Continuar con Google
+            <a href={buildApiUrl("/api/auth/bnet")} style={{ textDecoration: "none" }}>
+              <button style={oauthBtn("linear-gradient(135deg, #0074e0, #00aeff)")}>
+                <span
+                  style={{
+                    display: "grid",
+                    placeItems: "center",
+                    width: "20px",
+                    height: "20px",
+                    border: "1px solid rgba(255,255,255,0.45)",
+                    borderRadius: "999px",
+                    fontFamily: "var(--font-display)",
+                    fontSize: "10px",
+                    fontWeight: 900,
+                    letterSpacing: "0",
+                  }}
+                >
+                  B
+                </span>
+                Continuar con Battle.net
               </button>
             </a>
           </div>

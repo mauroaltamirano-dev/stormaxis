@@ -1,15 +1,45 @@
 import { Router } from 'express'
 import { z } from 'zod'
+import multer from 'multer'
+import path from 'path'
+import fs from 'fs'
 import { authenticate, AuthRequest } from '../../shared/middlewares/authenticate'
 import { db } from '../../infrastructure/database/client'
 import { castMvpVote, castVote, markPlayerReady, getRealtimeMatchMeta } from './matches.service'
 import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
 import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
+import { ingestMatchReplay, listMatchReplayUploads } from './replay-processor.service'
 
 export const matchesRouter = Router()
 
 matchesRouter.use(authenticate)
+
+const replayUploadDir = process.env.REPLAY_UPLOAD_DIR || path.join(process.cwd(), 'uploads', 'replays')
+fs.mkdirSync(replayUploadDir, { recursive: true })
+
+const replayUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_req, _file, cb) => cb(null, replayUploadDir),
+    filename: (_req, file, cb) => {
+      const safeBase = path
+        .basename(file.originalname)
+        .replace(/[^a-zA-Z0-9._-]+/g, '-')
+        .slice(0, 120)
+      cb(null, `${Date.now()}-${Math.random().toString(16).slice(2)}-${safeBase}`)
+    },
+  }),
+  limits: {
+    files: 1,
+    fileSize: Number(process.env.REPLAY_UPLOAD_MAX_BYTES || 50 * 1024 * 1024),
+  },
+  fileFilter: (_req, file, cb) => {
+    if (!file.originalname.toLowerCase().endsWith('.stormreplay')) {
+      return cb(Errors.VALIDATION('El archivo debe ser un .StormReplay.'))
+    }
+    cb(null, true)
+  },
+})
 
 matchesRouter.get('/live', async (req, res, next) => {
   try {
@@ -137,6 +167,7 @@ matchesRouter.get('/:matchId', async (req, res, next) => {
       mvpVotes,
       discordVoice,
       runtime,
+      replayUploads: await listMatchReplayUploads(req.params.matchId, 3),
       players: match.players.map((player) => ({
         ...player,
         user: player.user
@@ -167,6 +198,63 @@ matchesRouter.get('/:matchId', async (req, res, next) => {
       })),
     })
   } catch (err) {
+    next(err)
+  }
+})
+
+matchesRouter.get('/:matchId/replays', async (req, res, next) => {
+  try {
+    res.json(await listMatchReplayUploads(req.params.matchId, 10))
+  } catch (err) {
+    next(err)
+  }
+})
+
+matchesRouter.post('/:matchId/replays', replayUpload.single('replay'), async (req, res, next) => {
+  const uploadedFile = req.file
+  try {
+    const authReq = req as unknown as AuthRequest
+    if (!uploadedFile) throw Errors.VALIDATION('Subí un archivo .StormReplay.')
+
+    const match = await db.match.findUnique({
+      where: { id: String(req.params.matchId) },
+      select: {
+        id: true,
+        status: true,
+        selectedMap: true,
+        players: {
+          select: {
+            userId: true,
+            isBot: true,
+            team: true,
+            isCaptain: true,
+            botName: true,
+            user: { select: { username: true, bnetBattletag: true } },
+          },
+        },
+      },
+    })
+    if (!match) throw Errors.NOT_FOUND('Match')
+
+    const viewerPlayer = match.players.find((player) => player.userId === authReq.userId)
+    const canUpload = authReq.userRole === 'ADMIN' || Boolean(viewerPlayer?.isCaptain)
+    if (!canUpload) throw Errors.FORBIDDEN()
+
+    if (!['VOTING', 'COMPLETED'].includes(match.status)) {
+      throw Errors.VALIDATION('El replay se puede subir cuando la partida ya terminó y está en votación o completada.')
+    }
+
+    const result = await ingestMatchReplay({
+      match,
+      uploadedById: authReq.userId,
+      originalName: uploadedFile.originalname,
+      filePath: uploadedFile.path,
+      fileSize: uploadedFile.size,
+    })
+
+    res.status(result.duplicate ? 200 : 201).json(result)
+  } catch (err) {
+    if (uploadedFile?.path) fs.promises.unlink(uploadedFile.path).catch(() => {})
     next(err)
   }
 })
@@ -205,12 +293,47 @@ matchesRouter.post('/:matchId/mvp-vote', async (req, res, next) => {
 
 matchesRouter.get('/:matchId/chat', async (req, res, next) => {
   try {
-    const messages = await db.chatMessage.findMany({
-      where: { matchId: req.params.matchId },
-      orderBy: { createdAt: 'asc' },
-      include: { user: { select: { username: true, avatar: true } } },
+    const authReq = req as unknown as AuthRequest
+    const viewerPlayer = await db.matchPlayer.findUnique({
+      where: { matchId_userId: { matchId: req.params.matchId, userId: authReq.userId } },
+      select: { team: true, isBot: true },
     })
-    res.json(messages)
+    const viewerTeam = viewerPlayer?.isBot ? null : viewerPlayer?.team ?? null
+
+    const messages = await db.$queryRaw<
+      Array<{
+        id: string
+        userId: string
+        username: string
+        avatar: string | null
+        content: string
+        channel: string
+        team: number | null
+        createdAt: Date
+      }>
+    >`
+      SELECT cm."id", cm."userId", u."username", u."avatar", cm."content",
+             COALESCE(cm."channel", 'GLOBAL') AS "channel", cm."team", cm."createdAt"
+      FROM "ChatMessage" cm
+      JOIN "User" u ON u."id" = cm."userId"
+      WHERE cm."matchId" = ${req.params.matchId}
+        AND (cm."channel" = 'GLOBAL' OR (cm."channel" = 'TEAM' AND cm."team" = ${viewerTeam}))
+      ORDER BY cm."createdAt" ASC
+    `
+
+    res.json(
+      messages.map((message) => ({
+        id: message.id,
+        userId: message.userId,
+        username: message.username,
+        avatar: message.avatar,
+        content: message.content,
+        channel: message.channel === 'TEAM' ? 'TEAM' : 'GLOBAL',
+        team: message.team === 1 || message.team === 2 ? message.team : null,
+        timestamp: message.createdAt,
+        createdAt: message.createdAt,
+      })),
+    )
   } catch (err) {
     next(err)
   }

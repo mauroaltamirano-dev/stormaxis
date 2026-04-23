@@ -10,6 +10,7 @@ import {
   signRefreshToken,
   saveRefreshToken,
   verifyRefreshToken,
+  verifyAccessToken,
   rotateRefreshToken,
   revokeRefreshToken,
   isDiscordConfigured,
@@ -19,6 +20,12 @@ import {
   getDiscordAvatarUrl,
   getDiscordCreatedAt,
   getClientUrl,
+  isBattleNetConfigured,
+  getBattleNetAuthorizeUrl,
+  exchangeBattleNetCode,
+  fetchBattleNetProfile,
+  getBattleNetStableId,
+  getBattleNetDisplayName,
 } from './auth.service'
 import { Errors } from '../../shared/errors/AppError'
 import { authenticate, AuthRequest } from '../../shared/middlewares/authenticate'
@@ -54,7 +61,7 @@ const OAUTH_COOKIE_OPTIONS = {
 interface OAuthIntent {
   mode: 'login' | 'link'
   userId?: string
-  provider: 'discord'
+  provider: 'discord' | 'bnet'
   clientOrigin?: string
   redirectUri?: string
 }
@@ -109,6 +116,53 @@ function sanitizeDiscordRedirectUri(raw?: string) {
   } catch {
     return undefined
   }
+}
+
+function getBattleNetRedirectUriForRequest(req: any) {
+  if (process.env.NODE_ENV === 'production' && process.env.BNET_REDIRECT_URI) {
+    return process.env.BNET_REDIRECT_URI
+  }
+
+  const fromRequest = getRequestClientOrigin(req)
+  if (fromRequest) return `${fromRequest}/api/auth/bnet/callback`
+  return undefined
+}
+
+function sanitizeBattleNetRedirectUri(raw?: string) {
+  if (!raw) return undefined
+  try {
+    const parsed = new URL(raw)
+    if (!isAllowedClientOrigin(parsed.origin)) return undefined
+    if (parsed.pathname !== '/api/auth/bnet/callback') return undefined
+    return `${parsed.origin}${parsed.pathname}`
+  } catch {
+    return undefined
+  }
+}
+
+async function getOAuthLinkUserId(req: any) {
+  const header = req.headers.authorization as string | undefined
+  if (header?.startsWith('Bearer ')) {
+    const payload = verifyAccessToken(header.slice(7))
+    if (payload) return payload.sub
+  }
+
+  const refreshToken = req.cookies?.refreshToken as string | undefined
+  if (!refreshToken) return null
+
+  const payload = verifyRefreshToken(refreshToken)
+  if (!payload) return null
+
+  const stored = await db.refreshToken.findUnique({
+    where: { jti: payload.jti },
+    select: { isRevoked: true, expiresAt: true, userId: true, user: { select: { isBanned: true } } },
+  })
+
+  if (!stored || stored.isRevoked || stored.expiresAt < new Date() || stored.user.isBanned) {
+    return null
+  }
+
+  return stored.userId
 }
 
 // ─── Register ─────────────────────────────────────────────
@@ -254,25 +308,32 @@ authRouter.get('/discord', (req, res) => {
   res.redirect(getDiscordAuthorizeUrl(state, redirectUri))
 })
 
-authRouter.get('/link/discord', authenticate, (req, res) => {
-  if (!isDiscordConfigured()) {
-    return res.status(503).json({ error: { code: 'DISCORD_NOT_CONFIGURED', message: 'Discord OAuth is not configured' } })
-  }
+authRouter.get('/link/discord', async (req, res, next) => {
+  try {
+    if (!isDiscordConfigured()) {
+      return res.status(503).json({ error: { code: 'DISCORD_NOT_CONFIGURED', message: 'Discord OAuth is not configured' } })
+    }
 
-  const state = randomUUID()
-  const clientOrigin = getRequestClientOrigin(req)
-  const redirectUri = getDiscordRedirectUriForRequest(req)
-  const intent: OAuthIntent = {
-    mode: 'link',
-    provider: 'discord',
-    userId: (req as AuthRequest).userId,
-    clientOrigin,
-    redirectUri,
-  }
+    const userId = await getOAuthLinkUserId(req)
+    if (!userId) throw Errors.UNAUTHORIZED()
 
-  res.cookie('oauth_state', state, OAUTH_COOKIE_OPTIONS)
-  res.cookie('oauth_intent', encodeURIComponent(JSON.stringify(intent)), OAUTH_COOKIE_OPTIONS)
-  res.redirect(getDiscordAuthorizeUrl(state, redirectUri))
+    const state = randomUUID()
+    const clientOrigin = getRequestClientOrigin(req)
+    const redirectUri = getDiscordRedirectUriForRequest(req)
+    const intent: OAuthIntent = {
+      mode: 'link',
+      provider: 'discord',
+      userId,
+      clientOrigin,
+      redirectUri,
+    }
+
+    res.cookie('oauth_state', state, OAUTH_COOKIE_OPTIONS)
+    res.cookie('oauth_intent', encodeURIComponent(JSON.stringify(intent)), OAUTH_COOKIE_OPTIONS)
+    res.redirect(getDiscordAuthorizeUrl(state, redirectUri))
+  } catch (err) {
+    next(err)
+  }
 })
 
 authRouter.get('/discord/callback', async (req, res) => {
@@ -412,8 +473,153 @@ authRouter.get('/google', (_req, res) => {
   res.json({ message: 'Configure GOOGLE_CLIENT_ID to enable Google OAuth' })
 })
 
-authRouter.get('/bnet', (_req, res) => {
-  res.json({ message: 'Configure BNET_CLIENT_ID to enable Battle.net OAuth' })
+// ─── Battle.net OAuth ───────────────────────────────────
+
+authRouter.get('/bnet', (req, res) => {
+  if (!isBattleNetConfigured()) {
+    return res.status(503).json({ error: { code: 'BNET_NOT_CONFIGURED', message: 'Battle.net OAuth is not configured' } })
+  }
+
+  const state = randomUUID()
+  const clientOrigin = getRequestClientOrigin(req)
+  const redirectUri = getBattleNetRedirectUriForRequest(req)
+  const intent: OAuthIntent = { mode: 'login', provider: 'bnet', clientOrigin, redirectUri }
+
+  res.cookie('oauth_state', state, OAUTH_COOKIE_OPTIONS)
+  res.cookie('oauth_intent', encodeURIComponent(JSON.stringify(intent)), OAUTH_COOKIE_OPTIONS)
+  res.redirect(getBattleNetAuthorizeUrl(state, redirectUri))
+})
+
+authRouter.get('/link/bnet', async (req, res, next) => {
+  try {
+    if (!isBattleNetConfigured()) {
+      return res.status(503).json({ error: { code: 'BNET_NOT_CONFIGURED', message: 'Battle.net OAuth is not configured' } })
+    }
+
+    const userId = await getOAuthLinkUserId(req)
+    if (!userId) throw Errors.UNAUTHORIZED()
+
+    const state = randomUUID()
+    const clientOrigin = getRequestClientOrigin(req)
+    const redirectUri = getBattleNetRedirectUriForRequest(req)
+    const intent: OAuthIntent = {
+      mode: 'link',
+      provider: 'bnet',
+      userId,
+      clientOrigin,
+      redirectUri,
+    }
+
+    res.cookie('oauth_state', state, OAUTH_COOKIE_OPTIONS)
+    res.cookie('oauth_intent', encodeURIComponent(JSON.stringify(intent)), OAUTH_COOKIE_OPTIONS)
+    res.redirect(getBattleNetAuthorizeUrl(state, redirectUri))
+  } catch (err) {
+    next(err)
+  }
+})
+
+authRouter.get('/bnet/callback', async (req, res) => {
+  const clearOAuthCookies = () => {
+    res.clearCookie('oauth_state', { path: '/api/auth' })
+    res.clearCookie('oauth_intent', { path: '/api/auth' })
+  }
+
+  const redirectToClient = (search: Record<string, string>, clientOrigin?: string) => {
+    const params = new URLSearchParams(search)
+    const baseUrl = clientOrigin && isAllowedClientOrigin(clientOrigin) ? clientOrigin : getClientUrl()
+    res.redirect(`${baseUrl}/auth/callback?${params.toString()}`)
+  }
+
+  try {
+    const code = req.query.code
+    const state = req.query.state
+    const cookieState = req.cookies?.oauth_state as string | undefined
+    const cookieIntent = req.cookies?.oauth_intent as string | undefined
+
+    if (typeof code !== 'string' || typeof state !== 'string' || !cookieState || !cookieIntent || state !== cookieState) {
+      clearOAuthCookies()
+      return redirectToClient({ provider: 'bnet', error: 'oauth_state_mismatch' })
+    }
+
+    const intent = JSON.parse(decodeURIComponent(cookieIntent)) as OAuthIntent
+    const clientOrigin = intent.clientOrigin && isAllowedClientOrigin(intent.clientOrigin) ? intent.clientOrigin : undefined
+    const redirectUri = sanitizeBattleNetRedirectUri(intent.redirectUri)
+    const token = await exchangeBattleNetCode(code, redirectUri)
+    const profile = await fetchBattleNetProfile(token.access_token)
+    const bnetId = getBattleNetStableId(profile)
+    const bnetBattletag = getBattleNetDisplayName(profile)
+
+    if (!bnetId) {
+      clearOAuthCookies()
+      return redirectToClient({ provider: 'bnet', error: 'bnet_profile_missing_id' }, clientOrigin)
+    }
+
+    if (intent.mode === 'link') {
+      if (!intent.userId) {
+        clearOAuthCookies()
+        return redirectToClient({ provider: 'bnet', error: 'invalid_link_intent' }, clientOrigin)
+      }
+
+      const owner = await db.user.findFirst({
+        where: { bnetId, NOT: { id: intent.userId } },
+        select: { id: true },
+      })
+
+      if (owner) {
+        clearOAuthCookies()
+        return redirectToClient({ provider: 'bnet', error: 'bnet_already_linked' }, clientOrigin)
+      }
+
+      await db.user.update({
+        where: { id: intent.userId },
+        data: { bnetId, bnetBattletag },
+        select: authUserSelect,
+      })
+
+      clearOAuthCookies()
+      return redirectToClient({ provider: 'bnet', mode: 'link', linked: 'true' }, clientOrigin)
+    }
+
+    let user = await db.user.findUnique({
+      where: { bnetId },
+      select: authUserSelect,
+    })
+
+    if (!user) {
+      const username = await generateUniqueUsername(bnetBattletag?.split('#')[0] ?? 'bnet')
+      const syntheticEmailId = bnetId.replace(/[^a-zA-Z0-9_-]/g, '-')
+      user = await db.user.create({
+        data: {
+          username,
+          email: `bnet-${syntheticEmailId}@battle.net.local`,
+          bnetId,
+          bnetBattletag,
+          mmr: 1200,
+          rank: calculateRank(1200),
+        },
+        select: authUserSelect,
+      })
+    }
+
+    if (user.isBanned) {
+      clearOAuthCookies()
+      return redirectToClient({ provider: 'bnet', error: 'user_banned' }, clientOrigin)
+    }
+
+    const accessToken = signAccessToken(user.id, user.role)
+    const { token: refreshToken, jti } = signRefreshToken(user.id)
+    await saveRefreshToken(user.id, jti)
+
+    clearOAuthCookies()
+    res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
+    return redirectToClient(
+      { provider: 'bnet', mode: 'login', access: 'granted', accessToken },
+      clientOrigin,
+    )
+  } catch {
+    clearOAuthCookies()
+    return redirectToClient({ provider: 'bnet', error: 'bnet_auth_failed' })
+  }
 })
 
 // ─── Me ───────────────────────────────────────────────────

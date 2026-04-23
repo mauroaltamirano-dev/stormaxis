@@ -20,10 +20,11 @@ Como Battle.net no ofrece una API pública oficial útil para datos completos de
 6. Jugadores crean partida personalizada dentro del juego.
 7. Jugadores confirman disponibilidad/conexión.
 8. Capitanes solicitan finalizar.
-9. Jugadores votan ganador.
-10. Sistema actualiza MMR/ELO y guarda historial.
+9. Capitán o admin puede subir el `.StormReplay` oficial desde el matchroom.
+10. Jugadores votan ganador mientras el replay queda como evidencia/metadata real.
+11. Sistema actualiza MMR/ELO y guarda historial.
 
-A futuro, HeroesProfile Developer puede aportar datos reales de perfiles, replays, héroes, mapas, MMR externo y estadísticas.
+A futuro, HeroesProfile Developer queda como integración opcional; para beta el camino preferido es procesar `.StormReplay` propio sin depender del plan pago externo.
 
 ---
 
@@ -57,7 +58,7 @@ npm run build --workspace=client      ✅ pasa
 Notas:
 
 - El build frontend fue reparado en esta auditoría.
-- Vite avisa que el bundle principal supera 500 kB. No bloquea, pero sugiere code splitting más adelante.
+- [x] El bundle principal fue dividido por ruta con `lazyRouteComponent`: el chunk principal bajó a ~310 kB minificado y ya no dispara el warning de 500 kB.
 - El directorio **sí** está inicializado como repo git (`.git` presente en la raíz).
 
 ---
@@ -311,6 +312,7 @@ Modelos actuales:
 - `Hero`
 - `HeroStat`
 - `ReplayImport`
+  - 2026-04-23: primera base implementada como `MatchReplayUpload` + upload desde MatchRoom.
 - `HeroesProfileSnapshot`
 - `MatchDispute`
 
@@ -514,6 +516,9 @@ Debe incluir:
   - balancear equipos con combinación óptima.
   - relajar spread por espera máxima configurable en colas chicas.
 - [x] Mantener panel de Discord visible en PLAYING/VOTING y cerrar match automáticamente al terminar votaciones.
+- [x] Rediseñar MatchRoom como war room compacto:
+  - 2026-04-23: equipos/veto/timer alineados sin wrapper gigante, panel central de mapas acotado en altura, rosters más compactos y chat dock ancho completo con canales Sala/Equipo.
+  - 2026-04-23: pulido posterior: sin autoscroll del chat, paneles de equipo con background sutil, avatares más grandes, W/L/WR semántico, últimas 5 partidas W/L, badge +/- ELO más legible y hover de mapas sin romper dimensiones.
 
 ### Fase 3.5 — Discord competitivo por match
 
@@ -553,14 +558,19 @@ Debe incluir:
   - limpiar cola.
   - completar a 10 con bots.
   - cancelar/borrar match desde panel.
-- [ ] Audit logs.
+- [x] Audit logs.
 - [x] Client errors.
-- [ ] Anti-smurf flags.
+- [x] Anti-smurf flags.
 
 ### Fase 5 — Datos externos
 
-- [ ] Battle.net linking.
+- [x] Battle.net linking.
+  - 2026-04-23: implementado OAuth start/callback para login y vinculación desde Profile, guardando `bnetId` + `bnetBattletag` en el usuario.
+  - 2026-04-23: integrado en Login/Register y visible como Battle.net ID debajo del username en Profile y AppLayout.
+  - Conclusión de alcance: Battle.net sirve para identidad/mapping interno; no entrega email ni stats de HOTS. Las estadísticas reales quedan para HeroesProfile/replay import.
 - [ ] HeroesProfile backend adapter.
+- [x] Replay upload MVP desde MatchRoom.
+  - 2026-04-23: agregado modelo/migración `MatchReplayUpload`, parser backend con `hots-parser`, almacenamiento local en `server/uploads/replays`, permisos capitán/admin y card visual post-partida en MatchRoom.
 - [ ] Cache y normalización.
 - [ ] Stats reales.
 - [ ] Hero pool.
@@ -568,11 +578,12 @@ Debe incluir:
 ### Próximo paso pactado actualizado
 
 - [ ] Endurecer observabilidad/admin:
-  - audit logs.
-  - filtros de suspicious users / anti-smurf flags.
-  - métricas más claras de matchmaking y tiempos de espera.
-- [ ] Luego retomar **Battle.net linking** (start/callback, identidad y mapping interno).
-- [ ] Replay import/snapshots.
+  - [x] audit logs.
+  - [x] filtros de suspicious users / anti-smurf flags.
+  - [x] métricas más claras de matchmaking y tiempos de espera.
+- [x] Battle.net linking (start/callback, identidad y mapping interno).
+- [x] Replay upload/snapshot MVP.
+- [ ] Usar replay parseado para cerrar/validar automáticamente el resultado de la partida StormAxis.
 
 ---
 
@@ -635,7 +646,28 @@ Notas de avance (2026-04-22):
 
 ### Prioridad 4 — Battle.net
 
-Mantener el spike de **Battle.net linking** marcado para jueves 2026-04-23, después de estabilizar migraciones y Discord básico.
+Estado: **BASE CERRADA** (2026-04-23).
+
+- [x] OAuth start/callback para login Battle.net.
+- [x] OAuth start/callback para vincular Battle.net desde Profile.
+- [x] Guardar `bnetId` estable y `bnetBattletag` visible.
+- [x] Permitir desvincular Battle.net sin romper el último método de acceso.
+- [x] Documentar env vars `BNET_*` en `.env.example`.
+- [ ] Configurar credenciales reales en Battle.net Developer Portal y validar contra cuenta real.
+- [x] Definir fuente de stats HOTS beta: replay import propio primero; HeroesProfile queda opcional/futuro.
+
+### Prioridad 5 — Replay import propio
+
+Estado: **MVP DE UPLOAD CREADO** (2026-04-23).
+
+- [x] Modelo/migración `MatchReplayUpload`.
+- [x] Endpoint `POST /api/matches/:matchId/replays` con archivo `.StormReplay`.
+- [x] Permisos: capitán del match o admin; disponible en `VOTING`/`COMPLETED`.
+- [x] Parser backend con `hots-parser` y resumen de mapa, modo, duración, ganador, jugadores/héroes y validación básica contra match.
+- [x] Card visual en MatchRoom para subir/ver el replay oficial.
+- [ ] Validar con replays reales recientes de HOTS.
+- [ ] Usar el replay para resolver ganador automáticamente o levantar discrepancia.
+- [ ] Endurecer storage para producción Render: disco persistente externo/S3/R2 antes de depender del filesystem efímero.
 
 ---
 
@@ -647,6 +679,37 @@ Después de esta auditoría, el próximo trabajo de código debería ser:
 2. Empezar rediseño de `AppLayout`.
 3. Agregar search de jugadores en sidebar izquierda.
 4. Convertir panel derecho en `PlayerSpine` con nivel, MMR, progreso, historial y Discord CTA.
-5. Menu derecho colapsable.
 
 Esto crea la base visual y de navegación para ordenar todo lo demás.
+
+## 12. Pendiente
+
+1. [x] Hacer que el panel derecho sea colapsable
+   - 2026-04-23: `PlayerSpine` ahora se puede colapsar/expandir y recuerda el estado en `localStorage`.
+   - 2026-04-23: el command rail izquierdo se redujo de 280px a 238px para dar más espacio al contenido central.
+2. [x] Hacer clickeable el historial de partidas del profile.
+   - 2026-04-23: las filas del historial abren la matchroom histórica correspondiente.
+3. [x] Habilitar la page estadísticas y empezar mostrando el historial de partidas detallado allí del usuario (simular datos de momento pero pedir que datos mostraremos de los que realmente nos entrega el juego).
+   - 2026-04-23: agregada `/stats` con historial detallado real del usuario, filtros Todo/30d/7d, ELO neto, winrate, racha, últimos 10, mapas más jugados y slots explícitos para datos futuros de HeroesProfile/replays.
+4. [ ] Habilitar page de buscador de SCRIM para equipos vs equipos.
+5. [ ] Añadir los heroes del juego en una base de datos e incluir imágenes y descripción de cada uno.
+6. [ ] Revisar que tengamos bien separado los mapas con su nombre e imagen en un archivo modularizado para no romper con la modularización en el futuro.
+7. [ ] Habilitar página de noticias, donde las noticias se cargan desde #anuncios de nuestro discord.
+8. [ ] Carga de imágenes profile: hacer que las imágenes del perfil se vean rápido y en buena calidad.
+9. [ ] Logs de errores estileados correctamente en consola con pino o logger.
+10. [ ] Añadir nacionalidad en register, y mostrar también en profile y demás lugares junto al name.
+11. [ ] Añadir selector de idioma.
+12. [ ] Reemplazar todo que diga MMR a ELO y NexusGG a Stormaxis en toda la web.
+13. [ ] En leaderboard añadir distintos páneles, como top de ELO, top victorias, top mvps, top personajes jugadores, top partidas jugadas, top winrate, top cantidad de veces que se eligió cada personaje, etc. Además, permitir ordenar las columnas.
+14. [ ] Mejorar buscador: añadir filtros por rol, personaje, nivel, etc. Ordenar por ELO, victorias, mvps, personajes, partidas jugadas, winrate.
+15. [ ] Añadir sistema de añadir amigos.
+16. [ ] Añadir chat privado.
+17. [ ] Mejorar matchmaking: añadir sistema de invitación a scrims.
+18. [ ] Añadir sistema de recompensas por jugar scrims.
+19. [ ] Añadir visual de partidas jugadas con cierta persona y el winrate juntos.
+20. [ ] Añadir tiempo para las votaciones, actualmente cuando se vota en mayoría ya se elige al instante el ganador y el mvp, a lo mejor algun se confundió y votó mal, se debería dar un tiempo para votar de 1 minuto, y sino votaron los 10, ahí sí se elige el que tenga mayor cantidad de votos.´
+21. [ ] Aclarar que los slots de invitar aliados, no es para jugar juntos, sino para que busque en la misma cola, pero no quiere decir que vaya a estar en tu equipo. Si no que va a buscar con tus aliados pero no es asegurado que van a jugar en el mismo equipo, pueden pero es como si buscaran por separado, el buscar juntos no influye en ponerlos juntos.
+22. [x] En el panel de admin, el panel User tools, estira toda la pantalla y por lo tanto estira los paneles de qeueu monitor y match monitor.
+   - 2026-04-23: se limitó la columna derecha del war room y se corrigieron mínimos de ancho internos para que User tools no empuje Queue/Match monitor.
+
+23. [ ] Retocar UI del matchactive, panel del centro en las vistas posteriores al veto de mapa, veto de mapas muy grande la X

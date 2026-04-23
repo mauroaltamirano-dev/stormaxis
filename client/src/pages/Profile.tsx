@@ -1,6 +1,6 @@
 import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useRouterState } from "@tanstack/react-router";
+import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   Clock3,
   Crosshair,
@@ -423,6 +423,11 @@ export function Profile() {
     window.location.href = buildApiUrl("/api/auth/link/discord");
   }
 
+  function handleLinkBattleNet() {
+    setAccountMessage(null);
+    window.location.href = buildApiUrl("/api/auth/link/bnet");
+  }
+
   async function handleUnlink(provider: LinkedAccountProvider) {
     setAccountBusyProvider(provider);
     setAccountMessage(null);
@@ -552,6 +557,24 @@ export function Profile() {
                     >
                       {profile.username}
                     </h1>
+                    {profile.bnetBattletag ? (
+                      <BattleNetIdentityPill battletag={profile.bnetBattletag} />
+                    ) : isOwnProfile ? (
+                      <a
+                        href={buildApiUrl("/api/auth/link/bnet")}
+                        style={{
+                          width: "fit-content",
+                          color: "#5db7ff",
+                          fontSize: "11px",
+                          fontWeight: 900,
+                          letterSpacing: "1px",
+                          textTransform: "uppercase",
+                          textDecoration: "none",
+                        }}
+                      >
+                        + Vincular Battle.net
+                      </a>
+                    ) : null}
                     <div
                       style={{
                         height: "2px",
@@ -1004,8 +1027,11 @@ export function Profile() {
                     const mapImage = getMatchMapImage(entry.match.selectedMap);
 
                     return (
-                      <div
+                      <Link
                         key={entry.id}
+                        to="/match/$matchId"
+                        params={{ matchId: entry.match.id }}
+                        title="Abrir matchroom histórico"
                         style={{
                           display: "grid",
                           gridTemplateColumns: "78px minmax(0, 1fr) auto",
@@ -1017,6 +1043,9 @@ export function Profile() {
                           borderLeft: `3px solid ${resultColor}`,
                           background: `linear-gradient(180deg, ${resultColor}0a, rgba(3,8,18,0.94))`,
                           boxShadow: `inset 0 1px 0 rgba(255,255,255,0.035), 0 0 20px ${resultColor}0a`,
+                          color: "inherit",
+                          textDecoration: "none",
+                          cursor: "pointer",
                         }}
                       >
                         <div
@@ -1117,7 +1146,7 @@ export function Profile() {
                             ? "—"
                             : `${delta > 0 ? "+" : ""}${delta} ELO`}
                         </div>
-                      </div>
+                      </Link>
                     );
                   })}
                 </div>
@@ -1183,9 +1212,8 @@ export function Profile() {
                   Cuentas vinculadas
                 </div>
                 <div style={{ color: "var(--nexus-muted)", fontSize: "13px" }}>
-                  Hoy el flujo REAL de vinculación existe para Discord. Google y
-                  Battle.net están preparados visualmente, pero no tienen OAuth
-                  funcional todavía.
+                  Hoy Discord y Battle.net ya tienen flujo real de vinculación.
+                  Google queda preparado visualmente, pero sin OAuth funcional todavía.
                 </div>
               </div>
 
@@ -1222,8 +1250,10 @@ export function Profile() {
                     (entry) => entry.provider === "bnet",
                   ) ?? null
                 }
-                busy={false}
-                status="coming-soon"
+                busy={accountBusyProvider === "bnet"}
+                status="ready"
+                onLink={handleLinkBattleNet}
+                onUnlink={() => handleUnlink("bnet")}
               />
             </section>
           ) : null}
@@ -1724,6 +1754,42 @@ function Field({
         style={fieldStyle}
       />
     </label>
+  );
+}
+
+function BattleNetIdentityPill({ battletag }: { battletag: string }) {
+  return (
+    <div
+      title="Battle.net ID vinculado"
+      style={{
+        width: "fit-content",
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "7px",
+        border: "1px solid rgba(0,174,255,0.28)",
+        background:
+          "linear-gradient(90deg, rgba(0,174,255,0.12), rgba(93,183,255,0.05))",
+        color: "#9bd8ff",
+        padding: "5px 8px",
+        boxShadow: "0 0 18px rgba(0,174,255,0.08)",
+        fontSize: "11px",
+        fontWeight: 900,
+        letterSpacing: "0.9px",
+        textTransform: "uppercase",
+      }}
+    >
+      <span
+        style={{
+          width: "6px",
+          height: "6px",
+          borderRadius: "999px",
+          background: "#00aeff",
+          boxShadow: "0 0 10px #00aeff",
+        }}
+      />
+      <span style={{ color: "rgba(155,216,255,0.62)" }}>BATTLE.NET</span>
+      <span style={{ color: "#d8f2ff" }}>{battletag}</span>
+    </div>
   );
 }
 

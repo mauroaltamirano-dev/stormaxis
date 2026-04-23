@@ -30,6 +30,8 @@ type MatchChatMessage = {
   username: string
   avatar: string | null
   content: string
+  channel: 'GLOBAL' | 'TEAM'
+  team: 1 | 2 | null
   timestamp: string
 }
 
@@ -53,12 +55,18 @@ function normalizeChatMessage(raw: any): MatchChatMessage | null {
   const timestampDate = new Date(timestampRaw)
   if (Number.isNaN(timestampDate.getTime())) return null
 
+  const rawChannel = typeof raw?.channel === 'string' ? raw.channel.toUpperCase() : 'GLOBAL'
+  const channel = rawChannel === 'TEAM' ? 'TEAM' : 'GLOBAL'
+  const team = raw?.team === 1 || raw?.team === 2 ? raw.team : null
+
   return {
     id,
     userId,
     username,
     avatar: avatar ?? null,
     content,
+    channel,
+    team,
     timestamp: timestampDate.toISOString(),
   }
 }
@@ -408,10 +416,11 @@ export function MatchRoom() {
   return (
     <ActiveMatchRoom
       currentUserId={user.id}
+      currentUserRole={user.role}
       match={match}
       chatMessages={chatMessages}
-      onSendMessage={(content) => {
-        getSocket().emit('chat:send', { matchId: match.id, content })
+      onSendMessage={(content, channel) => {
+        getSocket().emit('chat:send', { matchId: match.id, content, channel })
       }}
       onBanMap={(mapId) => getSocket().emit('veto:ban', { matchId: match.id, mapId })}
       onReady={() => getSocket().emit('match:ready', { matchId: match.id })}
@@ -429,6 +438,22 @@ export function MatchRoom() {
           ...prev,
           mvpVotes: upsertMvpVote(prev?.mvpVotes ?? [], user.id, nomineeUserId),
         }))
+      }}
+      onUploadReplay={async (file) => {
+        const form = new FormData()
+        form.append('replay', file)
+        const { data } = await api.post(`/matches/${match.id}/replays`, form, {
+          headers: { 'Content-Type': 'multipart/form-data' },
+        })
+        const upload = data.upload
+        setMatch((prev: any) => ({
+          ...prev,
+          replayUploads: [
+            upload,
+            ...(prev?.replayUploads ?? []).filter((entry: any) => entry.id !== upload.id),
+          ],
+        }))
+        return upload
       }}
       onCancelMatch={() => getSocket().emit('match:cancel_request', { matchId: match.id })}
       onBack={() => {

@@ -2,21 +2,11 @@ import {
   createRouter,
   createRoute,
   createRootRoute,
+  lazyRouteComponent,
   Outlet,
   redirect,
 } from "@tanstack/react-router";
 import { useAuthStore } from "./stores/auth.store";
-import { Landing } from "./pages/Landing";
-import { Login } from "./pages/Login";
-import { Register } from "./pages/Register";
-import { Dashboard } from "./pages/Dashboard";
-import { MatchRoom } from "./pages/MatchRoom";
-import { Profile } from "./pages/Profile";
-import { Leaderboard } from "./pages/Leaderboard";
-import { Admin } from "./pages/Admin";
-import { AppLayout } from "./layouts/AppLayout";
-import { AuthCallback } from "./pages/AuthCallback";
-import { Onboarding } from "./pages/Onboarding";
 import { requiresCompetitiveOnboarding } from "./lib/onboarding";
 
 function getAuthedHomePath(user: { role?: string }) {
@@ -30,13 +20,13 @@ const rootRoute = createRootRoute({ component: Outlet });
 const landingRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/",
-  component: Landing,
+  component: lazyRouteComponent(() => import("./pages/Landing"), "Landing"),
 });
 
 const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
-  component: Login,
+  component: lazyRouteComponent(() => import("./pages/Login"), "Login"),
   beforeLoad: () => {
     const user = useAuthStore.getState().user;
     if (user) throw redirect({ to: requiresCompetitiveOnboarding(user) ? "/onboarding" : getAuthedHomePath(user) });
@@ -46,7 +36,7 @@ const loginRoute = createRoute({
 const registerRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/register",
-  component: Register,
+  component: lazyRouteComponent(() => import("./pages/Register"), "Register"),
   beforeLoad: () => {
     const user = useAuthStore.getState().user;
     if (user) throw redirect({ to: requiresCompetitiveOnboarding(user) ? "/onboarding" : getAuthedHomePath(user) });
@@ -56,7 +46,7 @@ const registerRoute = createRoute({
 const authCallbackRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/auth/callback",
-  component: AuthCallback,
+  component: lazyRouteComponent(() => import("./pages/AuthCallback"), "AuthCallback"),
 });
 
 // ─── Protected layout ──────────────────────────────────────
@@ -72,7 +62,7 @@ const protectedRoute = createRoute({
 const onboardingRoute = createRoute({
   getParentRoute: () => protectedRoute,
   path: "/onboarding",
-  component: Onboarding,
+  component: lazyRouteComponent(() => import("./pages/Onboarding"), "Onboarding"),
   beforeLoad: () => {
     const user = useAuthStore.getState().user;
     if (!user) throw redirect({ to: "/login" });
@@ -83,7 +73,7 @@ const onboardingRoute = createRoute({
 const appRoute = createRoute({
   getParentRoute: () => protectedRoute,
   id: "app",
-  component: AppLayout,
+  component: lazyRouteComponent(() => import("./layouts/AppLayout"), "AppLayout"),
   beforeLoad: () => {
     const user = useAuthStore.getState().user;
     if (!user) throw redirect({ to: "/login" });
@@ -94,13 +84,13 @@ const appRoute = createRoute({
 const dashboardRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/dashboard",
-  component: Dashboard,
+  component: lazyRouteComponent(() => import("./pages/Dashboard"), "Dashboard"),
 });
 
 const adminRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/admin",
-  component: Admin,
+  component: lazyRouteComponent(() => import("./pages/Admin"), "Admin"),
   beforeLoad: () => {
     const user = useAuthStore.getState().user;
     if (!user) throw redirect({ to: "/login" });
@@ -111,25 +101,31 @@ const adminRoute = createRoute({
 const profileRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/profile",
-  component: Profile,
+  component: lazyRouteComponent(() => import("./pages/Profile"), "Profile"),
 });
 
 const publicProfileRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/profile/$username",
-  component: Profile,
+  component: lazyRouteComponent(() => import("./pages/Profile"), "Profile"),
 });
 
 const matchRoomRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/match/$matchId",
-  component: MatchRoom,
+  component: lazyRouteComponent(() => import("./pages/MatchRoom"), "MatchRoom"),
 });
 
 const leaderboardRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/leaderboard",
-  component: Leaderboard,
+  component: lazyRouteComponent(() => import("./pages/Leaderboard"), "Leaderboard"),
+});
+
+const statsRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/stats",
+  component: lazyRouteComponent(() => import("./pages/Stats"), "Stats"),
 });
 
 // ─── Router ────────────────────────────────────────────────
@@ -144,6 +140,7 @@ const routeTree = rootRoute.addChildren([
       dashboardRoute,
       adminRoute,
       leaderboardRoute,
+      statsRoute,
       profileRoute,
       publicProfileRoute,
       matchRoomRoute,

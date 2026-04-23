@@ -1,4 +1,4 @@
-import type { CSSProperties, FormEvent, ReactNode } from "react";
+import type { ChangeEvent, CSSProperties, FormEvent, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HOTS_MAPS, MAP_ID_BY_NAME, MAP_NAME_BY_ID } from "@nexusgg/shared";
 import { RankBadge } from "../RankBadge";
@@ -51,6 +51,7 @@ type MatchState = {
   }>;
   votes?: Array<{ userId: string; winner: 1 | 2 }>;
   mvpVotes?: Array<{ userId: string; nomineeUserId: string }>;
+  replayUploads?: ReplayUpload[];
   discordVoice?: {
     enabled: boolean;
     status: "disabled" | "spectator" | "missing_link" | "pending" | "ready";
@@ -77,25 +78,60 @@ type MatchState = {
   } | null;
 };
 
+type ReplayUpload = {
+  id: string;
+  status: "UPLOADED" | "PARSED" | "FAILED" | string;
+  originalName: string;
+  fileSize: number;
+  parsedMap: string | null;
+  parsedGameMode: string | null;
+  parsedDuration: number | null;
+  parsedWinnerTeam: 1 | 2 | null;
+  parserStatus: string | null;
+  parseError: string | null;
+  parsedSummary?: {
+    validation?: {
+      mapMatches?: boolean;
+      expectedHumanPlayers?: number;
+      matchedPlayers?: number;
+    };
+    players?: Array<{
+      name: string;
+      battleTag: string | null;
+      hero: string | null;
+      team: 1 | 2 | null;
+      won: boolean;
+    }>;
+  } | null;
+  uploadedBy?: { id: string; username: string } | null;
+  createdAt: string;
+};
+
+type ChatChannel = "GLOBAL" | "TEAM";
+
 type ChatMessage = {
   id: string;
   userId: string;
   username: string;
   avatar: string | null;
   content: string;
+  channel: ChatChannel;
+  team: 1 | 2 | null;
   timestamp: string;
 };
 
 type Props = {
   currentUserId: string;
+  currentUserRole?: string;
   match: MatchState;
   chatMessages: ChatMessage[];
-  onSendMessage: (content: string) => void;
+  onSendMessage: (content: string, channel: ChatChannel) => void;
   onBanMap: (mapId: string) => void;
   onReady: () => void;
   onFinishMatch: () => void;
   onVote: (winner: 1 | 2) => void;
   onMvpVote: (nomineeUserId: string) => void;
+  onUploadReplay: (file: File) => Promise<ReplayUpload>;
   onCancelMatch: () => void;
   onBack: () => void;
 };
@@ -111,6 +147,11 @@ const TEAM_COLORS = {
     accent: "#ff4757",
     surface: "rgba(255, 71, 87, 0.08)",
   },
+} as const;
+
+const TEAM_BACKDROPS = {
+  1: "/images/greymane_1920x1200.thumb.webp",
+  2: "/images/Mephisto_1920x1200.thumb.webp",
 } as const;
 
 const MAP_BACKDROPS: Record<string, string> = {
@@ -143,13 +184,14 @@ const MAP_BACKDROPS: Record<string, string> = {
 // Map name → /maps/{id}.webp  (id viene directo de HOTS_MAPS, sin recomputar)
 // Ejemplo: 'Tomb of the Spider Queen' → /maps/tomb-of-spider-queen.webp
 function getMapImageUrl(mapName: string): string {
-  const id = MAP_ID_BY_NAME[mapName]
-  if (!id) return ""
-  return `/maps/${id}.webp`
+  const id = MAP_ID_BY_NAME[mapName];
+  if (!id) return "";
+  return `/maps/${id}.webp`;
 }
 
 export function ActiveMatchRoom({
   currentUserId,
+  currentUserRole,
   match,
   chatMessages,
   onSendMessage,
@@ -158,11 +200,19 @@ export function ActiveMatchRoom({
   onFinishMatch,
   onVote,
   onMvpVote,
+  onUploadReplay,
   onCancelMatch,
   onBack,
 }: Props) {
   const [now, setNow] = useState(Date.now());
   const [chatInput, setChatInput] = useState("");
+  const [activeChatChannel, setActiveChatChannel] =
+    useState<ChatChannel>("GLOBAL");
+  const [replayUploadState, setReplayUploadState] = useState<{
+    status: "idle" | "uploading" | "success" | "error";
+    message: string | null;
+  }>({ status: "idle", message: null });
+  const replayInputRef = useRef<HTMLInputElement | null>(null);
   const [viewportWidth, setViewportWidth] = useState(
     typeof window === "undefined" ? 1440 : window.innerWidth,
   );
@@ -207,8 +257,8 @@ export function ActiveMatchRoom({
   const currentVote =
     match.votes?.find((vote) => vote.userId === currentUserId)?.winner ?? null;
   const currentMvpVote =
-    match.mvpVotes?.find((vote) => vote.userId === currentUserId)?.nomineeUserId ??
-    null;
+    match.mvpVotes?.find((vote) => vote.userId === currentUserId)
+      ?.nomineeUserId ?? null;
   const readyBy = match.runtime?.ready?.readyBy ?? [];
   const isReady = readyBy.includes(currentUserId);
   const totalReadyPlayers =
@@ -239,7 +289,8 @@ export function ActiveMatchRoom({
   const selectedMap = match.selectedMap ?? getSelectedMapFromVeto(match);
   const mvpPlayer =
     match.mvpUserId != null
-      ? match.players.find((player) => player.userId === match.mvpUserId) ?? null
+      ? (match.players.find((player) => player.userId === match.mvpUserId) ??
+        null)
       : null;
   const isCaptainTurn = Boolean(
     isParticipant &&
@@ -252,12 +303,27 @@ export function ActiveMatchRoom({
     isParticipant &&
     currentPlayer?.isCaptain &&
     ["VETOING", "PLAYING", "VOTING"].includes(match.status);
+  const canUploadReplay =
+    ["VOTING", "COMPLETED"].includes(match.status) &&
+    (currentUserRole === "ADMIN" ||
+      (isParticipant && Boolean(currentPlayer?.isCaptain)));
   const cancelRequestedByMe =
     cancelState?.requestedBy.includes(currentUserId) ?? false;
   const canSendChat =
     isParticipant &&
     ["ACCEPTING", "VETOING", "PLAYING", "VOTING"].includes(match.status);
   const chatRemainingChars = 500 - chatInput.length;
+  const currentTeam =
+    currentPlayer?.team === 1 || currentPlayer?.team === 2
+      ? currentPlayer.team
+      : null;
+  const visibleChatMessages = chatMessages.filter((message) =>
+    activeChatChannel === "GLOBAL"
+      ? message.channel !== "TEAM"
+      : currentTeam != null &&
+        message.channel === "TEAM" &&
+        message.team === currentTeam,
+  );
   const statusMeta = getMatchLifecycleMeta(match.status, allConnected);
   const isTablet = viewportWidth < 1320;
   const isMobile = viewportWidth < 940;
@@ -279,20 +345,49 @@ export function ActiveMatchRoom({
       : match.status === "VOTING" && match.winner
         ? mvpVotingSeconds
         : match.status === "VOTING"
-        ? votingSeconds
-        : null;
+          ? votingSeconds
+          : null;
 
   function handleSendChat(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (!canSendChat) return;
     const nextMessage = chatInput.trim();
     if (!nextMessage) return;
-    onSendMessage(nextMessage);
+    onSendMessage(nextMessage, activeChatChannel);
     setChatInput("");
   }
 
+  async function handleReplayFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+    if (!file) return;
+
+    setReplayUploadState({
+      status: "uploading",
+      message: "Subiendo y procesando replay…",
+    });
+    try {
+      const upload = await onUploadReplay(file);
+      setReplayUploadState({
+        status: upload.status === "FAILED" ? "error" : "success",
+        message:
+          upload.status === "FAILED"
+            ? upload.parseError ?? "El archivo se subió, pero el parser no pudo leerlo."
+            : "Replay procesado. Ya tenemos metadata real de la partida.",
+      });
+    } catch (err) {
+      setReplayUploadState({
+        status: "error",
+        message:
+          err instanceof Error
+            ? err.message
+            : "No pude subir el replay. Probá de nuevo.",
+      });
+    }
+  }
+
   const centerColumn = (
-    <div style={{ display: "grid", gap: "1rem" }}>
+    <div style={centerColumnStyle}>
       {showDiscordVoicePanel && (
         <StageCard
           title="Discord por equipo"
@@ -363,11 +458,11 @@ export function ActiveMatchRoom({
                 fontWeight: 700,
               }}
             >
-              {isCaptainTurn
-                ? "Te toca vetar"
-                : "Esperando acción del capitán"}
+              {isCaptainTurn ? "Te toca vetar" : "Esperando acción del capitán"}
             </span>
-            <div style={timerBadgeStyle(vetoSeconds != null && vetoSeconds <= 10)}>
+            <div
+              style={timerBadgeStyle(vetoSeconds != null && vetoSeconds <= 10)}
+            >
               {vetoSeconds != null
                 ? `00:${String(vetoSeconds).padStart(2, "0")}`
                 : "—"}
@@ -395,8 +490,8 @@ export function ActiveMatchRoom({
             {isSpectator
               ? "Modo espectador: podés seguir el veto en vivo, sin intervenir."
               : isCaptainTurn
-              ? "Te toca vetar. Si expira el timer, el sistema banea un mapa al azar."
-              : "Solo el capitán del turno puede vetar."}
+                ? "Te toca vetar. Si expira el timer, el sistema banea un mapa al azar."
+                : "Solo el capitán del turno puede vetar."}
           </small>
         </StageCard>
       )}
@@ -424,7 +519,9 @@ export function ActiveMatchRoom({
             >
               <StageCallout
                 tone={allConnected ? "#4ade80" : "#38bdf8"}
-                label={allConnected ? "Fase competitiva" : "Checklist pre-partida"}
+                label={
+                  allConnected ? "Fase competitiva" : "Checklist pre-partida"
+                }
                 title={
                   allConnected
                     ? "La partida ya está corriendo"
@@ -486,7 +583,9 @@ export function ActiveMatchRoom({
                     <button
                       onClick={onFinishMatch}
                       disabled={!isCaptain || alreadyRequestedFinish}
-                      style={finishButtonStyle(!isCaptain || alreadyRequestedFinish)}
+                      style={finishButtonStyle(
+                        !isCaptain || alreadyRequestedFinish,
+                      )}
                     >
                       ✓ Partida terminada
                     </button>
@@ -495,10 +594,10 @@ export function ActiveMatchRoom({
                     {isSpectator
                       ? "Modo espectador: esperando cierre por capitanes."
                       : alreadyRequestedFinish
-                      ? "Ya marcaste tu confirmación. Falta el otro capitán."
-                      : isCaptain
-                        ? `Requiere confirmación de ambos capitanes: ${finishApprovals}/${finishNeeded}`
-                        : "Esperando confirmación de ambos capitanes para cerrar."}
+                        ? "Ya marcaste tu confirmación. Falta el otro capitán."
+                        : isCaptain
+                          ? `Requiere confirmación de ambos capitanes: ${finishApprovals}/${finishNeeded}`
+                          : "Esperando confirmación de ambos capitanes para cerrar."}
                   </div>
                 </>
               )}
@@ -553,8 +652,9 @@ export function ActiveMatchRoom({
               .filter((player) => !player.isBot && player.userId)
               .map((player) => {
                 const votes =
-                  mvpVoteCounts.find((entry) => entry.nomineeUserId === player.userId)
-                    ?.votes ?? 0;
+                  mvpVoteCounts.find(
+                    (entry) => entry.nomineeUserId === player.userId,
+                  )?.votes ?? 0;
                 const selected = currentMvpVote === player.userId;
                 const disabled =
                   !isParticipant || player.userId === currentUserId;
@@ -594,7 +694,8 @@ export function ActiveMatchRoom({
                             : "rgba(226,232,240,0.46)",
                         }}
                       >
-                        Team {player.team} · {votes} voto{votes === 1 ? "" : "s"}
+                        Team {player.team} · {votes} voto
+                        {votes === 1 ? "" : "s"}
                         {player.userId === currentUserId ? " · vos" : ""}
                       </small>
                     </span>
@@ -611,6 +712,22 @@ export function ActiveMatchRoom({
         </StageCard>
       )}
 
+      {["VOTING", "COMPLETED"].includes(match.status) && (
+        <ReplayUploadCard
+          uploads={match.replayUploads ?? []}
+          canUpload={canUploadReplay}
+          uploadState={replayUploadState}
+          winnerName={
+            match.winner === 1
+              ? teams.left.name
+              : match.winner === 2
+                ? teams.right.name
+                : null
+          }
+          onChooseFile={() => replayInputRef.current?.click()}
+        />
+      )}
+
       {match.status === "VOTING" && !match.winner && (
         <StageCard
           title="Votación de ganador"
@@ -624,8 +741,8 @@ export function ActiveMatchRoom({
               isSpectator
                 ? "Votación de resultado en curso"
                 : currentVote
-                ? `Marcaste ganador para ${currentVote === 1 ? teams.left.name : teams.right.name}`
-                : "Todavía no emitiste tu voto"
+                  ? `Marcaste ganador para ${currentVote === 1 ? teams.left.name : teams.right.name}`
+                  : "Todavía no emitiste tu voto"
             }
             description={
               isSpectator
@@ -634,7 +751,9 @@ export function ActiveMatchRoom({
             }
             rightSlot={
               <div
-                style={timerBadgeStyle(votingSeconds != null && votingSeconds <= 20)}
+                style={timerBadgeStyle(
+                  votingSeconds != null && votingSeconds <= 20,
+                )}
               >
                 {votingSeconds != null
                   ? `${Math.floor(votingSeconds / 60)}:${String(votingSeconds % 60).padStart(2, "0")}`
@@ -645,7 +764,9 @@ export function ActiveMatchRoom({
           <div
             style={{
               display: "grid",
-              gridTemplateColumns: isNarrow ? "1fr" : "repeat(3, minmax(0, 1fr))",
+              gridTemplateColumns: isNarrow
+                ? "1fr"
+                : "repeat(3, minmax(0, 1fr))",
               gap: "0.65rem",
             }}
           >
@@ -728,12 +849,16 @@ export function ActiveMatchRoom({
               ? `Duración estimada ${formatDuration(match.duration)}`
               : "Match finalizado"
           }
-          tone={match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent}
+          tone={
+            match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent
+          }
         >
           <WinnerSummaryHero
             winnerName={match.winner === 1 ? teams.left.name : teams.right.name}
             mapName={selectedMap}
-            accent={match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent}
+            accent={
+              match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent
+            }
             compact={isNarrow}
           />
           {mvpPlayer && (
@@ -759,7 +884,9 @@ export function ActiveMatchRoom({
                     size={42}
                   />
                   <div style={{ display: "grid", gap: "0.12rem" }}>
-                    <strong style={{ color: "#fef08a" }}>{mvpPlayer.user.username}</strong>
+                    <strong style={{ color: "#fef08a" }}>
+                      {mvpPlayer.user.username}
+                    </strong>
                     <small style={{ color: "rgba(254,240,138,0.8)" }}>
                       Team {mvpPlayer.team} · {mvpPlayer.user.rank}
                     </small>
@@ -786,33 +913,14 @@ export function ActiveMatchRoom({
             title="La sala se cerró antes del cierre competitivo"
             description="Se preserva el contexto del room, pero este match ya no va a aplicar resultado competitivo."
           />
-          <div style={winnerBannerStyle("#fca5a5")}>La partida fue cancelada</div>
+          <div style={winnerBannerStyle("#fca5a5")}>
+            La partida fue cancelada
+          </div>
           <small style={{ color: "#94a3b8" }}>
             Volvé al dashboard y podés buscar otra partida.
           </small>
         </StageCard>
       )}
-
-      <StageCard
-        title="Chat del match"
-        subtitle={
-          canSendChat
-            ? "Coordinación en tiempo real entre jugadores"
-            : "Chat en solo lectura: disponible únicamente mientras el match está activo"
-        }
-        tone={canSendChat ? "#38bdf8" : "#94a3b8"}
-      >
-        <MatchChatPanel
-          currentUserId={currentUserId}
-          messages={chatMessages}
-          draft={chatInput}
-          remainingChars={chatRemainingChars}
-          canSend={canSendChat}
-          compact={isTablet}
-          onDraftChange={setChatInput}
-          onSubmit={handleSendChat}
-        />
-      </StageCard>
     </div>
   );
 
@@ -906,10 +1014,7 @@ export function ActiveMatchRoom({
           />
         </div>
 
-        <MatchTimeline
-          status={match.status}
-          allConnected={allConnected}
-        />
+        <MatchTimeline status={match.status} allConnected={allConnected} />
 
         {isSpectator && (
           <div style={infoBannerStyle}>
@@ -928,11 +1033,15 @@ export function ActiveMatchRoom({
           )}
 
         {isMobile ? (
-          <div style={{ display: "grid", gap: "1rem" }}>
+          <div style={{ display: "grid", gap: "0.8rem" }}>
             {centerColumn}
             <div style={mobileTeamGridStyle(isNarrow)}>
               <TeamColumn team={teams.left} teamNumber={1} compact={isTablet} />
-              <TeamColumn team={teams.right} teamNumber={2} compact={isTablet} />
+              <TeamColumn
+                team={teams.right}
+                teamNumber={2}
+                compact={isTablet}
+              />
             </div>
           </div>
         ) : (
@@ -942,8 +1051,162 @@ export function ActiveMatchRoom({
             <TeamColumn team={teams.right} teamNumber={2} compact={isTablet} />
           </div>
         )}
+
+        <MatchChatDock
+          activeChannel={activeChatChannel}
+          currentTeam={currentTeam}
+          canUseTeamChat={isParticipant && currentTeam != null}
+          canSend={canSendChat}
+          messageCount={chatMessages.length}
+          onChannelChange={setActiveChatChannel}
+        >
+          <MatchChatPanel
+            currentUserId={currentUserId}
+            messages={visibleChatMessages}
+            draft={chatInput}
+            remainingChars={chatRemainingChars}
+            canSend={
+              canSendChat &&
+              (activeChatChannel === "GLOBAL" || currentTeam != null)
+            }
+            compact={isTablet}
+            activeChannel={activeChatChannel}
+            currentTeam={currentTeam}
+            onDraftChange={setChatInput}
+            onSubmit={handleSendChat}
+          />
+        </MatchChatDock>
+        <input
+          ref={replayInputRef}
+          type="file"
+          accept=".StormReplay,.stormreplay"
+          onChange={handleReplayFileChange}
+          style={{ display: "none" }}
+        />
       </div>
     </div>
+  );
+}
+
+function ReplayUploadCard({
+  uploads,
+  canUpload,
+  uploadState,
+  winnerName,
+  onChooseFile,
+}: {
+  uploads: ReplayUpload[];
+  canUpload: boolean;
+  uploadState: { status: "idle" | "uploading" | "success" | "error"; message: string | null };
+  winnerName: string | null;
+  onChooseFile: () => void;
+}) {
+  const latest = uploads[0] ?? null;
+  const parsedPlayers = latest?.parsedSummary?.players ?? [];
+  const validation = latest?.parsedSummary?.validation;
+  const statusTone =
+    latest?.status === "PARSED"
+      ? "#4ade80"
+      : latest?.status === "FAILED"
+        ? "#f87171"
+        : "#fbbf24";
+
+  return (
+    <StageCard
+      title="Replay oficial"
+      subtitle="Subida post-partida para validar mapa, ganador y jugadores sin depender de HeroesProfile"
+      tone="#38bdf8"
+    >
+      <div style={replayUploadShellStyle}>
+        <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
+          <div
+            style={{
+              color: "#bae6fd",
+              fontSize: "0.66rem",
+              fontWeight: 900,
+              letterSpacing: "0.16em",
+              textTransform: "uppercase",
+            }}
+          >
+            Procesador StormReplay
+          </div>
+          <div
+            style={{
+              color: "#f8fafc",
+              fontFamily: "var(--font-display)",
+              fontSize: "1rem",
+              letterSpacing: "0.05em",
+            }}
+          >
+            {latest
+              ? latest.status === "PARSED"
+                ? `Replay leído · ${latest.parsedMap ?? "Mapa detectado"}`
+                : "Replay recibido"
+              : "Esperando archivo .StormReplay"}
+          </div>
+          <div style={{ color: "rgba(226,232,240,0.68)", fontSize: "0.84rem", lineHeight: 1.45 }}>
+            {latest
+              ? latest.status === "PARSED"
+                ? `Ganador detectado: ${latest.parsedWinnerTeam ? `Team ${latest.parsedWinnerTeam}` : winnerName ?? "pendiente"} · ${latest.parsedDuration ? formatDuration(latest.parsedDuration) : "duración pendiente"}`
+                : latest.parseError ?? "El archivo quedó guardado para revisar el parser."
+              : canUpload
+                ? "Capitanes y admins pueden subir el replay apenas termina la partida."
+                : "Esperando a un capitán o admin para subir el replay oficial."}
+          </div>
+        </div>
+
+        <button
+          type="button"
+          onClick={onChooseFile}
+          disabled={!canUpload || uploadState.status === "uploading"}
+          style={replayUploadButtonStyle(!canUpload || uploadState.status === "uploading")}
+        >
+          {uploadState.status === "uploading" ? "Procesando…" : latest ? "Subir otra replay" : "Subir replay"}
+        </button>
+      </div>
+
+      {uploadState.message && (
+        <div style={replayUploadNoticeStyle(uploadState.status === "error")}>
+          {uploadState.message}
+        </div>
+      )}
+
+      {latest && (
+        <div style={replayMetaGridStyle}>
+          <StatusTile label="Parser" value={latest.parserStatus ?? latest.status} tone={statusTone} />
+          <StatusTile label="Modo" value={latest.parsedGameMode ?? "—"} tone="#7dd3fc" />
+          <StatusTile
+            label="Mapa"
+            value={
+              validation?.mapMatches === false
+                ? "Revisar mapa"
+                : latest.parsedMap ?? "—"
+            }
+            tone={validation?.mapMatches === false ? "#fbbf24" : "#e2e8f0"}
+          />
+          <StatusTile
+            label="Jugadores"
+            value={
+              typeof validation?.matchedPlayers === "number"
+                ? `${validation.matchedPlayers}/${validation.expectedHumanPlayers ?? "?"}`
+                : `${parsedPlayers.length}/10`
+            }
+            tone="#4ade80"
+          />
+        </div>
+      )}
+
+      {parsedPlayers.length > 0 && (
+        <div style={replayPlayersStripStyle}>
+          {parsedPlayers.slice(0, 10).map((player, index) => (
+            <div key={`${player.name}-${index}`} style={replayPlayerPillStyle(player.team ?? 1)}>
+              <strong>{player.hero ?? "Hero"}</strong>
+              <span>{player.battleTag ?? player.name}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </StageCard>
   );
 }
 
@@ -1078,215 +1341,201 @@ function TeamColumn({
   const colors = TEAM_COLORS[teamNumber];
 
   return (
-    <div
+    <section
       style={{
         ...teamColumnStyle,
         borderColor: colors.border,
-        background: colors.surface,
+        backgroundImage:
+          teamNumber === 1
+            ? `linear-gradient(145deg, rgba(0,28,42,0.82), rgba(4,9,18,0.88) 42%, rgba(4,9,18,0.74)), radial-gradient(circle at 88% 10%, ${colors.accent}24, transparent 28%), url(${TEAM_BACKDROPS[teamNumber]})`
+            : `linear-gradient(145deg, rgba(42,8,24,0.84), rgba(12,6,18,0.88) 42%, rgba(4,9,18,0.74)), radial-gradient(circle at 88% 10%, ${colors.accent}24, transparent 28%), url(${TEAM_BACKDROPS[teamNumber]})`,
+        backgroundSize: "cover",
+        backgroundPosition: teamNumber === 1 ? "center left" : "center right",
       }}
     >
-      <div style={{ display: "grid", gap: "0.35rem" }}>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.75rem",
-            flexWrap: "wrap",
-          }}
-        >
+      <div style={teamHeaderStyle}>
+        <div style={{ minWidth: 0 }}>
           <div style={{ ...eyebrowStyle, color: colors.accent }}>
             {teamNumber === 1 ? "Blue side" : "Red side"}
           </div>
-          <div style={{ display: "flex", gap: "0.45rem", flexWrap: "wrap" }}>
-            <MetaChip label="Activos" value={`${team.realPlayersCount}/5`} />
-            <MetaChip label="Win avg" value={`${team.avgWinrate}%`} />
-          </div>
+          <div style={teamTitleStyle}>{team.name}</div>
         </div>
         <div
           style={{
-            fontFamily: "var(--font-display)",
-            fontSize: "1.3rem",
-            letterSpacing: "0.05em",
+            display: "flex",
+            gap: "0.42rem",
+            flexWrap: "wrap",
+            justifyContent: "flex-end",
           }}
         >
-          {team.name}
-        </div>
-        <div style={{ color: "#cbd5e1", fontSize: "0.92rem" }}>
-          Capitán: <strong>{team.captainName}</strong>
+          <MetaChip label="Activos" value={`${team.realPlayersCount}/5`} />
+          <MetaChip label="Win avg" value={`${team.avgWinrate}%`} />
         </div>
       </div>
 
-      <div style={{ display: "grid", gap: "0.5rem" }}>
+      <div style={captainPlateStyle(colors.accent)}>
+        <span
+          style={{
+            color: colors.accent,
+            fontSize: "0.64rem",
+            fontWeight: 900,
+            letterSpacing: "0.16em",
+            textTransform: "uppercase",
+          }}
+        >
+          Capitán
+        </span>
+        <strong
+          style={{
+            color: "#f8fafc",
+            minWidth: 0,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
+          }}
+        >
+          {team.captainName}
+        </strong>
+      </div>
+
+      <div style={teamRosterStyle}>
         {team.players.map((player) => (
           <div
             key={player.id}
             style={{
-              ...playerCardStyle(player.placeholder),
+              ...playerRowStyle(player.placeholder),
               borderColor: player.isCaptain
-                ? `${colors.accent}44`
+                ? `${colors.accent}55`
                 : player.placeholder
-                  ? "rgba(100,116,139,0.25)"
-                  : "rgba(148,163,184,0.18)",
-              flexDirection: "column",
-              alignItems: "stretch",
-              gap: compact ? "0.42rem" : "0.5rem",
-              padding: compact ? "0.58rem 0.65rem" : "0.65rem 0.75rem",
+                  ? "rgba(100,116,139,0.22)"
+                  : "rgba(148,163,184,0.14)",
               boxShadow: player.isCaptain
-                ? `0 0 0 1px ${colors.accent}14, 0 0 18px ${colors.accent}12`
+                ? `inset 2px 0 0 ${colors.accent}`
                 : undefined,
             }}
           >
-            {/* Top row: avatar + name + badge */}
-            <div style={{ display: "flex", alignItems: "center", gap: "0.55rem", minWidth: 0 }}>
-              <AvatarCell username={player.name} avatar={player.avatar} size={32} />
-              <div style={{ minWidth: 0, flex: 1 }}>
-                <div style={{ fontWeight: 700, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis", fontSize: "0.88rem" }}>
-                  {player.name}
-                </div>
-                <div style={{ color: "#94a3b8", fontSize: "0.72rem" }}>
-                  {player.placeholder
-                    ? "Bot de testing"
-                    : player.isCaptain
-                      ? "★ Capitán"
-                      : "Jugador"}
-                </div>
+            <AvatarCell
+              username={player.name}
+              avatar={player.avatar}
+              size={compact ? 38 : 46}
+            />
+            <div style={{ minWidth: 0, flex: 1 }}>
+              <div style={playerNameRowStyle}>
+                <span style={playerNameStyle}>{player.name}</span>
+                {player.isCaptain && (
+                  <span style={captainMiniTagStyle(colors.accent)}>CPT</span>
+                )}
+                {player.isWinner && <span style={winnerMiniTagStyle}>WIN</span>}
+                {player.isMvp && <span style={mvpMiniTagStyle}>MVP</span>}
               </div>
-              {player.placeholder ? (
-                <div style={{ color: "#64748b", fontWeight: 700, fontSize: "0.72rem" }}>BOT</div>
-              ) : (
-                <div style={{ display: "grid", justifyItems: "end", gap: "0.25rem" }}>
-                  {player.isCaptain && (
-                    <div
+              <div style={playerSublineStyle}>
+                {player.placeholder ? (
+                  "Bot de testing"
+                ) : (
+                  <>
+                    <span style={{ color: "#4ade80", fontWeight: 900 }}>
+                      {player.wins}W
+                    </span>
+                    <span style={{ color: "rgba(148,163,184,0.56)" }}> · </span>
+                    <span style={{ color: "#f87171", fontWeight: 900 }}>
+                      {player.losses}L
+                    </span>
+                    <span style={{ color: "rgba(148,163,184,0.56)" }}> · </span>
+                    <span
                       style={{
-                        padding: "0.18rem 0.4rem",
-                        border: `1px solid ${colors.accent}55`,
-                        background: `${colors.accent}12`,
-                        color: colors.accent,
-                        fontSize: "0.58rem",
+                        color: player.winrate >= 50 ? "#4ade80" : "#f87171",
                         fontWeight: 900,
-                        letterSpacing: "0.14em",
-                        textTransform: "uppercase",
                       }}
                     >
-                      Captain
-                    </div>
-                  )}
-                  <LevelBadge level={player.level} />
+                      {player.winrate}% WR
+                    </span>
+                  </>
+                )}
+              </div>
+              {!player.placeholder && (
+                <div style={playerMiniStatsStyle}>
+                  <span
+                    style={{
+                      color: "rgba(148,163,184,0.76)",
+                      fontSize: "0.62rem",
+                      fontWeight: 900,
+                      letterSpacing: "0.1em",
+                      textTransform: "uppercase",
+                    }}
+                  >
+                    Últimas
+                  </span>
+                  <RecentForm matches={player.recentMatches} />
                 </div>
               )}
             </div>
-
-            {/* Stats row — solo para jugadores reales */}
-            {!player.placeholder && (
-              <div style={{ display: "grid", gap: "0.3rem" }}>
-                {/* Winrate label + bar */}
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.4rem" }}>
-                  <div style={{ fontSize: "0.68rem", color: "#64748b", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.1em" }}>
-                    Win%
-                  </div>
-                  <div style={{ fontSize: "0.75rem", fontWeight: 800, color: player.winrate >= 50 ? "#4ade80" : "#f87171" }}>
-                    {player.winrate}%
-                    <span style={{ color: "#475569", fontWeight: 400, marginLeft: "0.3rem", fontSize: "0.65rem" }}>
-                      {player.wins}W·{player.losses}L
-                    </span>
-                  </div>
-                </div>
-                {/* Progress bar */}
-                <div style={{ height: "3px", background: "rgba(148,163,184,0.15)", borderRadius: "2px", overflow: "hidden" }}>
-                  <div style={{
-                    height: "100%",
-                    width: `${player.winrate}%`,
-                    background: player.winrate >= 50
-                      ? "linear-gradient(90deg, #22c55e, #4ade80)"
-                      : "linear-gradient(90deg, #ef4444, #f87171)",
-                    transition: "width 0.4s ease",
-                    borderRadius: "2px",
-                  }} />
-                </div>
-                {/* Last 5 matches */}
-                {player.recentMatches.length > 0 && (
-                  <div style={{ display: "flex", alignItems: "center", gap: "0.25rem", marginTop: "0.1rem" }}>
-                    <span style={{ fontSize: "0.62rem", color: "#475569", fontWeight: 700, textTransform: "uppercase", letterSpacing: "0.08em", marginRight: "0.1rem" }}>
-                      Últimas
-                    </span>
-                    {player.recentMatches.map((m, i) => (
-                      <div
-                        key={i}
-                        title={m.won ? `Victoria${m.map ? ` · ${m.map}` : ""}` : `Derrota${m.map ? ` · ${m.map}` : ""}`}
-                        style={{
-                          width: "14px",
-                          height: "14px",
-                          borderRadius: "2px",
-                          background: m.won ? "rgba(74,222,128,0.2)" : "rgba(248,113,113,0.2)",
-                          border: `1px solid ${m.won ? "rgba(74,222,128,0.5)" : "rgba(248,113,113,0.5)"}`,
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          fontSize: "0.52rem",
-                          fontWeight: 900,
-                          color: m.won ? "#4ade80" : "#f87171",
-                          flexShrink: 0,
-                        }}
-                      >
-                        {m.won ? "W" : "L"}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {team.status === "COMPLETED" && (
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.35rem",
-                      flexWrap: "wrap",
-                      marginTop: "0.18rem",
-                    }}
-                  >
-                    {typeof player.mmrDelta === "number" && (
-                      <div
-                        style={{
-                          padding: "0.22rem 0.42rem",
-                          border: `1px solid ${
-                            player.mmrDelta >= 0
-                              ? "rgba(74,222,128,0.45)"
-                              : "rgba(248,113,113,0.42)"
-                          }`,
-                          background:
-                            player.mmrDelta >= 0
-                              ? "rgba(74,222,128,0.12)"
-                              : "rgba(248,113,113,0.12)",
-                          color: player.mmrDelta >= 0 ? "#4ade80" : "#f87171",
-                          fontSize: "0.62rem",
-                          fontWeight: 900,
-                          letterSpacing: "0.1em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        {player.mmrDelta >= 0 ? "+" : ""}
-                        {player.mmrDelta} MMR
-                      </div>
-                    )}
-                    {player.isWinner && (
-                      <div style={playerResultTagStyle(colors.accent, `${colors.accent}16`)}>
-                        Winner
-                      </div>
-                    )}
-                    {player.isMvp && (
-                      <div style={playerResultTagStyle("#facc15", "rgba(250,204,21,0.12)")}>
-                        MVP
-                      </div>
-                    )}
-                  </div>
-                )}
+            {player.placeholder ? (
+              <span style={botTagStyle}>BOT</span>
+            ) : (
+              <div style={playerSideStackStyle}>
+                <LevelBadge level={player.level} />
+                {team.status === "COMPLETED" &&
+                typeof player.mmrDelta === "number" ? (
+                  <span style={mmrDeltaBadgeStyle(player.mmrDelta)}>
+                    {player.mmrDelta >= 0 ? "+" : ""}
+                    {player.mmrDelta} ELO
+                  </span>
+                ) : null}
               </div>
             )}
           </div>
         ))}
       </div>
-    </div>
+    </section>
+  );
+}
+
+function RecentForm({
+  matches,
+}: {
+  matches: Array<{ won: boolean; map: string | null; date: string }>;
+}) {
+  const form = matches.slice(0, 5);
+  const padded = [...form];
+  while (padded.length < 5) {
+    padded.push({ won: false, map: null, date: "" });
+  }
+
+  return (
+    <span style={recentFormStyle}>
+      {padded.map((match, index) => {
+        const hasResult = index < form.length;
+        const color = !hasResult
+          ? "rgba(148,163,184,0.22)"
+          : match.won
+            ? "#4ade80"
+            : "#f87171";
+        return (
+          <span
+            key={`${match.date || "empty"}-${index}`}
+            title={
+              hasResult
+                ? `${match.won ? "Victoria" : "Derrota"}${match.map ? ` · ${match.map}` : ""}`
+                : "Sin partida"
+            }
+            style={{
+              width: "13px",
+              height: "13px",
+              display: "grid",
+              placeItems: "center",
+              border: `1px solid ${color}88`,
+              background: hasResult ? `${color}22` : "rgba(15,23,42,0.7)",
+              color,
+              fontSize: "0.48rem",
+              fontWeight: 900,
+              lineHeight: 1,
+            }}
+          >
+            {hasResult ? (match.won ? "W" : "L") : "·"}
+          </span>
+        );
+      })}
+    </span>
   );
 }
 
@@ -1403,16 +1652,20 @@ function StageCard({
       style={{
         ...stageCardStyle,
         borderColor: tone ? `${tone}2e` : stageCardStyle.borderColor,
-        boxShadow: tone ? `inset 0 1px 0 rgba(255,255,255,0.03), 0 0 28px ${tone}10` : undefined,
+        boxShadow: tone
+          ? `inset 0 1px 0 rgba(255,255,255,0.03), 0 0 28px ${tone}10`
+          : undefined,
       }}
     >
       <div>
         <div style={{ ...eyebrowStyle, color: tone ?? eyebrowStyle.color }}>
           {title}
         </div>
-        <div style={{ color: "#e2e8f0", fontWeight: 700 }}>{subtitle}</div>
+        <div style={{ color: "#e2e8f0", fontWeight: 700, fontSize: "0.84rem" }}>
+          {subtitle}
+        </div>
       </div>
-      <div style={{ display: "grid", gap: "1rem" }}>{children}</div>
+      <div style={{ display: "grid", gap: "0.66rem" }}>{children}</div>
     </div>
   );
 }
@@ -1461,7 +1714,14 @@ function StageCallout({
           flexWrap: "wrap",
         }}
       >
-        <div style={{ display: "grid", gap: "0.2rem", position: "relative", zIndex: 1 }}>
+        <div
+          style={{
+            display: "grid",
+            gap: "0.2rem",
+            position: "relative",
+            zIndex: 1,
+          }}
+        >
           <div
             style={{
               color: tone,
@@ -1510,6 +1770,69 @@ function StageCallout({
   );
 }
 
+function MatchChatDock({
+  activeChannel,
+  currentTeam,
+  canUseTeamChat,
+  canSend,
+  messageCount,
+  onChannelChange,
+  children,
+}: {
+  activeChannel: ChatChannel;
+  currentTeam: 1 | 2 | null;
+  canUseTeamChat: boolean;
+  canSend: boolean;
+  messageCount: number;
+  onChannelChange: (channel: ChatChannel) => void;
+  children: ReactNode;
+}) {
+  return (
+    <section style={chatDockStyle}>
+      <div style={chatDockHeaderStyle}>
+        <div style={{ display: "grid", gap: "0.15rem" }}>
+          <div
+            style={{ ...eyebrowStyle, color: canSend ? "#38bdf8" : "#94a3b8" }}
+          >
+            Comunicaciones
+          </div>
+          <div style={{ color: "rgba(226,232,240,0.72)", fontSize: "0.82rem" }}>
+            Chat general y canal privado de equipo · {messageCount} mensajes
+            visibles
+          </div>
+        </div>
+        <div style={chatTabsStyle}>
+          <button
+            type="button"
+            onClick={() => onChannelChange("GLOBAL")}
+            style={chatTabStyle(activeChannel === "GLOBAL", "#38bdf8")}
+          >
+            Sala
+          </button>
+          <button
+            type="button"
+            onClick={() => canUseTeamChat && onChannelChange("TEAM")}
+            disabled={!canUseTeamChat}
+            title={
+              canUseTeamChat
+                ? `Chat privado Team ${currentTeam}`
+                : "Sólo disponible para jugadores del match"
+            }
+            style={chatTabStyle(
+              activeChannel === "TEAM",
+              currentTeam === 2 ? TEAM_COLORS[2].accent : TEAM_COLORS[1].accent,
+              !canUseTeamChat,
+            )}
+          >
+            Equipo {currentTeam ?? "—"}
+          </button>
+        </div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
 function MatchChatPanel({
   currentUserId,
   messages,
@@ -1517,6 +1840,8 @@ function MatchChatPanel({
   remainingChars,
   canSend,
   compact = false,
+  activeChannel,
+  currentTeam,
   onDraftChange,
   onSubmit,
 }: {
@@ -1526,13 +1851,17 @@ function MatchChatPanel({
   remainingChars: number;
   canSend: boolean;
   compact?: boolean;
+  activeChannel: ChatChannel;
+  currentTeam: 1 | 2 | null;
   onDraftChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
 }) {
-  const listEndRef = useRef<HTMLDivElement | null>(null);
+  const chatListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    listEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    const list = chatListRef.current;
+    if (!list) return;
+    list.scrollTop = list.scrollHeight;
   }, [messages]);
 
   const lastMessage = messages[messages.length - 1];
@@ -1577,7 +1906,9 @@ function MatchChatPanel({
                 fontSize: "0.84rem",
               }}
             >
-              Canal operativo
+              {activeChannel === "TEAM"
+                ? `Canal Team ${currentTeam ?? "—"}`
+                : "Canal sala"}
             </span>
             <span
               style={{
@@ -1616,19 +1947,18 @@ function MatchChatPanel({
           </div>
         )}
       </div>
-      <div style={chatListStyle}>
+      <div ref={chatListRef} style={chatListStyle}>
         {messages.length === 0 ? (
           <div style={chatEmptyStateStyle}>
-            Todavía no hay mensajes. Coordiná acá con tu equipo.
+            {activeChannel === "TEAM"
+              ? "Todavía no hay mensajes de equipo. Coordiná rotaciones y lobby privado acá."
+              : "Todavía no hay mensajes de sala. Coordiná el lobby general acá."}
           </div>
         ) : (
           messages.map((message) => {
             const mine = message.userId === currentUserId;
             return (
-              <div
-                key={message.id}
-                style={chatMessageRowStyle(mine)}
-              >
+              <div key={message.id} style={chatMessageRowStyle(mine)}>
                 <AvatarCell
                   username={message.username}
                   avatar={message.avatar}
@@ -1661,7 +1991,6 @@ function MatchChatPanel({
             );
           })
         )}
-        <div ref={listEndRef} />
       </div>
 
       <form onSubmit={onSubmit} style={chatComposerStyle}>
@@ -1672,7 +2001,9 @@ function MatchChatPanel({
           disabled={!canSend}
           placeholder={
             canSend
-              ? "Escribí un mensaje para el lobby..."
+              ? activeChannel === "TEAM"
+                ? "Mensaje privado para tu equipo..."
+                : "Mensaje para toda la sala..."
               : "Chat deshabilitado"
           }
           style={chatInputStyle}
@@ -1746,7 +2077,8 @@ function ProgressRail({
   total: number;
   color: string;
 }) {
-  const percentage = total > 0 ? Math.max(0, Math.min(100, (value / total) * 100)) : 0;
+  const percentage =
+    total > 0 ? Math.max(0, Math.min(100, (value / total) * 100)) : 0;
 
   return (
     <div style={{ display: "grid", gap: "0.45rem" }}>
@@ -1892,8 +2224,10 @@ function toDisplayTeam(
     realPlayersCount: realPlayers.filter((player) => !player.isBot).length,
     avgWinrate: realPlayers.length
       ? Math.round(
-          realPlayers.reduce((sum, player) => sum + (player.user.winrate ?? 0), 0) /
-            realPlayers.length,
+          realPlayers.reduce(
+            (sum, player) => sum + (player.user.winrate ?? 0),
+            0,
+          ) / realPlayers.length,
         )
       : 0,
     players: padded,
@@ -1979,21 +2313,20 @@ function formatChatTime(value: string) {
 }
 
 const pageShellStyle: CSSProperties = {
-  minHeight: "calc(100vh - 80px)",
-  padding: "1rem 0 1.25rem",
+  minHeight: "calc(100vh - 48px)",
+  padding: "0",
   position: "relative",
 };
 
 const panelStyle: CSSProperties = {
   width: "100%",
-  background:
-    "linear-gradient(180deg, var(--nexus-surface), rgba(8,12,20,0.98))",
-  border: "1px solid var(--nexus-border)",
+  background: "transparent",
+  border: "none",
   borderRadius: "0",
-  boxShadow: "0 24px 70px rgba(0, 0, 0, 0.28)",
-  padding: "0.9rem",
+  boxShadow: "none",
+  padding: "0",
   display: "grid",
-  gap: "0.75rem",
+  gap: "0.68rem",
 };
 
 const headerStyle: CSSProperties = {
@@ -2001,16 +2334,24 @@ const headerStyle: CSSProperties = {
   justifyContent: "space-between",
   alignItems: "center",
   gap: "0.75rem",
+  padding: "0.15rem 0 0.25rem",
+};
+
+const centerColumnStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: "0.68rem",
+  alignContent: "start",
 };
 
 function teamsGridStyle(isTablet: boolean): CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns: isTablet
-      ? "minmax(240px, 0.95fr) minmax(320px, 1.2fr) minmax(240px, 0.95fr)"
-      : "1fr minmax(360px, 480px) 1fr",
-    gap: isTablet ? "0.8rem" : "1rem",
-    alignItems: "start",
+      ? "minmax(230px, 0.92fr) minmax(320px, 1.12fr) minmax(230px, 0.92fr)"
+      : "minmax(280px, 1fr) minmax(390px, 470px) minmax(280px, 1fr)",
+    gap: isTablet ? "0.72rem" : "0.82rem",
+    alignItems: "stretch",
   };
 }
 
@@ -2033,33 +2374,243 @@ function opsGridStyle(isMobile: boolean): CSSProperties {
 }
 
 const teamColumnStyle: CSSProperties = {
+  minWidth: 0,
   border: "1px solid",
   borderRadius: "0",
-  padding: "1rem",
+  padding: "0.78rem",
   display: "grid",
-  gap: "1rem",
-  background:
-    "linear-gradient(180deg, rgba(13,20,34,0.94), rgba(8,12,20,0.94))",
+  gap: "0.68rem",
+  alignContent: "start",
+  position: "relative",
+  overflow: "hidden",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035)",
 };
 
-const stageCardStyle: CSSProperties = {
-  border: "1px solid var(--nexus-border)",
-  borderColor: "var(--nexus-border)",
-  borderRadius: "0",
-  padding: "1rem",
-  display: "grid",
-  gap: "1rem",
-  background: "var(--nexus-card)",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
-};
-
-const chatPanelStyle: CSSProperties = {
-  display: "grid",
+const teamHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "flex-start",
+  justifyContent: "space-between",
   gap: "0.65rem",
 };
 
+const teamTitleStyle: CSSProperties = {
+  marginTop: "0.18rem",
+  color: "#f8fafc",
+  fontFamily: "var(--font-display)",
+  fontSize: "1.08rem",
+  fontWeight: 900,
+  letterSpacing: "0.04em",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+function captainPlateStyle(accent: string): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    alignItems: "center",
+    gap: "0.55rem",
+    padding: "0.5rem 0.6rem",
+    border: `1px solid ${accent}30`,
+    background: `${accent}10`,
+  };
+}
+
+const teamRosterStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.42rem",
+};
+
+function playerRowStyle(placeholder: boolean): CSSProperties {
+  return {
+    minWidth: 0,
+    minHeight: "72px",
+    display: "flex",
+    alignItems: "center",
+    gap: "0.72rem",
+    padding: "0.62rem 0.68rem",
+    border: "1px solid",
+    background: placeholder ? "rgba(30,41,59,0.34)" : "rgba(8,16,30,0.68)",
+  };
+}
+
+const playerNameRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.35rem",
+  minWidth: 0,
+};
+
+const playerNameStyle: CSSProperties = {
+  minWidth: 0,
+  color: "#f8fafc",
+  fontWeight: 850,
+  fontSize: "0.86rem",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const playerSublineStyle: CSSProperties = {
+  marginTop: "0.1rem",
+  color: "rgba(148,163,184,0.78)",
+  fontSize: "0.72rem",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const playerMiniStatsStyle: CSSProperties = {
+  marginTop: "0.34rem",
+  display: "flex",
+  alignItems: "center",
+  gap: "0.34rem",
+  flexWrap: "wrap",
+};
+
+const recentFormStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.2rem",
+};
+
+function captainMiniTagStyle(accent: string): CSSProperties {
+  return {
+    flexShrink: 0,
+    padding: "0.12rem 0.28rem",
+    border: `1px solid ${accent}55`,
+    background: `${accent}14`,
+    color: accent,
+    fontSize: "0.52rem",
+    fontWeight: 900,
+    letterSpacing: "0.1em",
+  };
+}
+
+const mvpMiniTagStyle: CSSProperties = {
+  flexShrink: 0,
+  padding: "0.12rem 0.28rem",
+  border: "1px solid rgba(250,204,21,0.55)",
+  background: "rgba(250,204,21,0.14)",
+  color: "#facc15",
+  fontSize: "0.52rem",
+  fontWeight: 900,
+  letterSpacing: "0.1em",
+};
+
+const winnerMiniTagStyle: CSSProperties = {
+  flexShrink: 0,
+  padding: "0.12rem 0.28rem",
+  border: "1px solid rgba(74,222,128,0.5)",
+  background: "rgba(74,222,128,0.12)",
+  color: "#4ade80",
+  fontSize: "0.52rem",
+  fontWeight: 900,
+  letterSpacing: "0.1em",
+};
+
+const botTagStyle: CSSProperties = {
+  color: "#94a3b8",
+  border: "1px solid rgba(148,163,184,0.18)",
+  padding: "0.16rem 0.35rem",
+  fontSize: "0.62rem",
+  fontWeight: 900,
+};
+
+const playerSideStackStyle: CSSProperties = {
+  display: "grid",
+  justifyItems: "end",
+  alignContent: "center",
+  gap: "0.32rem",
+  minWidth: "76px",
+  flexShrink: 0,
+};
+
+function mmrDeltaBadgeStyle(delta: number): CSSProperties {
+  const positive = delta >= 0;
+  const tone = positive ? "#4ade80" : "#f87171";
+
+  return {
+    minWidth: "70px",
+    padding: "0.24rem 0.44rem",
+    border: `1px solid ${positive ? "rgba(74,222,128,0.42)" : "rgba(248,113,113,0.42)"}`,
+    background: positive ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)",
+    color: tone,
+    fontSize: "0.62rem",
+    fontWeight: 950,
+    letterSpacing: "0.08em",
+    textAlign: "center",
+    whiteSpace: "nowrap",
+    boxShadow: `0 0 14px ${positive ? "rgba(74,222,128,0.10)" : "rgba(248,113,113,0.10)"}`,
+  };
+}
+
+const stageCardStyle: CSSProperties = {
+  minWidth: 0,
+  border: "1px solid var(--nexus-border)",
+  borderColor: "var(--nexus-border)",
+  borderRadius: "0",
+  padding: "0.78rem",
+  display: "grid",
+  gap: "0.68rem",
+  background: "rgba(6,12,24,0.78)",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+};
+
+const chatDockStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: "0.62rem",
+  padding: "0.72rem",
+  border: "1px solid rgba(100,200,255,0.14)",
+  background: "linear-gradient(180deg, rgba(4,9,18,0.76), rgba(4,9,18,0.54))",
+};
+
+const chatDockHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "0.75rem",
+  flexWrap: "wrap",
+};
+
+const chatTabsStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.4rem",
+  flexWrap: "wrap",
+};
+
+function chatTabStyle(
+  active: boolean,
+  tone: string,
+  disabled = false,
+): CSSProperties {
+  return {
+    border: `1px solid ${active ? `${tone}66` : "rgba(148,163,184,0.16)"}`,
+    background: active ? `${tone}18` : "rgba(2,6,23,0.5)",
+    color: disabled
+      ? "rgba(148,163,184,0.42)"
+      : active
+        ? tone
+        : "rgba(226,232,240,0.72)",
+    padding: "0.5rem 0.68rem",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontSize: "0.68rem",
+    fontWeight: 900,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+  };
+}
+
+const chatPanelStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: "0.55rem",
+};
+
 const chatListStyle: CSSProperties = {
-  maxHeight: "168px",
+  maxHeight: "142px",
   overflowY: "auto",
   border: "1px solid rgba(148,163,184,0.18)",
   background: "rgba(2,6,23,0.55)",
@@ -2082,9 +2633,7 @@ function chatMessageRowStyle(mine: boolean): CSSProperties {
     gap: "0.55rem",
     alignItems: "start",
     border: "1px solid rgba(148,163,184,0.12)",
-    background: mine
-      ? "rgba(14,116,144,0.18)"
-      : "rgba(15,23,42,0.55)",
+    background: mine ? "rgba(14,116,144,0.18)" : "rgba(15,23,42,0.55)",
     padding: "0.5rem",
   };
 }
@@ -2153,11 +2702,83 @@ const quickPromptStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+const replayUploadShellStyle: CSSProperties = {
+  position: "relative",
+  overflow: "hidden",
+  border: "1px solid rgba(56,189,248,0.26)",
+  background:
+    "linear-gradient(135deg, rgba(14,116,144,0.22), rgba(2,6,23,0.78)), radial-gradient(circle at 85% 10%, rgba(56,189,248,0.22), transparent 32%)",
+  padding: "0.9rem",
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: "0.85rem",
+  flexWrap: "wrap",
+};
+
+function replayUploadButtonStyle(disabled: boolean): CSSProperties {
+  return {
+    border: "1px solid rgba(56,189,248,0.5)",
+    background: disabled
+      ? "rgba(30,41,59,0.68)"
+      : "linear-gradient(90deg, rgba(56,189,248,0.96), rgba(34,211,238,0.86))",
+    color: disabled ? "#94a3b8" : "#020617",
+    padding: "0.72rem 0.9rem",
+    minWidth: "148px",
+    cursor: disabled ? "not-allowed" : "pointer",
+    fontSize: "0.7rem",
+    fontWeight: 900,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+  };
+}
+
+function replayUploadNoticeStyle(error: boolean): CSSProperties {
+  return {
+    border: `1px solid ${error ? "rgba(248,113,113,0.32)" : "rgba(74,222,128,0.28)"}`,
+    background: error ? "rgba(127,29,29,0.18)" : "rgba(20,83,45,0.18)",
+    color: error ? "#fecaca" : "#bbf7d0",
+    padding: "0.58rem 0.7rem",
+    fontSize: "0.82rem",
+    lineHeight: 1.35,
+  };
+}
+
+const replayMetaGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gap: "0.55rem",
+};
+
+const replayPlayersStripStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.42rem",
+  overflowX: "auto",
+  paddingBottom: "0.1rem",
+};
+
+function replayPlayerPillStyle(team: 1 | 2): CSSProperties {
+  const tone = TEAM_COLORS[team].accent;
+  return {
+    minWidth: "118px",
+    border: `1px solid ${tone}33`,
+    background: `${tone}10`,
+    padding: "0.45rem 0.55rem",
+    display: "grid",
+    gap: "0.12rem",
+    color: "#e2e8f0",
+    fontSize: "0.72rem",
+  };
+}
+
 function mapGridStyle(isNarrow: boolean): CSSProperties {
   return {
     display: "grid",
     gridTemplateColumns: isNarrow ? "1fr" : "1fr 1fr",
-    gap: "0.5rem",
+    gap: "0.6rem",
+    maxHeight: isNarrow ? "none" : "398px",
+    overflowY: isNarrow ? "visible" : "auto",
+    paddingRight: isNarrow ? 0 : "0.12rem",
   };
 }
 
@@ -2211,9 +2832,10 @@ function MapSelectedCard({
         style={{
           position: "absolute",
           inset: 0,
-          background: imgFailed || !imageUrl
-            ? backdrop
-            : "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.1) 55%, transparent 100%)",
+          background:
+            imgFailed || !imageUrl
+              ? backdrop
+              : "linear-gradient(to top, rgba(0,0,0,0.88) 0%, rgba(0,0,0,0.1) 55%, transparent 100%)",
         }}
       />
       {/* Content */}
@@ -2303,9 +2925,10 @@ function WinnerSummaryHero({
         style={{
           position: "absolute",
           inset: 0,
-          background: imgFailed || !imageUrl
-            ? backdrop
-            : `linear-gradient(180deg, rgba(2,6,23,0.14) 0%, rgba(2,6,23,0.44) 42%, rgba(2,6,23,0.92) 100%)`,
+          background:
+            imgFailed || !imageUrl
+              ? backdrop
+              : `linear-gradient(180deg, rgba(2,6,23,0.14) 0%, rgba(2,6,23,0.44) 42%, rgba(2,6,23,0.92) 100%)`,
         }}
       />
       <div
@@ -2414,10 +3037,12 @@ function MapVetoCard({
         padding: 0,
         overflow: "hidden",
         cursor: active && !isBanned ? "pointer" : "not-allowed",
-        aspectRatio: "16/7",
+        aspectRatio: "16/4.35",
         background: "#0d1422",
-        transition: "border-color 0.15s, transform 0.12s",
-        transform: isBanning ? "scale(1.02)" : "scale(1)",
+        transition: "border-color 0.15s, box-shadow 0.12s, filter 0.12s",
+        boxShadow: isBanning
+          ? "0 0 0 1px rgba(248,113,113,0.35), inset 0 0 22px rgba(248,113,113,0.18)"
+          : "none",
         outline: "none",
       }}
     >
@@ -2451,15 +3076,16 @@ function MapVetoCard({
         style={{
           position: "absolute",
           inset: 0,
-          background: imgFailed || !imageUrl
-            ? isBanning
-              ? "linear-gradient(to top, rgba(248,113,113,0.55) 0%, rgba(0,0,0,0.4) 100%)"
-              : backdrop
-            : isBanned
-              ? "linear-gradient(to top, rgba(2,6,23,0.92) 0%, rgba(2,6,23,0.5) 58%, rgba(2,6,23,0.35) 100%)"
-              : isBanning
-                ? "linear-gradient(to top, rgba(200,30,30,0.7) 0%, transparent 55%)"
-                : "linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 50%)",
+          background:
+            imgFailed || !imageUrl
+              ? isBanning
+                ? "linear-gradient(to top, rgba(248,113,113,0.55) 0%, rgba(0,0,0,0.4) 100%)"
+                : backdrop
+              : isBanned
+                ? "linear-gradient(to top, rgba(2,6,23,0.92) 0%, rgba(2,6,23,0.5) 58%, rgba(2,6,23,0.35) 100%)"
+                : isBanning
+                  ? "linear-gradient(to top, rgba(200,30,30,0.7) 0%, transparent 55%)"
+                  : "linear-gradient(to top, rgba(0,0,0,0.75) 0%, transparent 50%)",
           transition: "background 0.15s",
         }}
       />
@@ -2549,7 +3175,8 @@ function MapVetoCard({
             letterSpacing: "0.04em",
             textTransform: "uppercase",
             lineHeight: 1.2,
-            textShadow: active || isBanned ? "0 1px 4px rgba(0,0,0,0.8)" : "none",
+            textShadow:
+              active || isBanned ? "0 1px 4px rgba(0,0,0,0.8)" : "none",
           }}
         >
           {mapName}
@@ -2619,7 +3246,8 @@ const playAgainButtonStyle: CSSProperties = {
   letterSpacing: "0.12em",
   textTransform: "uppercase",
   cursor: "pointer",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 24px rgba(0,0,0,0.22)",
+  boxShadow:
+    "inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 24px rgba(0,0,0,0.22)",
 };
 
 const eyebrowStyle: CSSProperties = {
@@ -2765,32 +3393,6 @@ function timerBadgeStyle(urgent: boolean): CSSProperties {
     fontFamily: "var(--font-display)",
     letterSpacing: "0.14em",
     fontWeight: 700,
-  };
-}
-
-function playerResultTagStyle(color: string, background: string): CSSProperties {
-  return {
-    padding: "0.22rem 0.42rem",
-    border: `1px solid ${color}66`,
-    background,
-    color,
-    fontSize: "0.62rem",
-    fontWeight: 900,
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-  };
-}
-
-function playerCardStyle(placeholder: boolean): CSSProperties {
-  return {
-    display: "flex",
-    justifyContent: "space-between",
-    alignItems: "center",
-    gap: "0.75rem",
-    borderRadius: "0",
-    padding: "0.85rem 0.95rem",
-    background: placeholder ? "rgba(30,41,59,0.45)" : "rgba(15,23,42,0.78)",
-    border: `1px solid ${placeholder ? "rgba(100,116,139,0.25)" : "rgba(148,163,184,0.18)"}`,
   };
 }
 

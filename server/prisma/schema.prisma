@@ -41,6 +41,12 @@ enum PlayerRole {
   TANK
 }
 
+enum ReplayUploadStatus {
+  UPLOADED
+  PARSED
+  FAILED
+}
+
 // ─── Models ───────────────────────────────────────────────
 
 model User {
@@ -84,6 +90,9 @@ model User {
   mvpVotesCast     MvpVote[] @relation("MvpVotesCast")
   mvpVotesReceived MvpVote[] @relation("MvpVotesReceived")
   matchMvps        Match[]   @relation("MatchMvp")
+  replayUploads    MatchReplayUpload[] @relation("ReplayUploader")
+  adminAuditLogsAuthored AdminAuditLog[] @relation("AdminAuditActor")
+  adminAuditLogsTargeted AdminAuditLog[] @relation("AdminAuditTargetUser")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -128,6 +137,7 @@ model Match {
   messages ChatMessage[]
   votes    Vote[]
   mvpVotes MvpVote[]
+  replayUploads MatchReplayUpload[]
 
   createdAt DateTime  @default(now())
   startedAt DateTime?
@@ -136,6 +146,40 @@ model Match {
   @@index([status])
   @@index([mvpUserId])
   @@index([createdAt])
+}
+
+model MatchReplayUpload {
+  id      String @id @default(cuid())
+  matchId String
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  uploadedById String?
+  uploadedBy   User?   @relation("ReplayUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  status ReplayUploadStatus @default(UPLOADED)
+
+  originalName String @db.VarChar(260)
+  storagePath  String @db.VarChar(500)
+  fileSize     Int
+  sha256       String @unique @db.VarChar(64)
+
+  parsedMap        String?
+  parsedGameMode   String?
+  parsedRegion     Int?
+  parsedBuild      Int?
+  parsedDuration   Int?
+  parsedGameDate   DateTime?
+  parsedWinnerTeam Int?
+  parserStatus     String? @db.VarChar(64)
+  parseError       String? @db.VarChar(500)
+  parsedSummary    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([matchId, createdAt])
+  @@index([uploadedById, createdAt])
+  @@index([status, createdAt])
 }
 
 model MatchPlayer {
@@ -219,8 +263,35 @@ model ChatMessage {
   user    User   @relation(fields: [userId], references: [id])
 
   content String @db.VarChar(500)
+  channel String @default("GLOBAL") @db.VarChar(16)
+  team    Int?
 
   createdAt DateTime @default(now())
 
   @@index([matchId, createdAt])
+  @@index([matchId, channel, createdAt])
+}
+
+model AdminAuditLog {
+  id String @id @default(cuid())
+
+  actorId String?
+  actor   User?   @relation("AdminAuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+
+  targetUserId String?
+  targetUser   User?   @relation("AdminAuditTargetUser", fields: [targetUserId], references: [id], onDelete: SetNull)
+
+  action     String @db.VarChar(64)
+  entityType String @db.VarChar(32)
+  entityId   String?
+  summary    String @db.VarChar(280)
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([action, createdAt])
+  @@index([entityType, createdAt])
+  @@index([actorId, createdAt])
+  @@index([targetUserId, createdAt])
 }

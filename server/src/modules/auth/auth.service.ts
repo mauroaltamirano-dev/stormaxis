@@ -196,3 +196,108 @@ export function getDiscordCreatedAt(discordId: string) {
   const timestamp = Number((BigInt(discordId) >> 22n) + discordEpoch)
   return new Date(timestamp)
 }
+
+// ─── Battle.net OAuth helpers ───────────────────────────
+
+interface BattleNetTokenResponse {
+  access_token: string
+  token_type: string
+  expires_in?: number
+  scope?: string
+}
+
+export interface BattleNetProfile {
+  sub?: string
+  id?: string | number
+  battletag?: string
+}
+
+export function isBattleNetConfigured() {
+  return Boolean(process.env.BNET_CLIENT_ID && process.env.BNET_CLIENT_SECRET)
+}
+
+function getBattleNetRegion() {
+  const region = (process.env.BNET_REGION || 'us').trim().toLowerCase()
+
+  // Battle.net groups Latin America/South America under the Americas OAuth host.
+  if (['americas', 'america', 'latam', 'latin-america', 'south-america', 'southamerica', 'sa', 'br'].includes(region)) {
+    return 'us'
+  }
+
+  return region
+}
+
+function getBattleNetOAuthBase() {
+  const region = getBattleNetRegion()
+  if (region === 'cn') return 'https://www.battlenet.com.cn'
+  return `https://${region}.battle.net`
+}
+
+export function getBattleNetRedirectUri(override?: string) {
+  const fallbackPort = process.env.PORT || '3000'
+  return override || process.env.BNET_REDIRECT_URI || `http://localhost:${fallbackPort}/api/auth/bnet/callback`
+}
+
+export function getBattleNetAuthorizeUrl(state: string, redirectUri?: string) {
+  if (!isBattleNetConfigured()) throw Errors.INTERNAL()
+
+  const params = new URLSearchParams({
+    client_id: process.env.BNET_CLIENT_ID!,
+    response_type: 'code',
+    redirect_uri: getBattleNetRedirectUri(redirectUri),
+    scope: process.env.BNET_OAUTH_SCOPES || 'openid',
+    state,
+  })
+
+  return `${getBattleNetOAuthBase()}/oauth/authorize?${params.toString()}`
+}
+
+export async function exchangeBattleNetCode(code: string, redirectUri?: string): Promise<BattleNetTokenResponse> {
+  if (!isBattleNetConfigured()) throw Errors.INTERNAL()
+
+  const body = new URLSearchParams({
+    grant_type: 'authorization_code',
+    code,
+    redirect_uri: getBattleNetRedirectUri(redirectUri),
+  })
+
+  const basic = Buffer.from(`${process.env.BNET_CLIENT_ID!}:${process.env.BNET_CLIENT_SECRET!}`).toString('base64')
+  const response = await fetch(`${getBattleNetOAuthBase()}/oauth/token`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Basic ${basic}`,
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body,
+  })
+
+  if (!response.ok) {
+    throw Errors.UNAUTHORIZED()
+  }
+
+  return response.json() as Promise<BattleNetTokenResponse>
+}
+
+export async function fetchBattleNetProfile(accessToken: string): Promise<BattleNetProfile> {
+  const headers = { Authorization: `Bearer ${accessToken}` }
+  const response = await fetch(`${getBattleNetOAuthBase()}/oauth/userinfo`, { headers })
+
+  if (response.ok) return response.json() as Promise<BattleNetProfile>
+
+  // Some OAuth libraries/documentation also reference the global oauth.battle.net userinfo host.
+  const fallback = await fetch('https://oauth.battle.net/userinfo', { headers })
+  if (!fallback.ok) {
+    throw Errors.UNAUTHORIZED()
+  }
+
+  return fallback.json() as Promise<BattleNetProfile>
+}
+
+export function getBattleNetStableId(profile: BattleNetProfile) {
+  const id = profile.sub ?? profile.id
+  return id == null ? null : String(id)
+}
+
+export function getBattleNetDisplayName(profile: BattleNetProfile) {
+  return profile.battletag ?? null
+}
