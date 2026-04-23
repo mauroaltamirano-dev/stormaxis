@@ -90,6 +90,10 @@ function getRequestClientOrigin(req: any): string | undefined {
 }
 
 function getDiscordRedirectUriForRequest(req: any) {
+  if (process.env.NODE_ENV === 'production' && process.env.DISCORD_REDIRECT_URI) {
+    return process.env.DISCORD_REDIRECT_URI
+  }
+
   const fromRequest = getRequestClientOrigin(req)
   if (fromRequest) return `${fromRequest}/api/auth/discord/callback`
   return undefined
