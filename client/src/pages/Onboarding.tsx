@@ -83,7 +83,7 @@ export function Onboarding() {
     try {
       const response = await api.post('/users/me/onboarding', parsed.data)
       updateUser(response.data)
-      navigate({ to: '/dashboard' })
+      navigate({ to: user?.role === 'ADMIN' ? '/admin' : '/dashboard' })
     } catch (err: any) {
       setServerError(err.response?.data?.error?.message || 'No pudimos completar tu onboarding')
     }

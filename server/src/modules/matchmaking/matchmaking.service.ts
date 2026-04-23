@@ -28,6 +28,14 @@ const MAX_MMR_TOLERANCE = toPositiveInt(
 )
 const MMR_TOLERANCE_STEP = toPositiveInt(process.env.MATCHMAKING_MMR_TOLERANCE_STEP, 50)
 const MMR_TOLERANCE_STEP_MS = toPositiveInt(process.env.MATCHMAKING_MMR_TOLERANCE_STEP_MS, 10_000)
+const FORCE_RELAX_MMR_AFTER_MS = toPositiveInt(
+  process.env.MATCHMAKING_FORCE_RELAX_MMR_AFTER_MS,
+  process.env.NODE_ENV === 'production' ? 45_000 : 20_000,
+)
+const SMALL_POPULATION_QUEUE_LIMIT = toPositiveInt(
+  process.env.MATCHMAKING_SMALL_POPULATION_QUEUE_LIMIT,
+  20,
+)
 const IGNORE_MMR_BALANCE = ['1', 'true', 'yes', 'on'].includes(
   String(process.env.MATCHMAKING_IGNORE_MMR_BALANCE ?? '').toLowerCase(),
 )
@@ -55,11 +63,23 @@ type PendingAcceptState = {
 }
 
 type QueueCandidate = {
+  queueId: string
   userId: string | null
   mmr: number
   isBot: boolean
   botName: string | null
   joinedAt: number | null
+}
+
+type BalancedTeamsResult = {
+  team1: QueueCandidate[]
+  team2: QueueCandidate[]
+  team1CaptainId: string
+  team2CaptainId: string
+  team1Total: number
+  team2Total: number
+  totalDiff: number
+  pairingGap: number
 }
 
 type QueueProgressEvent = {
@@ -91,6 +111,96 @@ function toBotName(index: number) {
 
 function normalizeQueueMMR(value: number) {
   return Math.max(500, Math.min(3500, Math.round(value)))
+}
+
+function sumMMR(players: QueueCandidate[]) {
+  return players.reduce((sum, player) => sum + player.mmr, 0)
+}
+
+function computePairingGap(team1: QueueCandidate[], team2: QueueCandidate[]) {
+  const left = [...team1].sort((a, b) => b.mmr - a.mmr)
+  const right = [...team2].sort((a, b) => b.mmr - a.mmr)
+
+  return left.reduce((sum, player, index) => {
+    return sum + Math.abs(player.mmr - (right[index]?.mmr ?? player.mmr))
+  }, 0)
+}
+
+function chooseIndexCombinations(source: number[], size: number): number[][] {
+  if (size <= 0) return [[]]
+  if (size > source.length) return []
+
+  const results: number[][] = []
+
+  function walk(start: number, picked: number[]) {
+    if (picked.length === size) {
+      results.push([...picked])
+      return
+    }
+
+    for (let index = start; index < source.length; index++) {
+      picked.push(source[index])
+      walk(index + 1, picked)
+      picked.pop()
+    }
+  }
+
+  walk(0, [])
+  return results
+}
+
+function buildBestBalancedTeams(players: QueueCandidate[]): BalancedTeamsResult | null {
+  const teamSize = Math.max(1, Math.floor(MATCH_SIZE / 2))
+  const humansByMMR = [...players]
+    .filter((player) => !player.isBot && player.userId)
+    .sort((a, b) => b.mmr - a.mmr)
+
+  const captainA = humansByMMR[0]
+  const captainB = humansByMMR[1]
+  if (!captainA?.userId || !captainB?.userId) return null
+
+  const remaining = players.filter((candidate) => candidate !== captainA && candidate !== captainB)
+  const team1PickCount = teamSize - 1
+  const combinations = chooseIndexCombinations(
+    remaining.map((_, index) => index),
+    team1PickCount,
+  )
+
+  let best: BalancedTeamsResult | null = null
+
+  for (const combination of combinations) {
+    const selected = new Set(combination)
+    const team1 = [captainA, ...remaining.filter((_, index) => selected.has(index))]
+    const team2 = [captainB, ...remaining.filter((_, index) => !selected.has(index))]
+
+    if (team1.length !== teamSize || team2.length !== teamSize) continue
+
+    const team1Total = sumMMR(team1)
+    const team2Total = sumMMR(team2)
+    const totalDiff = Math.abs(team1Total - team2Total)
+    const pairingGap = computePairingGap(team1, team2)
+
+    const candidate: BalancedTeamsResult = {
+      team1,
+      team2,
+      team1CaptainId: captainA.userId,
+      team2CaptainId: captainB.userId,
+      team1Total,
+      team2Total,
+      totalDiff,
+      pairingGap,
+    }
+
+    if (
+      !best ||
+      candidate.totalDiff < best.totalDiff ||
+      (candidate.totalDiff === best.totalDiff && candidate.pairingGap < best.pairingGap)
+    ) {
+      best = candidate
+    }
+  }
+
+  return best
 }
 
 function safeParsePositiveInt(value: string | null | undefined) {
@@ -567,10 +677,10 @@ export async function tryFormMatch() {
 
   if (queueSize < MATCH_SIZE) return null
 
-  // Get bottom 10 (MMR ascending)
-  const candidates = await redis.zrange(queueKey, 0, MATCH_SIZE - 1, 'WITHSCORES')
+  // Evaluate the full queue so small-population matchmaking can choose the best
+  // available block of 10 instead of freezing on the first MMR window forever.
+  const candidates = await redis.zrange(queueKey, 0, -1, 'WITHSCORES')
 
-  // candidates = [userId1, mmr1, userId2, mmr2, ...]
   const players: QueueCandidate[] = []
   let removedStaleEntries = 0
   for (let i = 0; i < candidates.length; i += 2) {
@@ -586,6 +696,7 @@ export async function tryFormMatch() {
     const isBot = Boolean(meta.isBot) || isBotQueueId(queueId)
     const joinedAt = typeof meta.joinedAt === 'number' ? meta.joinedAt : null
     players.push({
+      queueId,
       userId: isBot ? null : queueId,
       mmr,
       isBot,
@@ -600,65 +711,83 @@ export async function tryFormMatch() {
 
   if (players.length < MATCH_SIZE) return null
 
-  const humans = players.filter((player) => !player.isBot && player.userId)
-  if (humans.length < 2) return null
-  const hasBots = players.some((player) => player.isBot)
+  const oldestQueueJoinedAt = players
+    .filter((player) => !player.isBot && player.joinedAt != null)
+    .reduce<number | null>((oldest, player) => {
+      if (player.joinedAt == null) return oldest
+      return oldest == null ? player.joinedAt : Math.min(oldest, player.joinedAt)
+    }, null)
+  const oldestQueueWaitMs = oldestQueueJoinedAt == null ? 0 : Math.max(0, Date.now() - oldestQueueJoinedAt)
 
-  // Check MMR spread
-  const minMMR = players[0].mmr
-  const maxMMR = players[players.length - 1].mmr
-  if (!IGNORE_MMR_BALANCE && !hasBots) {
-    const tolerance = await getDynamicMMRTolerance(players)
-    if (maxMMR - minMMR > tolerance) return null // Not balanced enough yet
-  }
+  const windows = await Promise.all(
+    Array.from({ length: players.length - MATCH_SIZE + 1 }, async (_, startIndex) => {
+      const windowPlayers = players.slice(startIndex, startIndex + MATCH_SIZE)
+      const humans = windowPlayers.filter((player) => !player.isBot && player.userId)
+      if (humans.length < 2) return null
 
-  // Remove them from queue
-  const queueIds = candidates.filter((_, index) => index % 2 === 0)
+      const hasBots = windowPlayers.some((player) => player.isBot)
+      const spread = windowPlayers[windowPlayers.length - 1].mmr - windowPlayers[0].mmr
+      const tolerance = IGNORE_MMR_BALANCE || hasBots
+        ? Number.POSITIVE_INFINITY
+        : await getDynamicMMRTolerance(windowPlayers)
+      const balanced = buildBestBalancedTeams(windowPlayers)
+      if (!balanced) return null
+
+      const oldestJoinedAt = windowPlayers
+        .filter((player) => !player.isBot && player.joinedAt != null)
+        .reduce<number | null>((oldest, player) => {
+          if (player.joinedAt == null) return oldest
+          return oldest == null ? player.joinedAt : Math.min(oldest, player.joinedAt)
+        }, null)
+
+      return {
+        startIndex,
+        players: windowPlayers,
+        hasBots,
+        spread,
+        tolerance,
+        withinTolerance: spread <= tolerance,
+        waitedMs: oldestJoinedAt == null ? 0 : Math.max(0, Date.now() - oldestJoinedAt),
+        ...balanced,
+      }
+    }),
+  )
+
+  const validWindows = windows.filter((window): window is NonNullable<typeof window> => window != null)
+  if (validWindows.length === 0) return null
+
+  const toleratedWindows = validWindows.filter((window) => window.withinTolerance)
+  const canForceSmallPopulationMatch =
+    !IGNORE_MMR_BALANCE &&
+    queueSize <= SMALL_POPULATION_QUEUE_LIMIT &&
+    oldestQueueWaitMs >= FORCE_RELAX_MMR_AFTER_MS
+
+  const rankedWindows = (toleratedWindows.length > 0
+    ? toleratedWindows
+    : canForceSmallPopulationMatch
+      ? validWindows
+      : []
+  ).sort((left, right) => {
+    if (left.totalDiff !== right.totalDiff) return left.totalDiff - right.totalDiff
+    if (left.pairingGap !== right.pairingGap) return left.pairingGap - right.pairingGap
+    if (left.spread !== right.spread) return left.spread - right.spread
+    if (left.waitedMs !== right.waitedMs) return right.waitedMs - left.waitedMs
+    return left.startIndex - right.startIndex
+  })
+
+  const selectedWindow = rankedWindows[0]
+  if (!selectedWindow) return null
+
+  const queueIds = selectedWindow.players.map((player) => player.queueId)
   await redis.zrem(queueKey, ...queueIds)
   for (const queueId of queueIds) await redis.del(REDIS_KEYS.userInQueue(queueId))
   void emitQueuePositionUpdates()
-
-  // Build teams: top 2 HUMAN MMR are captains; rest balanced by total MMR
-  const teamSize = Math.max(1, Math.floor(MATCH_SIZE / 2))
-  const humansByMMR = [...humans].sort((a, b) => b.mmr - a.mmr)
-  const captainA = humansByMMR[0]
-  const captainB = humansByMMR[1]
-  if (!captainA || !captainB || !captainA.userId || !captainB.userId) return null
-
-  const team1: QueueCandidate[] = [captainA]
-  const team2: QueueCandidate[] = [captainB]
-  let team1Total = captainA.mmr
-  let team2Total = captainB.mmr
-
-  const remaining = players.filter((candidate) => candidate !== captainA && candidate !== captainB)
-  const sortedRemaining = [...remaining].sort((a, b) => b.mmr - a.mmr)
-  for (const candidate of sortedRemaining) {
-    const canJoinTeam1 = team1.length < teamSize
-    const canJoinTeam2 = team2.length < teamSize
-
-    if (canJoinTeam1 && !canJoinTeam2) {
-      team1.push(candidate)
-      team1Total += candidate.mmr
-      continue
-    }
-
-    if (!canJoinTeam1 && canJoinTeam2) {
-      team2.push(candidate)
-      team2Total += candidate.mmr
-      continue
-    }
-
-    if (team1Total <= team2Total) {
-      team1.push(candidate)
-      team1Total += candidate.mmr
-    } else {
-      team2.push(candidate)
-      team2Total += candidate.mmr
-    }
-  }
-
-  const team1CaptainId = captainA.userId
-  const team2CaptainId = captainB.userId
+  const {
+    team1,
+    team2,
+    team1CaptainId,
+    team2CaptainId,
+  } = selectedWindow
 
   const match = await db.match.create({
     data: {
@@ -735,7 +864,7 @@ export async function tryFormMatch() {
 
   // Set timeout to cancel if not all accept
   setTimeout(() => cancelMatchIfNotFull(match.id), ACCEPT_TIMEOUT_MS + 1000)
-  void recordQueueFormationMetrics(players).catch((err) => {
+  void recordQueueFormationMetrics(selectedWindow.players).catch((err) => {
     logger.warn('Failed to record matchmaking metrics', err)
   })
 
@@ -1078,22 +1207,30 @@ async function emitAcceptProgress(
   })
 }
 
-async function getDynamicMMRTolerance(players: Array<{ userId: string | null; mmr: number }>) {
-  const queueMetadata = await Promise.all(
-    players.map((player) => (player.userId ? redis.get(REDIS_KEYS.userInQueue(player.userId)) : Promise.resolve(null))),
-  )
-
-  const joinedAts = queueMetadata
-    .map((raw) => {
-      if (!raw) return null
-      try {
-        const parsed = JSON.parse(raw) as { joinedAt?: number }
-        return typeof parsed.joinedAt === 'number' ? parsed.joinedAt : null
-      } catch {
-        return null
-      }
-    })
+async function getDynamicMMRTolerance(
+  players: Array<{ userId: string | null; mmr: number; joinedAt?: number | null }>,
+) {
+  const joinedAtsFromPlayers = players
+    .map((player) => (typeof player.joinedAt === 'number' ? player.joinedAt : null))
     .filter((joinedAt): joinedAt is number => joinedAt != null)
+
+  const joinedAts = joinedAtsFromPlayers.length > 0
+    ? joinedAtsFromPlayers
+    : (await Promise.all(
+        players.map((player) => (
+          player.userId ? redis.get(REDIS_KEYS.userInQueue(player.userId)) : Promise.resolve(null)
+        )),
+      ))
+        .map((raw) => {
+          if (!raw) return null
+          try {
+            const parsed = JSON.parse(raw) as { joinedAt?: number }
+            return typeof parsed.joinedAt === 'number' ? parsed.joinedAt : null
+          } catch {
+            return null
+          }
+        })
+        .filter((joinedAt): joinedAt is number => joinedAt != null)
 
   if (joinedAts.length === 0) return BASE_MMR_TOLERANCE
 

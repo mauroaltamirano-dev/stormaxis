@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { useNavigate } from '@tanstack/react-router'
 import { api } from '../lib/api'
 import { useAuthStore } from '../stores/auth.store'
@@ -7,6 +7,7 @@ import { requiresCompetitiveOnboarding } from '../lib/onboarding'
 export function AuthCallback() {
   const navigate = useNavigate()
   const { user, accessToken, isLoading, setAuth, updateUser } = useAuthStore()
+  const handledRef = useRef(false)
 
   const search = new URLSearchParams(window.location.search)
   const error = search.get('error')
@@ -15,10 +16,11 @@ export function AuthCallback() {
   const callbackAccessToken = search.get('accessToken')
 
   useEffect(() => {
-    if (isLoading) return
+    if (isLoading || handledRef.current) return
+    handledRef.current = true
 
     if (error) {
-      navigate({ to: user ? '/profile' : '/login' })
+      navigate({ to: user ? '/profile' : '/login', replace: true })
       return
     }
 
@@ -43,10 +45,12 @@ export function AuthCallback() {
               ? '/profile'
               : requiresCompetitiveOnboarding(currentUser)
                 ? '/onboarding'
-                : '/dashboard'
+                : currentUser.role === 'ADMIN'
+                  ? '/admin'
+                  : '/dashboard'
             : '/login'
 
-        navigate({ to: nextTarget })
+        navigate({ to: nextTarget, replace: true })
       })
   }, [accessToken, callbackAccessToken, error, isLoading, mode, navigate, setAuth, updateUser, user])
 

@@ -36,7 +36,12 @@ export function Register() {
   useEffect(() => {
     if (!user) return;
     navigate({
-      to: requiresCompetitiveOnboarding(user) ? "/onboarding" : "/dashboard",
+      to:
+        requiresCompetitiveOnboarding(user)
+          ? "/onboarding"
+          : user.role === "ADMIN"
+            ? "/admin"
+            : "/dashboard",
       replace: true,
     });
   }, [navigate, user]);
@@ -59,7 +64,9 @@ export function Register() {
       navigate({
         to: requiresCompetitiveOnboarding(res.data.user)
           ? "/onboarding"
-          : "/dashboard",
+          : res.data.user.role === "ADMIN"
+            ? "/admin"
+            : "/dashboard",
       });
     } catch (err: any) {
       setServerError(

@@ -1,8 +1,8 @@
 # HOTS Competitive Platform — Project Audit & Roadmap
 
-Fecha: 2026-04-21  
+Fecha: 2026-04-23  
 Base actual: `/home/tuki/projects/hots`  
-Estado: proyecto nuevo en monorepo Vite + Express.
+Estado: MVP competitivo funcional desplegado en Cloudflare Pages + Render, con matchmaking, matchroom, Discord voice por equipo y panel admin inicial.
 
 ---
 
@@ -50,8 +50,8 @@ A futuro, HeroesProfile Developer puede aportar datos reales de perfiles, replay
 ### Verificación actual
 
 ```txt
+npm run typecheck                     ✅ pasa
 npm run build --workspace=client      ✅ pasa
-npm run typecheck --workspace=server  ✅ pasa
 ```
 
 Notas:
@@ -498,17 +498,22 @@ Debe incluir:
 
 - [ ] Mover roles fuera del formulario de queue como fuente principal.
 - [ ] Mostrar roles en tarjetas de jugador.
-- [ ] Mejorar queue status.
-- [ ] Mostrar live testers/logs.
+- [x] Mejorar queue status.
+- [x] Mostrar live testers/logs.
 - [ ] Mejorar accept modal.
-- [ ] Mejorar empty/active/completed states.
+- [x] Mejorar empty/active/completed states.
 - [x] Mostrar partidas live en Dashboard con acceso a matchroom.
 - [x] Permitir modo espectador readonly en MatchRoom.
 - [x] Corregir realtime de espectadores para vetos/fases/votos.
 - [x] Agregar votación MVP posterior a votación de ganador.
-- [ ] Probar end-to-end con bots:
+- [x] Probar end-to-end con bots (validación inicial manual):
   - cola → accept → veto → playing → ready → finish → voto ganador → voto MVP → completed.
   - verificar espectador observando cambios live sin recargar.
+- [x] Ajustar matchmaking para comunidad chica:
+  - evaluar varias ventanas de cola, no solo los 10 MMR más bajos.
+  - balancear equipos con combinación óptima.
+  - relajar spread por espera máxima configurable en colas chicas.
+- [x] Mantener panel de Discord visible en PLAYING/VOTING y cerrar match automáticamente al terminar votaciones.
 
 ### Fase 3.5 — Discord competitivo por match
 
@@ -539,14 +544,17 @@ Debe incluir:
 
 ### Fase 4 — Admin panel real
 
-- [ ] Crear `/admin`.
-- [ ] Queue monitor.
-- [ ] Match monitor.
-- [ ] User tools.
-- [ ] ELO tools.
-- [ ] Lifecycle simulator.
+- [x] Crear `/admin`.
+- [x] Queue monitor.
+- [x] Match monitor.
+- [x] User tools.
+- [x] ELO tools.
+- [x] Lifecycle simulator básico:
+  - limpiar cola.
+  - completar a 10 con bots.
+  - cancelar/borrar match desde panel.
 - [ ] Audit logs.
-- [ ] Client errors.
+- [x] Client errors.
 - [ ] Anti-smurf flags.
 
 ### Fase 5 — Datos externos
@@ -557,9 +565,13 @@ Debe incluir:
 - [ ] Stats reales.
 - [ ] Hero pool.
 
-### Próximo paso pactado (jueves, 2026-04-23)
+### Próximo paso pactado actualizado
 
-- [ ] Spike técnico: implementar **Battle.net linking** (start/callback, guardar identidad Battle.net y mapping con usuario interno).
+- [ ] Endurecer observabilidad/admin:
+  - audit logs.
+  - filtros de suspicious users / anti-smurf flags.
+  - métricas más claras de matchmaking y tiempos de espera.
+- [ ] Luego retomar **Battle.net linking** (start/callback, identidad y mapping interno).
 - [ ] Replay import/snapshots.
 
 ---
@@ -609,15 +621,17 @@ Notas de avance (2026-04-22):
    - voto MVP.
    - completed con MMR/MVP.
    - espectador recibiendo updates live.
+   - 2026-04-23: validación manual inicial OK según testing local del usuario; falta validación con más gente real.
 
 ### Prioridad 3 — Discord match voice
 
-1. Crear app/bot Discord y agregarlo al server con permisos de gestión de canales/invites.
-2. Añadir env vars.
-3. Implementar servicio Discord.
-4. Crear canales por match al pasar de accept a veto/playing.
-5. Mostrar links por equipo en MatchRoom.
-6. Programar cleanup.
+1. [x] Crear app/bot Discord y agregarlo al server con permisos de gestión de canales/invites.
+2. [x] Añadir env vars.
+3. [x] Implementar servicio Discord.
+4. [x] Crear canales por match al pasar de accept a veto/playing.
+5. [x] Mostrar links por equipo en MatchRoom.
+6. [x] Programar cleanup.
+7. [ ] Pendiente UX: CTA más explícito para usuarios sin Discord vinculado.
 
 ### Prioridad 4 — Battle.net
 
@@ -633,5 +647,6 @@ Después de esta auditoría, el próximo trabajo de código debería ser:
 2. Empezar rediseño de `AppLayout`.
 3. Agregar search de jugadores en sidebar izquierda.
 4. Convertir panel derecho en `PlayerSpine` con nivel, MMR, progreso, historial y Discord CTA.
+5. Menu derecho colapsable.
 
 Esto crea la base visual y de navegación para ordenar todo lo demás.

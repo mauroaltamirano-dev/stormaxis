@@ -17,6 +17,8 @@ import { RankBadge } from "../components/RankBadge";
 import { useAuthStore } from "../stores/auth.store";
 import { getRoleMeta } from "../lib/roles";
 import { getRankMeta } from "../lib/ranks";
+import { RankProgressBar } from "../components/RankProgressBar";
+import { RolePicker } from "../components/RolePicker";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
 
 type PlayerRole = "RANGED" | "HEALER" | "OFFLANE" | "FLEX" | "TANK";
@@ -90,19 +92,6 @@ const PLAYER_ROLE_OPTIONS: Array<{ value: PlayerRole; label: string }> = [
   { value: "FLEX", label: "Flex" },
   { value: "TANK", label: "Tank" },
 ];
-
-const LEVEL_COLORS: Record<number, string> = {
-  1: "#6b7280",
-  2: "#a16207",
-  3: "#94a3b8",
-  4: "#eab308",
-  5: "#06b6d4",
-  6: "#3b82f6",
-  7: "#8b5cf6",
-  8: "#d946ef",
-  9: "#f97316",
-  10: "#fb2424",
-};
 
 const MATCHES_PER_PAGE = 5;
 
@@ -218,7 +207,9 @@ export function Profile() {
 
   const level = profile?.level ?? 1;
   const rankMeta = getRankMeta(level);
-  const levelColor = LEVEL_COLORS[level] || "var(--nexus-accent)";
+  const nextRankMeta = getRankMeta(Math.min(10, level + 1));
+  const rankColor = rankMeta.color;
+  const nextRankColor = level >= 10 ? rankColor : nextRankMeta.color;
   const levelProgressPct = Math.max(
     0,
     Math.min(100, profile?.levelProgressPct ?? 0),
@@ -519,6 +510,7 @@ export function Profile() {
                 avatar={profile.avatar}
                 username={profile.username}
                 size={200}
+                rankColor={rankColor}
               />
 
               <div style={{ minWidth: 0 }}>
@@ -546,18 +538,27 @@ export function Profile() {
                     flexWrap: "wrap",
                   }}
                 >
-                  <h1
-                    style={{
-                      margin: 0,
-                      fontFamily: "var(--font-display)",
-                      fontSize: "32px",
-                      fontWeight: 900,
-                      letterSpacing: "1px",
-                      color: "var(--nexus-text)",
-                    }}
-                  >
-                    {profile.username}
-                  </h1>
+                  <div style={{ display: "grid", gap: "4px" }}>
+                    <h1
+                      style={{
+                        margin: 0,
+                        fontFamily: "var(--font-display)",
+                        fontSize: "32px",
+                        fontWeight: 900,
+                        letterSpacing: "1px",
+                        color: "var(--nexus-text)",
+                        textShadow: `0 0 28px ${rankColor}55`,
+                      }}
+                    >
+                      {profile.username}
+                    </h1>
+                    <div
+                      style={{
+                        height: "2px",
+                        background: `linear-gradient(90deg, ${rankColor}, ${nextRankColor}55, transparent)`,
+                      }}
+                    />
+                  </div>
                 </div>
 
                 <div
@@ -676,61 +677,17 @@ export function Profile() {
             <RoleBadge label="Main" role={profile.mainRole} />
             <RoleBadge label="Secundario" role={profile.secondaryRole} />
 
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                color: "rgba(232,244,255,0.42)",
-                fontSize: "11px",
-                fontWeight: 900,
-                letterSpacing: "1px",
-                textTransform: "uppercase",
-              }}
-            >
-              <span>Progreso al próximo rango</span>
-              <strong style={{ color: levelColor }}>
-                {pointsToNextLevel == null
-                  ? "Rango máximo"
-                  : `+${pointsToNextLevel}`}
-              </strong>
-            </div>
-
-            <div
-              style={{
-                position: "relative",
-                height: "10px",
-                overflow: "hidden",
-                border: "1px solid rgba(255,255,255,0.07)",
-                background: "rgba(2,6,14,0.8)",
-              }}
-            >
-              <div
-                style={{
-                  position: "absolute",
-                  inset: "0 auto 0 0",
-                  width: `${levelProgressPct}%`,
-                  height: "100%",
-                  background:
-                    "linear-gradient(90deg, #f97316 0%, #facc15 33%, #22d3ee 66%, #00c8ff 100%)",
-                }}
-              />
-              <div
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  backgroundImage:
-                    "linear-gradient(90deg, rgba(2,6,14,0.35) 1px, transparent 1px)",
-                  backgroundSize: "14px 100%",
-                }}
-              />
-            </div>
-
-            <div style={{ color: "var(--nexus-muted)", fontSize: "12px" }}>
-              {pointsToNextLevel == null
-                ? "Ya estás en el techo actual del ladder."
-                : `Te faltan ${pointsToNextLevel} puntos para el próximo rango.`}
-            </div>
+            <RankProgressBar
+              progressPct={levelProgressPct}
+              pointsToNextLevel={pointsToNextLevel}
+              rankColor={rankColor}
+              nextRankColor={nextRankColor}
+              subtitle={
+                pointsToNextLevel == null
+                  ? "Ya estás en el techo actual del ladder."
+                  : `Te faltan ${pointsToNextLevel} puntos para el próximo rango.`
+              }
+            />
 
             {isOwnProfile && profile.email ? (
               <div
@@ -868,23 +825,23 @@ export function Profile() {
                       }
                       placeholder="https://..."
                     />
-                    <SelectField
+                    <RolePicker
                       label="Main role"
                       value={form.mainRole}
                       onChange={(value) =>
                         setForm((current) => ({
                           ...current,
-                          mainRole: value as PlayerRole | null,
+                          mainRole: value,
                         }))
                       }
                     />
-                    <SelectField
+                    <RolePicker
                       label="Secundario"
                       value={form.secondaryRole}
                       onChange={(value) =>
                         setForm((current) => ({
                           ...current,
-                          secondaryRole: value as PlayerRole | null,
+                          secondaryRole: value,
                         }))
                       }
                     />
@@ -1056,10 +1013,10 @@ export function Profile() {
                           alignItems: "center",
                           minHeight: "68px",
                           padding: "8px 14px 8px 8px",
-                          border: "1px solid rgba(69,87,116,0.35)",
-                          background:
-                            "linear-gradient(180deg, rgba(7,14,27,0.92), rgba(3,8,18,0.94))",
-                          boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035)",
+                          border: "1px solid rgba(69,87,116,0.28)",
+                          borderLeft: `3px solid ${resultColor}`,
+                          background: `linear-gradient(180deg, ${resultColor}0a, rgba(3,8,18,0.94))`,
+                          boxShadow: `inset 0 1px 0 rgba(255,255,255,0.035), 0 0 20px ${resultColor}0a`,
                         }}
                       >
                         <div
@@ -1097,7 +1054,9 @@ export function Profile() {
                                 fontWeight: 900,
                               }}
                             >
-                              {entry.match.selectedMap?.slice(0, 2).toUpperCase() ?? "?"}
+                              {entry.match.selectedMap
+                                ?.slice(0, 2)
+                                .toUpperCase() ?? "?"}
                             </div>
                           )}
                           <div
@@ -1421,13 +1380,22 @@ function AvatarBlock({
   avatar,
   username,
   size,
+  rankColor,
 }: {
   avatar: string | null;
   username: string;
   size: number;
+  rankColor?: string;
 }) {
   const [imageVisible, setImageVisible] = useState(Boolean(avatar));
   const initial = username.charAt(0).toUpperCase() || "N";
+
+  const borderStyle = rankColor
+    ? `2px solid ${rankColor}66`
+    : "1px solid rgba(255,255,255,0.08)";
+  const glowStyle = rankColor
+    ? `0 0 24px ${rankColor}44, 0 0 48px ${rankColor}22, inset 0 0 0 1px ${rankColor}22`
+    : "none";
 
   return avatar && imageVisible ? (
     <img
@@ -1437,7 +1405,9 @@ function AvatarBlock({
         width: `${size}px`,
         height: `${size}px`,
         objectFit: "cover",
-        border: "1px solid rgba(255,255,255,0.08)",
+        border: borderStyle,
+        boxShadow: glowStyle,
+        flexShrink: 0,
       }}
       onError={(event) => {
         event.currentTarget.style.display = "none";
@@ -1451,12 +1421,14 @@ function AvatarBlock({
         height: `${size}px`,
         display: "grid",
         placeItems: "center",
-        border: "1px solid rgba(255,255,255,0.08)",
-        background: "rgba(0,174,255,0.12)",
-        color: "var(--nexus-accent)",
+        border: borderStyle,
+        boxShadow: glowStyle,
+        background: rankColor ? `${rankColor}18` : "rgba(0,174,255,0.12)",
+        color: rankColor ?? "var(--nexus-accent)",
         fontFamily: "var(--font-display)",
         fontSize: `${Math.max(16, Math.floor(size / 2.2))}px`,
         fontWeight: 900,
+        flexShrink: 0,
       }}
     >
       {initial}
@@ -1595,14 +1567,23 @@ function TabButton({
     <button
       onClick={onClick}
       style={{
-        border: `1px solid ${active ? "rgba(0,200,255,0.35)" : "rgba(255,255,255,0.08)"}`,
-        background: active ? "rgba(0,200,255,0.12)" : "rgba(255,255,255,0.02)",
-        color: active ? "var(--nexus-accent)" : "var(--nexus-text)",
-        padding: "11px 14px",
+        position: "relative",
+        border: "1px solid rgba(255,255,255,0.06)",
+        borderBottom: active
+          ? "2px solid var(--nexus-accent)"
+          : "2px solid transparent",
+        background: active
+          ? "linear-gradient(180deg, rgba(0,200,255,0.10), rgba(0,200,255,0.04))"
+          : "rgba(255,255,255,0.02)",
+        color: active ? "var(--nexus-accent)" : "rgba(232,244,255,0.55)",
+        padding: "10px 18px",
         cursor: "pointer",
+        fontFamily: "var(--font-display)",
         fontWeight: 800,
+        fontSize: "12px",
         textTransform: "uppercase",
-        letterSpacing: "1px",
+        letterSpacing: "1.5px",
+        boxShadow: active ? "0 0 16px rgba(0,200,255,0.12)" : "none",
       }}
     >
       {label}
@@ -1742,46 +1723,6 @@ function Field({
         placeholder={placeholder}
         style={fieldStyle}
       />
-    </label>
-  );
-}
-
-function SelectField({
-  label,
-  value,
-  onChange,
-}: {
-  label: string;
-  value: PlayerRole | null;
-  onChange: (value: PlayerRole | null) => void;
-}) {
-  return (
-    <label style={{ display: "grid", gap: "8px" }}>
-      <span
-        style={{
-          fontSize: "11px",
-          fontWeight: 800,
-          letterSpacing: "1px",
-          textTransform: "uppercase",
-          color: "var(--nexus-faint)",
-        }}
-      >
-        {label}
-      </span>
-      <select
-        value={value ?? ""}
-        onChange={(event) =>
-          onChange((event.target.value || null) as PlayerRole | null)
-        }
-        style={fieldStyle}
-      >
-        <option value="">Sin definir</option>
-        {PLAYER_ROLE_OPTIONS.map((option) => (
-          <option key={option.value} value={option.value}>
-            {option.label}
-          </option>
-        ))}
-      </select>
     </label>
   );
 }

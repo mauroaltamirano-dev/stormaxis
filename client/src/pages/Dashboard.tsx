@@ -78,20 +78,6 @@ const MODES = [
 const SLOT_ORDER = [0, 1, 2, 3, 4];
 const DISMISSED_ACTIVE_MATCH_KEY = "nexusgg.dismissedActiveMatchId";
 
-type AdminMatchRow = {
-  id: string;
-  status: string;
-  selectedMap?: string | null;
-  createdAt: string;
-  players: Array<{
-    userId: string | null;
-    isBot?: boolean;
-    botName?: string | null;
-    accepted?: boolean | null;
-    user?: { username?: string };
-  }>;
-};
-
 type LiveMatchRow = {
   id: string;
   status: "VETOING" | "PLAYING" | "VOTING";
@@ -182,15 +168,8 @@ export function Dashboard() {
       isBot?: boolean;
     }>
   >([]);
-  const [adminMatches, setAdminMatches] = useState<AdminMatchRow[]>([]);
   const [liveMatches, setLiveMatches] = useState<LiveMatchRow[]>([]);
   const [liveMatchesOpen, setLiveMatchesOpen] = useState(true);
-  const [adminLoading, setAdminLoading] = useState(false);
-  const [adminActionMatchId, setAdminActionMatchId] = useState<string | null>(
-    null,
-  );
-  const [adminFillingBots, setAdminFillingBots] = useState(false);
-  const [adminError, setAdminError] = useState<string | null>(null);
   const [avatarLoadError, setAvatarLoadError] = useState(false);
   const [matchmakingLayout, setMatchmakingLayout] = useState<"split" | "stack">(
     "split",
@@ -504,43 +483,6 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    if (!user || user.role !== "ADMIN") {
-      setAdminMatches([]);
-      return;
-    }
-
-    let cancelled = false;
-
-    async function loadAdminMatches() {
-      try {
-        setAdminLoading(true);
-        const { data } = await api.get<AdminMatchRow[]>("/admin/matches");
-        if (cancelled) return;
-        setAdminMatches(
-          data.filter((match) =>
-            ["ACCEPTING", "VETOING", "PLAYING", "VOTING", "PENDING"].includes(
-              match.status,
-            ),
-          ),
-        );
-        setAdminError(null);
-      } catch {
-        if (!cancelled) setAdminError("No pude cargar los matches admin.");
-      } finally {
-        if (!cancelled) setAdminLoading(false);
-      }
-    }
-
-    loadAdminMatches();
-    const interval = setInterval(loadAdminMatches, 4000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [user]);
-
-  useEffect(() => {
     setAvatarLoadError(false);
   }, [user?.avatar]);
 
@@ -611,122 +553,6 @@ export function Dashboard() {
         err?.response?.data?.error?.message ?? "No se pudo procesar la acción.",
         "warn",
       );
-    }
-  }
-
-  async function handleAdminCancelMatch(matchId: string) {
-    try {
-      setAdminActionMatchId(matchId);
-      await api.patch(`/admin/matches/${matchId}/cancel`);
-      setAdminMatches((prev) => prev.filter((match) => match.id !== matchId));
-      pushOpsEvent(
-        "Admin canceló match",
-        `Match ${matchId.slice(0, 8)} marcado como CANCELLED.`,
-        "warn",
-      );
-      if (hiddenActiveMatchId === matchId) {
-        window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
-        setDismissedActiveMatchId(null);
-        setHiddenActiveMatchId(null);
-      }
-      if (pendingMatch?.matchId === matchId) {
-        clearPendingMatch();
-      }
-    } catch (err: any) {
-      setAdminError(
-        err.response?.data?.error?.message ?? "No pude cancelar el match.",
-      );
-      pushOpsEvent(
-        "Error admin",
-        err?.response?.data?.error?.message ?? "No se pudo cancelar el match.",
-        "warn",
-      );
-    } finally {
-      setAdminActionMatchId(null);
-    }
-  }
-
-  async function handleAdminDeleteMatch(matchId: string) {
-    try {
-      setAdminActionMatchId(matchId);
-      await api.delete(`/admin/matches/${matchId}`);
-      setAdminMatches((prev) => prev.filter((match) => match.id !== matchId));
-      pushOpsEvent(
-        "Admin borró match",
-        `Match ${matchId.slice(0, 8)} eliminado del sistema.`,
-        "warn",
-      );
-      if (hiddenActiveMatchId === matchId) {
-        window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
-        setDismissedActiveMatchId(null);
-        setHiddenActiveMatchId(null);
-      }
-      if (pendingMatch?.matchId === matchId) {
-        clearPendingMatch();
-      }
-    } catch (err: any) {
-      setAdminError(
-        err.response?.data?.error?.message ?? "No pude borrar el match.",
-      );
-      pushOpsEvent(
-        "Error admin",
-        err?.response?.data?.error?.message ?? "No se pudo borrar el match.",
-        "warn",
-      );
-    } finally {
-      setAdminActionMatchId(null);
-    }
-  }
-
-  async function handleAdminFillBots() {
-    try {
-      setAdminFillingBots(true);
-      setAdminError(null);
-      await api.post("/admin/queue/fill-bots", { targetSize: 10 });
-      pushOpsEvent(
-        "Admin completó cola",
-        "Se agregaron bots para llegar a 10 jugadores.",
-        "neutral",
-      );
-    } catch (err: any) {
-      setAdminError(
-        err.response?.data?.error?.message ??
-          "No pude completar la cola con bots.",
-      );
-      pushOpsEvent(
-        "Error admin",
-        err?.response?.data?.error?.message ??
-          "No se pudo completar la cola con bots.",
-        "warn",
-      );
-    } finally {
-      setAdminFillingBots(false);
-    }
-  }
-
-  async function handleAdminClearQueue() {
-    try {
-      setAdminFillingBots(true);
-      setAdminError(null);
-      await api.post("/admin/queue/clear");
-      setQueuePreview([]);
-      resetMatchmaking();
-      pushOpsEvent(
-        "Admin limpió cola",
-        "Se purgó la cola de matchmaking para reiniciar testing.",
-        "warn",
-      );
-    } catch (err: any) {
-      setAdminError(
-        err.response?.data?.error?.message ?? "No pude limpiar la cola.",
-      );
-      pushOpsEvent(
-        "Error admin",
-        err?.response?.data?.error?.message ?? "No se pudo limpiar la cola.",
-        "warn",
-      );
-    } finally {
-      setAdminFillingBots(false);
     }
   }
 
@@ -957,8 +783,8 @@ export function Dashboard() {
               <StatPanel
                 label="Partidas"
                 value={(user.wins + user.losses).toString()}
-                sub="Temporada actual"
-                tone="#5217dd"
+                sub="Partidas Jugadas"
+                tone="#9417dd"
                 iconSrc="/brand/matches.thumb.webp"
               />
               <StatPanel
@@ -975,14 +801,14 @@ export function Dashboard() {
                   streakType === "win"
                     ? "#F98005"
                     : streakType === "loss"
-                      ? "#fb7185"
+                      ? "#71cffb"
                       : "#94a3b8"
                 }
                 iconSrc={
                   streakType === "win"
-                    ? "/brand/racha.thumb.webp"
+                    ? "/brand/winStreak.thumb.webp"
                     : streakType === "loss"
-                      ? "/brand/racha.thumb.webp"
+                      ? "/brand/lossStreak.thumb.webp"
                       : "/brand/logo.thumb.webp"
                 }
               />
@@ -1851,8 +1677,8 @@ export function Dashboard() {
           <section
             style={{
               ...panelStyle,
-              borderColor: "rgba(248,113,113,0.20)",
-              background: "rgba(127,29,29,0.08)",
+              borderColor: "rgba(125,211,252,0.20)",
+              background: "rgba(8,47,73,0.12)",
             }}
           >
             <div
@@ -1865,124 +1691,21 @@ export function Dashboard() {
               }}
             >
               <PanelTitle
-                eyebrow="Admin · Rescue panel"
-                title="Control rápido de testing"
+                eyebrow="Admin · War room"
+                title="Operación movida al panel /admin"
               />
               <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
                 <button
-                  onClick={handleAdminClearQueue}
-                  disabled={adminFillingBots}
-                  style={amberGhostButtonStyle}
-                >
-                  Limpiar cola
-                </button>
-                <button
-                  onClick={handleAdminFillBots}
-                  disabled={adminFillingBots}
+                  onClick={() => navigate({ to: "/admin" })}
                   style={blueGhostButtonStyle}
                 >
-                  {adminFillingBots
-                    ? "Completando…"
-                    : "Completar cola a 10 con bots"}
+                  Abrir panel admin
                 </button>
               </div>
             </div>
-
-            {adminError && <Notice tone="danger" text={adminError} />}
-
-            {adminMatches.length === 0 ? (
-              <Notice
-                text={
-                  adminLoading
-                    ? "Actualizando matches…"
-                    : "No hay matches activos o colgados ahora mismo."
-                }
-              />
-            ) : (
-              <div style={{ display: "grid", gap: "0.7rem" }}>
-                {adminMatches.map((match) => {
-                  const humanPlayers = match.players.filter(
-                    (player) => !player.isBot,
-                  );
-                  const accepted = humanPlayers.filter(
-                    (player) => player.accepted === true,
-                  ).length;
-                  return (
-                    <div
-                      key={match.id}
-                      style={{
-                        ...adminMatchStyle,
-                        gridTemplateColumns: isSm
-                          ? "1fr"
-                          : isMd
-                            ? "minmax(0, 1fr) auto"
-                            : adminMatchStyle.gridTemplateColumns,
-                      }}
-                    >
-                      <div style={{ minWidth: 0 }}>
-                        <div style={{ color: "#fff", fontWeight: 900 }}>
-                          {match.status} · {match.id.slice(0, 8)}
-                        </div>
-                        <div
-                          style={{
-                            color: "rgba(232,244,255,0.42)",
-                            fontSize: "0.82rem",
-                            whiteSpace: "nowrap",
-                            overflow: "hidden",
-                            textOverflow: "ellipsis",
-                          }}
-                        >
-                          {match.players
-                            .map(
-                              (player) =>
-                                player.user?.username ??
-                                player.botName ??
-                                player.userId?.slice(0, 6) ??
-                                "Bot",
-                            )
-                            .join(" · ")}
-                        </div>
-                      </div>
-                      <div
-                        style={{
-                          color: "rgba(232,244,255,0.62)",
-                          fontSize: "0.82rem",
-                          textAlign: "right",
-                        }}
-                      >
-                        {match.status === "ACCEPTING"
-                          ? `Aceptaron ${accepted}/${humanPlayers.length}`
-                          : match.selectedMap
-                            ? `Mapa: ${match.selectedMap}`
-                            : "Sin mapa"}
-                      </div>
-                      <div
-                        style={{
-                          display: "flex",
-                          gap: "0.5rem",
-                          justifyContent: "flex-end",
-                        }}
-                      >
-                        <button
-                          onClick={() => handleAdminCancelMatch(match.id)}
-                          disabled={adminActionMatchId === match.id}
-                          style={amberGhostButtonStyle}
-                        >
-                          Cancelar
-                        </button>
-                        <button
-                          onClick={() => handleAdminDeleteMatch(match.id)}
-                          disabled={adminActionMatchId === match.id}
-                          style={redGhostButtonStyle}
-                        >
-                          Borrar
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
+            <Notice
+              text="La cola, los matches, los usuarios, el ELO y los client errors ahora se operan desde /admin. El dashboard vuelve a quedar enfocado en jugar."
+            />
           </section>
         )}
       </section>
@@ -2704,32 +2427,4 @@ const blueGhostButtonStyle: React.CSSProperties = {
   padding: "0.65rem 0.9rem",
   fontWeight: 900,
   cursor: "pointer",
-};
-
-const amberGhostButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(251,191,36,0.35)",
-  background: "rgba(251,191,36,0.10)",
-  color: "#fde68a",
-  padding: "0.6rem 0.8rem",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const redGhostButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(248,113,113,0.35)",
-  background: "rgba(248,113,113,0.10)",
-  color: "#fecaca",
-  padding: "0.6rem 0.8rem",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const adminMatchStyle: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(0, 1fr) auto auto",
-  alignItems: "center",
-  gap: "0.9rem",
-  border: "1px solid rgba(232,244,255,0.07)",
-  background: "rgba(15,23,42,0.72)",
-  padding: "0.85rem",
 };

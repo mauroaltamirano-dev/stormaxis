@@ -158,7 +158,7 @@ export async function castVote(matchId: string, userId: string, winner: 1 | 2) {
 
   const majority = Math.floor(totalPlayers / 2) + 1
 
-  const winnerTeam =
+  let winnerTeam: 1 | 2 | null =
     voteCounts.team1Votes >= majority
       ? 1
       : voteCounts.team2Votes >= majority
@@ -166,6 +166,10 @@ export async function castVote(matchId: string, userId: string, winner: 1 | 2) {
         : voteCounts.total === totalPlayers && voteCounts.team1Votes !== voteCounts.team2Votes
           ? (voteCounts.team1Votes > voteCounts.team2Votes ? 1 : 2)
           : null
+
+  if (!winnerTeam && voteCounts.total === totalPlayers) {
+    winnerTeam = await resolveWinnerOnTimeout(match.players, voteCounts)
+  }
 
   if (winnerTeam) {
     await openMvpVoting(matchId, winnerTeam, totalPlayers, 'votes')
@@ -234,6 +238,13 @@ export async function castMvpVote(matchId: string, userId: string, nomineeUserId
   const majorityWinner = mvpVoteCounts.find((entry) => entry.votes >= majority)
   if (majorityWinner) {
     await finalizeMatchWithMvp(matchId, majorityWinner.nomineeUserId, 'votes')
+    return
+  }
+
+  const totalVotesCast = mvpVoteCounts.reduce((sum, entry) => sum + entry.votes, 0)
+  if (totalVotesCast >= totalPlayers) {
+    const resolvedMvpUserId = await resolveMvpOnTimeout(matchId, match.players, match.winner as 1 | 2)
+    await finalizeMatchWithMvp(matchId, resolvedMvpUserId, 'votes')
   }
 }
 

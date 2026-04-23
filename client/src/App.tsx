@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { RouterProvider } from '@tanstack/react-router'
 import { router } from './router'
 import { api } from './lib/api'
@@ -6,10 +6,12 @@ import { useAuthStore } from './stores/auth.store'
 
 export function App() {
   const { setAuth, setAccessToken, logout, isLoading, accessToken, hasHydrated } = useAuthStore()
+  const restoreAttemptedRef = useRef(false)
 
   // Silent session restore on mount
   useEffect(() => {
-    if (!hasHydrated) return
+    if (!hasHydrated || restoreAttemptedRef.current) return
+    restoreAttemptedRef.current = true
 
     const restoreFromRefresh = () =>
       api.post<{ accessToken: string }>('/auth/refresh')

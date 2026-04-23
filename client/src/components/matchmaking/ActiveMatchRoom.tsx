@@ -182,13 +182,19 @@ export function ActiveMatchRoom({
     const left = toDisplayTeam(
       match.players.filter((player) => player.team === 1),
       1,
+      match.status,
+      match.winner ?? null,
+      match.mvpUserId ?? null,
     );
     const right = toDisplayTeam(
       match.players.filter((player) => player.team === 2),
       2,
+      match.status,
+      match.winner ?? null,
+      match.mvpUserId ?? null,
     );
     return { left, right };
-  }, [match.players]);
+  }, [match.players, match.status, match.winner, match.mvpUserId]);
 
   const currentPlayer = match.players.find(
     (player) => player.userId === currentUserId,
@@ -231,6 +237,10 @@ export function ActiveMatchRoom({
     ? Math.max(0, Math.round((mvpVotingExpiresAt - now) / 1000))
     : null;
   const selectedMap = match.selectedMap ?? getSelectedMapFromVeto(match);
+  const mvpPlayer =
+    match.mvpUserId != null
+      ? match.players.find((player) => player.userId === match.mvpUserId) ?? null
+      : null;
   const isCaptainTurn = Boolean(
     isParticipant &&
     match.status === "VETOING" &&
@@ -252,6 +262,9 @@ export function ActiveMatchRoom({
   const isTablet = viewportWidth < 1320;
   const isMobile = viewportWidth < 940;
   const isNarrow = viewportWidth < 720;
+  const showDiscordVoicePanel =
+    Boolean(match.discordVoice?.enabled) &&
+    ["PLAYING", "VOTING"].includes(match.status);
   const mapCards = useMemo(() => {
     return HOTS_MAPS.map((map) => {
       const veto = match.vetoes.find(
@@ -280,6 +293,48 @@ export function ActiveMatchRoom({
 
   const centerColumn = (
     <div style={{ display: "grid", gap: "1rem" }}>
+      {showDiscordVoicePanel && (
+        <StageCard
+          title="Discord por equipo"
+          subtitle="El acceso al voice queda visible mientras la sala siga activa"
+          tone="#5865F2"
+        >
+          <StageCallout
+            tone="#5865F2"
+            label="Comando de voz"
+            title={
+              match.discordVoice?.status === "ready"
+                ? `Voice listo para Team ${match.discordVoice.team}`
+                : match.discordVoice?.status === "missing_link"
+                  ? "Vinculá tu Discord para entrar a voz"
+                  : match.discordVoice?.status === "spectator"
+                    ? "Modo espectador: links privados ocultos"
+                    : "Voice en preparación"
+            }
+            description={
+              match.discordVoice?.status === "ready"
+                ? "El link se mantiene visible para que nadie se quede afuera si todavía no abrió Discord."
+                : match.discordVoice?.status === "missing_link"
+                  ? "Podés seguir en la sala sin voice, pero no vas a recibir enlace privado hasta vincular tu cuenta."
+                  : "El sistema solo expone enlaces privados al jugador participante de ese equipo."
+            }
+            rightSlot={
+              match.discordVoice?.status === "ready" &&
+              match.discordVoice.teamInviteUrl ? (
+                <a
+                  href={match.discordVoice.teamInviteUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  style={primaryButtonStyle}
+                >
+                  Entrar al voice
+                </a>
+              ) : null
+            }
+          />
+        </StageCard>
+      )}
+
       {match.status === "VETOING" && (
         <StageCard
           title="Veto de mapas"
@@ -359,64 +414,29 @@ export function ActiveMatchRoom({
 
           return (
             <StageCard
-              title={allConnected ? "Todos conectados" : "Mapa confirmado"}
+              title={allConnected ? "Partida en curso" : "Mapa confirmado"}
               subtitle={
                 allConnected
-                  ? "La partida terminó. Cerrá el cliente y finalizá aquí."
-                  : "Conectate a la lobby en Heroes of the Storm"
+                  ? "Cuando termine, los dos capitanes deben marcar Partida terminada."
+                  : "Entrá al lobby y marcá que ya empezaste la partida"
               }
               tone={allConnected ? "#4ade80" : "#38bdf8"}
             >
               <StageCallout
                 tone={allConnected ? "#4ade80" : "#38bdf8"}
-                label={allConnected ? "Fase de cierre" : "Briefing operativo"}
+                label={allConnected ? "Fase competitiva" : "Checklist pre-partida"}
                 title={
                   allConnected
-                    ? "Todos los jugadores reportaron presencia"
-                    : "Entrá a la lobby y marcá tu conexión"
+                    ? "La partida ya está corriendo"
+                    : "Todo listo para arrancar"
                 }
                 description={
                   allConnected
-                    ? "La partida ya puede cerrarse desde acá. Hace falta la confirmación de ambos capitanes para consolidar el resultado."
-                    : "Usá este panel como checklist rápido: mapa definido, jugadores entrando, capitanes monitoreando progreso."
+                    ? "Cuando la partida termine, ambos capitanes deben confirmar 'Partida terminada' para abrir la votación de ganador y MVP."
+                    : "Cada jugador debe marcar Comenzar partida. Cuando todos entren, la sala queda lista para jugar sin perder el acceso al panel de Discord."
                 }
               />
               <MapSelectedCard mapName={selectedMap} compact={isNarrow} />
-              {match.discordVoice?.enabled && (
-                <StageCallout
-                  tone="#5865F2"
-                  label="Discord por equipo"
-                  title={
-                    match.discordVoice.status === "ready"
-                      ? `Voice listo para Team ${match.discordVoice.team}`
-                      : match.discordVoice.status === "missing_link"
-                        ? "Vinculá tu Discord para entrar a voz"
-                        : match.discordVoice.status === "spectator"
-                          ? "Modo espectador: links privados ocultos"
-                          : "Voice en preparación"
-                  }
-                  description={
-                    match.discordVoice.status === "ready"
-                      ? "Entrá al canal privado de tu team para coordinar la partida."
-                      : match.discordVoice.status === "missing_link"
-                        ? "Podés seguir jugando sin voice, pero no vas a recibir enlace privado."
-                        : "El sistema solo expone enlace al jugador participante de ese equipo."
-                  }
-                  rightSlot={
-                    match.discordVoice.status === "ready" &&
-                    match.discordVoice.teamInviteUrl ? (
-                      <a
-                        href={match.discordVoice.teamInviteUrl}
-                        target="_blank"
-                        rel="noreferrer"
-                        style={primaryButtonStyle}
-                      >
-                        Entrar al voice
-                      </a>
-                    ) : null
-                  }
-                />
-              )}
               <ProgressRail
                 label="Operatividad de lobby"
                 value={connectedCount}
@@ -430,7 +450,7 @@ export function ActiveMatchRoom({
                   disabled={isReady}
                   style={primaryButtonStyle}
                 >
-                  {isReady ? "Esperando al resto…" : "Conectarse a la partida"}
+                  {isReady ? "Esperando al resto…" : "Comenzar partida"}
                 </button>
               )}
 
@@ -468,7 +488,7 @@ export function ActiveMatchRoom({
                       disabled={!isCaptain || alreadyRequestedFinish}
                       style={finishButtonStyle(!isCaptain || alreadyRequestedFinish)}
                     >
-                      ✓ Finalizar partida
+                      ✓ Partida terminada
                     </button>
                   )}
                   <div style={{ color: "#94a3b8", fontSize: "0.86rem" }}>
@@ -710,27 +730,47 @@ export function ActiveMatchRoom({
           }
           tone={match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent}
         >
-          <StageCallout
-            tone={match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent}
-            label="Resultado consolidado"
-            title={`Victoria ${match.winner === 1 ? teams.left.name : teams.right.name}`}
-            description="El resultado quedó cerrado y las variaciones de MMR ya pueden revisarse jugador por jugador."
+          <WinnerSummaryHero
+            winnerName={match.winner === 1 ? teams.left.name : teams.right.name}
+            mapName={selectedMap}
+            accent={match.winner === 1 ? TEAM_COLORS[1].accent : TEAM_COLORS[2].accent}
+            compact={isNarrow}
           />
-          <div
-            style={winnerBannerStyle(
-              match.winner === 1
-                ? TEAM_COLORS[1].accent
-                : TEAM_COLORS[2].accent,
-            )}
-          >
-            Ganó {match.winner === 1 ? teams.left.name : teams.right.name}
-          </div>
-          {match.mvpUserId && (
-            <div style={winnerBannerStyle("#facc15")}>
-              MVP · {getPlayerNameById(match, match.mvpUserId)}
-            </div>
+          {mvpPlayer && (
+            <StageCallout
+              tone="#facc15"
+              label="MVP oficial"
+              title={mvpPlayer.user.username}
+              description="El MVP ya quedó consolidado junto al resultado. Las variaciones de MMR ahora viven dentro de la ficha de cada jugador."
+              rightSlot={
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "0.65rem",
+                    padding: "0.55rem 0.65rem",
+                    border: "1px solid rgba(250,204,21,0.32)",
+                    background: "rgba(250,204,21,0.12)",
+                  }}
+                >
+                  <AvatarCell
+                    username={mvpPlayer.user.username}
+                    avatar={mvpPlayer.user.avatar}
+                    size={42}
+                  />
+                  <div style={{ display: "grid", gap: "0.12rem" }}>
+                    <strong style={{ color: "#fef08a" }}>{mvpPlayer.user.username}</strong>
+                    <small style={{ color: "rgba(254,240,138,0.8)" }}>
+                      Team {mvpPlayer.team} · {mvpPlayer.user.rank}
+                    </small>
+                  </div>
+                </div>
+              }
+            />
           )}
-          <ResultList match={match} />
+          <button type="button" onClick={onBack} style={playAgainButtonStyle}>
+            Volver a jugar
+          </button>
         </StageCard>
       )}
 
@@ -815,9 +855,11 @@ export function ActiveMatchRoom({
                   : "Cancelar match (test)"}
               </button>
             )}
-            <button onClick={onBack} style={ghostButtonStyle}>
-              Volver
-            </button>
+            {match.status !== "COMPLETED" && (
+              <button onClick={onBack} style={ghostButtonStyle}>
+                Volver
+              </button>
+            )}
           </div>
         </div>
 
@@ -1024,35 +1066,6 @@ function OpsPill({
   );
 }
 
-function ResultList({ match }: { match: MatchState }) {
-  return (
-    <div style={{ display: "grid", gap: "0.5rem" }}>
-      {match.players.map((player) => (
-        <div key={player.userId} style={resultRowStyle}>
-          <div
-            style={{ display: "flex", alignItems: "center", gap: "0.65rem" }}
-          >
-            <AvatarCell
-              username={player.user.username}
-              avatar={player.user.avatar}
-              size={30}
-            />
-            <span>{player.user.username}</span>
-          </div>
-          <strong
-            style={{
-              color: (player.mmrDelta ?? 0) >= 0 ? "#4ade80" : "#f87171",
-            }}
-          >
-            {(player.mmrDelta ?? 0) >= 0 ? "+" : ""}
-            {player.mmrDelta ?? 0} MMR
-          </strong>
-        </div>
-      ))}
-    </div>
-  );
-}
-
 function TeamColumn({
   team,
   teamNumber,
@@ -1219,6 +1232,53 @@ function TeamColumn({
                         {m.won ? "W" : "L"}
                       </div>
                     ))}
+                  </div>
+                )}
+
+                {team.status === "COMPLETED" && (
+                  <div
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "0.35rem",
+                      flexWrap: "wrap",
+                      marginTop: "0.18rem",
+                    }}
+                  >
+                    {typeof player.mmrDelta === "number" && (
+                      <div
+                        style={{
+                          padding: "0.22rem 0.42rem",
+                          border: `1px solid ${
+                            player.mmrDelta >= 0
+                              ? "rgba(74,222,128,0.45)"
+                              : "rgba(248,113,113,0.42)"
+                          }`,
+                          background:
+                            player.mmrDelta >= 0
+                              ? "rgba(74,222,128,0.12)"
+                              : "rgba(248,113,113,0.12)",
+                          color: player.mmrDelta >= 0 ? "#4ade80" : "#f87171",
+                          fontSize: "0.62rem",
+                          fontWeight: 900,
+                          letterSpacing: "0.1em",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        {player.mmrDelta >= 0 ? "+" : ""}
+                        {player.mmrDelta} MMR
+                      </div>
+                    )}
+                    {player.isWinner && (
+                      <div style={playerResultTagStyle(colors.accent, `${colors.accent}16`)}>
+                        Winner
+                      </div>
+                    )}
+                    {player.isMvp && (
+                      <div style={playerResultTagStyle("#facc15", "rgba(250,204,21,0.12)")}>
+                        MVP
+                      </div>
+                    )}
                   </div>
                 )}
               </div>
@@ -1776,7 +1836,13 @@ function StatusTile({
   );
 }
 
-function toDisplayTeam(players: Player[], teamNumber: 1 | 2) {
+function toDisplayTeam(
+  players: Player[],
+  teamNumber: 1 | 2,
+  status: MatchStatus,
+  winner: 1 | 2 | null,
+  mvpUserId: string | null,
+) {
   const realPlayers = [...players].sort(
     (a, b) => Number(b.isCaptain) - Number(a.isCaptain),
   );
@@ -1796,6 +1862,9 @@ function toDisplayTeam(players: Player[], teamNumber: 1 | 2) {
       wins: player.user.wins ?? 0,
       losses: player.user.losses ?? 0,
       recentMatches: player.user.recentMatches ?? [],
+      mmrDelta: player.mmrDelta ?? null,
+      isWinner: winner != null && player.team === winner,
+      isMvp: player.userId != null && player.userId === mvpUserId,
     })),
   ];
 
@@ -1811,6 +1880,9 @@ function toDisplayTeam(players: Player[], teamNumber: 1 | 2) {
       wins: 0,
       losses: 0,
       recentMatches: [],
+      mmrDelta: null,
+      isWinner: false,
+      isMvp: false,
     });
   }
 
@@ -1825,6 +1897,7 @@ function toDisplayTeam(players: Player[], teamNumber: 1 | 2) {
         )
       : 0,
     players: padded,
+    status,
   };
 }
 
@@ -2181,6 +2254,130 @@ function MapSelectedCard({
   );
 }
 
+function WinnerSummaryHero({
+  winnerName,
+  mapName,
+  accent,
+  compact = false,
+}: {
+  winnerName: string;
+  mapName: string;
+  accent: string;
+  compact?: boolean;
+}) {
+  const [imgFailed, setImgFailed] = useState(false);
+  const imageUrl = getMapImageUrl(mapName);
+  const backdrop =
+    MAP_BACKDROPS[mapName] ??
+    "linear-gradient(135deg, rgba(0,200,255,0.25), rgba(15,23,42,0.95))";
+
+  return (
+    <div
+      style={{
+        position: "relative",
+        minHeight: compact ? "200px" : "236px",
+        overflow: "hidden",
+        border: `1px solid ${accent}44`,
+        background: "#0b1220",
+        display: "flex",
+        alignItems: "flex-end",
+      }}
+    >
+      {imageUrl && !imgFailed && (
+        <img
+          src={imageUrl}
+          alt=""
+          aria-hidden
+          onError={() => setImgFailed(true)}
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+            filter: "brightness(0.52) saturate(1.02)",
+          }}
+        />
+      )}
+      <div
+        style={{
+          position: "absolute",
+          inset: 0,
+          background: imgFailed || !imageUrl
+            ? backdrop
+            : `linear-gradient(180deg, rgba(2,6,23,0.14) 0%, rgba(2,6,23,0.44) 42%, rgba(2,6,23,0.92) 100%)`,
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          inset: "auto auto -40px -20px",
+          width: "220px",
+          height: "220px",
+          background: `radial-gradient(circle, ${accent}30 0%, transparent 70%)`,
+          filter: "blur(10px)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          position: "relative",
+          zIndex: 1,
+          width: "100%",
+          padding: compact ? "1rem" : "1.15rem 1.2rem",
+          display: "grid",
+          gap: "0.35rem",
+        }}
+      >
+        <div
+          style={{
+            color: accent,
+            fontSize: "0.68rem",
+            fontWeight: 900,
+            letterSpacing: "0.18em",
+            textTransform: "uppercase",
+          }}
+        >
+          Resultado consolidado
+        </div>
+        <div
+          style={{
+            color: "#f8fafc",
+            fontFamily: "var(--font-display)",
+            fontSize: compact ? "1.55rem" : "1.9rem",
+            lineHeight: 1.05,
+            letterSpacing: "0.05em",
+            textTransform: "uppercase",
+            textShadow: "0 2px 18px rgba(0,0,0,0.72)",
+          }}
+        >
+          Ganó {winnerName}
+        </div>
+        <div
+          style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: "0.45rem",
+            width: "fit-content",
+            padding: "0.36rem 0.55rem",
+            border: "1px solid rgba(226,232,240,0.18)",
+            background: "rgba(2,6,23,0.42)",
+            color: "#dbeafe",
+            fontSize: "0.74rem",
+            fontWeight: 800,
+            letterSpacing: "0.08em",
+            textTransform: "uppercase",
+            backdropFilter: "blur(6px)",
+          }}
+        >
+          <span style={{ color: "rgba(191,219,254,0.76)" }}>Mapa</span>
+          <span>{mapName}</span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function MapVetoCard({
   mapName,
   active,
@@ -2410,23 +2607,27 @@ const ghostButtonStyle: CSSProperties = {
   fontSize: "0.72rem",
 };
 
+const playAgainButtonStyle: CSSProperties = {
+  border: "1px solid rgba(0,200,255,0.28)",
+  padding: "0.95rem 1rem",
+  background:
+    "linear-gradient(90deg, rgba(8,20,40,0.96), rgba(11,33,57,0.96) 45%, rgba(0,200,255,0.14))",
+  color: "#e6f6ff",
+  fontFamily: "var(--font-display)",
+  fontSize: "0.96rem",
+  fontWeight: 900,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+  cursor: "pointer",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.04), 0 12px 24px rgba(0,0,0,0.22)",
+};
+
 const eyebrowStyle: CSSProperties = {
   color: "#94a3b8",
   textTransform: "uppercase",
   letterSpacing: "0.18em",
   fontSize: "0.72rem",
   fontWeight: 800,
-};
-
-const resultRowStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "1rem",
-  padding: "0.8rem 0.95rem",
-  borderRadius: "0",
-  background: "rgba(15,23,42,0.75)",
-  border: "1px solid rgba(148,163,184,0.14)",
 };
 
 const infoBannerStyle: CSSProperties = {
@@ -2564,6 +2765,19 @@ function timerBadgeStyle(urgent: boolean): CSSProperties {
     fontFamily: "var(--font-display)",
     letterSpacing: "0.14em",
     fontWeight: 700,
+  };
+}
+
+function playerResultTagStyle(color: string, background: string): CSSProperties {
+  return {
+    padding: "0.22rem 0.42rem",
+    border: `1px solid ${color}66`,
+    background,
+    color,
+    fontSize: "0.62rem",
+    fontWeight: 900,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
   };
 }
 

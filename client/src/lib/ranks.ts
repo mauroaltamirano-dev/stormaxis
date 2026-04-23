@@ -57,3 +57,26 @@ export function getRankMetaFromMmr(rawMmr: number): RankMeta {
 
   return getRankMeta(band.level);
 }
+
+export function getLevelMeta(rawMmr: number): {
+  level: number;
+  progressPct: number;
+  nextLevelAt: number | null;
+} {
+  const mmr = Math.max(0, rawMmr);
+  const band =
+    LEVEL_BANDS.find((c) =>
+      c.max == null ? mmr >= c.min : mmr >= c.min && mmr <= c.max,
+    ) ?? LEVEL_BANDS[0];
+
+  if (band.max == null) {
+    return { level: band.level, progressPct: 100, nextLevelAt: null };
+  }
+
+  const span = band.max - band.min + 1;
+  const progressPct = Math.max(
+    0,
+    Math.min(100, Math.floor(((mmr - band.min + 1) / span) * 100)),
+  );
+  return { level: band.level, progressPct, nextLevelAt: band.max + 1 };
+}

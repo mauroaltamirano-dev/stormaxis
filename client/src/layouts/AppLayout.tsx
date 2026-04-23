@@ -29,26 +29,14 @@ import { getSocket } from "../lib/socket";
 import { useSocketStore } from "../stores/socket.store";
 import { useMatchmakingStore } from "../stores/matchmaking.store";
 import { getRoleIconSources, getRoleMeta } from "../lib/roles";
-import { getRankMeta } from "../lib/ranks";
+import { getLevelMeta, getRankMeta } from "../lib/ranks";
+import { RankProgressBar } from "../components/RankProgressBar";
 import {
   getMatchLifecycleMeta,
   getQueueLifecycleMeta,
   type MatchLifecycleStatus,
 } from "../lib/competitiveStatus";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
-
-const LEVEL_BANDS = [
-  { level: 1, min: 0, max: 199 },
-  { level: 2, min: 200, max: 399 },
-  { level: 3, min: 400, max: 599 },
-  { level: 4, min: 600, max: 799 },
-  { level: 5, min: 800, max: 999 },
-  { level: 6, min: 1000, max: 1199 },
-  { level: 7, min: 1200, max: 1499 },
-  { level: 8, min: 1500, max: 1699 },
-  { level: 9, min: 1700, max: 1899 },
-  { level: 10, min: 1900, max: null as number | null },
-] as const;
 
 type SearchResult = {
   id: string;
@@ -98,31 +86,6 @@ const accountNav: NavItem[] = [
   { label: "Mi perfil", icon: User, to: "/profile" },
   { label: "Configuración", icon: Settings, disabled: true, badge: "soon" },
 ];
-
-function getLevelMeta(rawMmr: number) {
-  const mmr = Math.max(0, rawMmr);
-  const band =
-    LEVEL_BANDS.find((candidate) => {
-      if (candidate.max == null) return mmr >= candidate.min;
-      return mmr >= candidate.min && mmr <= candidate.max;
-    }) ?? LEVEL_BANDS[0];
-
-  if (band.max == null) {
-    return {
-      level: band.level,
-      progressPct: 100,
-      nextLevelAt: null as number | null,
-    };
-  }
-
-  const span = band.max - band.min + 1;
-  const progressPct = Math.max(
-    0,
-    Math.min(100, Math.floor(((mmr - band.min + 1) / span) * 100)),
-  );
-
-  return { level: band.level, progressPct, nextLevelAt: band.max + 1 };
-}
 
 function formatMatchDate(value: string) {
   return new Date(value).toLocaleDateString("es-AR", {
@@ -196,6 +159,13 @@ export function AppLayout() {
   } | null>(null);
   const [adminMmrBusy, setAdminMmrBusy] = useState<number | null>(null);
   const [adminMmrError, setAdminMmrError] = useState<string | null>(null);
+  const primaryNavItems = useMemo(
+    () =>
+      user?.role === "ADMIN"
+        ? [...primaryNav, { label: "Admin", icon: Shield, to: "/admin" }]
+        : primaryNav,
+    [user?.role],
+  );
 
   const levelMeta = useMemo(() => getLevelMeta(user?.mmr ?? 0), [user?.mmr]);
   const level = levelMeta.level;
@@ -549,7 +519,7 @@ export function AppLayout() {
         </div>
 
         <RailSection eyebrow="Matchmaking">
-          {primaryNav.map((item) => (
+          {primaryNavItems.map((item) => (
             <RailItem
               key={item.label}
               item={item}
@@ -780,23 +750,17 @@ export function AppLayout() {
             </div>
           </button>
 
-          <div style={styles.progressHeader}>
-            <span>Progreso al próximo rango</span>
-            <strong style={{ color: rankColor }}>
-              {levelMeta.nextLevelAt == null
-                ? "Rango máximo"
-                : `+${pointsToNextLevel}`}
-            </strong>
-          </div>
-          <div style={styles.progressTrack}>
-            <div
-              style={{
-                ...styles.progressFill,
-                width: `${levelMeta.progressPct}%`,
-                background: `linear-gradient(90deg, ${rankColor}, ${nextRankColor})`,
-              }}
+          <div style={{ marginTop: "18px" }}>
+            <RankProgressBar
+              progressPct={levelMeta.progressPct}
+              pointsToNextLevel={
+                levelMeta.nextLevelAt == null
+                  ? null
+                  : pointsToNextLevel
+              }
+              rankColor={rankColor}
+              nextRankColor={nextRankColor}
             />
-            <div style={styles.progressGrid} />
           </div>
 
           <div style={styles.statsGrid}>
@@ -1650,32 +1614,6 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     letterSpacing: "0.9px",
     textTransform: "uppercase",
-  },
-  progressHeader: {
-    marginTop: "18px",
-    display: "flex",
-    justifyContent: "space-between",
-    color: "rgba(232,244,255,0.42)",
-    fontSize: "11px",
-    fontWeight: 900,
-    letterSpacing: "1px",
-    textTransform: "uppercase",
-  },
-  progressTrack: {
-    position: "relative",
-    height: "10px",
-    marginTop: "8px",
-    overflow: "hidden",
-    border: "1px solid rgba(232,244,255,0.07)",
-    background: "rgba(2,6,14,0.8)",
-  },
-  progressFill: { position: "absolute", inset: "0 auto 0 0" },
-  progressGrid: {
-    position: "absolute",
-    inset: 0,
-    backgroundImage:
-      "linear-gradient(90deg, rgba(2,6,14,0.35) 1px, transparent 1px)",
-    backgroundSize: "14px 100%",
   },
   statsGrid: {
     marginTop: "14px",
