@@ -4,6 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useForm, type FieldPath } from "react-hook-form";
 import { z } from "zod/v4";
 import { api } from "../lib/api";
+import { buildApiUrl } from "../lib/backend";
 import { useAuthStore } from "../stores/auth.store";
 import { ChevronRight } from "lucide-react";
 import { requiresCompetitiveOnboarding } from "../lib/onboarding";
@@ -340,7 +341,7 @@ export function Register() {
 
           {/* OAuth */}
           <a
-            href="/api/auth/discord"
+            href={buildApiUrl("/api/auth/discord")}
             style={{
               textDecoration: "none",
               display: "block",

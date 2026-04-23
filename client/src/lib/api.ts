@@ -1,8 +1,9 @@
 import axios from 'axios'
 import { useAuthStore } from '../stores/auth.store'
+import { API_BASE_URL } from './backend'
 
 export const api = axios.create({
-  baseURL: '/api',
+  baseURL: API_BASE_URL,
   withCredentials: true, // for refresh token cookie
 })
 

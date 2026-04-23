@@ -12,6 +12,7 @@ import {
   Users,
 } from "lucide-react";
 import { api } from "../lib/api";
+import { buildApiUrl } from "../lib/backend";
 import { RankBadge } from "../components/RankBadge";
 import { useAuthStore } from "../stores/auth.store";
 import { getRoleMeta } from "../lib/roles";
@@ -428,7 +429,7 @@ export function Profile() {
 
   function handleLinkDiscord() {
     setAccountMessage(null);
-    window.location.href = "/api/auth/link/discord";
+    window.location.href = buildApiUrl("/api/auth/link/discord");
   }
 
   async function handleUnlink(provider: LinkedAccountProvider) {

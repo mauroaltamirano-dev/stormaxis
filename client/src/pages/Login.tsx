@@ -4,6 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import { useForm, type FieldPath } from "react-hook-form";
 import { z } from "zod/v4";
 import { api } from "../lib/api";
+import { buildApiUrl } from "../lib/backend";
 import { useAuthStore } from "../stores/auth.store";
 import { ChevronRight } from "lucide-react";
 import { requiresCompetitiveOnboarding } from "../lib/onboarding";
@@ -300,7 +301,7 @@ export function Login() {
               marginBottom: "2rem",
             }}
           >
-            <a href="/api/auth/discord" style={{ textDecoration: "none" }}>
+            <a href={buildApiUrl("/api/auth/discord")} style={{ textDecoration: "none" }}>
               <button style={oauthBtn("#5865F2")}>
                 <svg
                   width="18"
@@ -313,7 +314,7 @@ export function Login() {
                 Continuar con Discord
               </button>
             </a>
-            <a href="/api/auth/google" style={{ textDecoration: "none" }}>
+            <a href={buildApiUrl("/api/auth/google")} style={{ textDecoration: "none" }}>
               <button style={oauthBtn("#1a1a2e")}>
                 <svg width="18" height="18" viewBox="0 0 48 48">
                   <path
