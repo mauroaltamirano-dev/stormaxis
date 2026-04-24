@@ -1,4 +1,4 @@
-import type { ChangeEvent, CSSProperties, FormEvent, ReactNode } from "react";
+import type { ChangeEvent, CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { HOTS_MAPS, MAP_ID_BY_NAME, MAP_NAME_BY_ID } from "@nexusgg/shared";
 import { RankBadge } from "../RankBadge";
@@ -88,12 +88,18 @@ type ReplayResolutionStatus =
 
 type ReplayUpload = {
   id: string;
+  matchId?: string;
+  uploadedById?: string | null;
   status: "UPLOADED" | "PARSED" | "FAILED" | string;
   originalName: string;
   fileSize: number;
+  sha256?: string;
   parsedMap: string | null;
   parsedGameMode: string | null;
+  parsedRegion?: number | null;
+  parsedBuild?: number | null;
   parsedDuration: number | null;
+  parsedGameDate?: string | Date | null;
   parsedWinnerTeam: 1 | 2 | null;
   parserStatus: string | null;
   parseError: string | null;
@@ -113,6 +119,15 @@ type ReplayUpload = {
       existingWinner?: 1 | 2 | null;
       eligibleForAutoWinner?: boolean;
       decidedAt?: string;
+    };
+    match?: {
+      map?: string | null;
+      gameMode?: string | null;
+      region?: number | null;
+      build?: number | null;
+      duration?: number | null;
+      gameDate?: string | null;
+      winnerTeam?: 1 | 2 | null;
     };
     players?: Array<{
       name: string;
@@ -134,25 +149,10 @@ type ReplayUpload = {
   createdAt: string;
 };
 
-type ChatChannel = "GLOBAL" | "TEAM";
-
-type ChatMessage = {
-  id: string;
-  userId: string;
-  username: string;
-  avatar: string | null;
-  content: string;
-  channel: ChatChannel;
-  team: 1 | 2 | null;
-  timestamp: string;
-};
-
 type Props = {
   currentUserId: string;
   currentUserRole?: string;
   match: MatchState;
-  chatMessages: ChatMessage[];
-  onSendMessage: (content: string, channel: ChatChannel) => void;
   onBanMap: (mapId: string) => void;
   onReady: () => void;
   onFinishMatch: () => void;
@@ -220,8 +220,6 @@ export function ActiveMatchRoom({
   currentUserId,
   currentUserRole,
   match,
-  chatMessages,
-  onSendMessage,
   onBanMap,
   onReady,
   onFinishMatch,
@@ -232,9 +230,6 @@ export function ActiveMatchRoom({
   onBack,
 }: Props) {
   const [now, setNow] = useState(Date.now());
-  const [chatInput, setChatInput] = useState("");
-  const [activeChatChannel, setActiveChatChannel] =
-    useState<ChatChannel>("GLOBAL");
   const [replayUploadState, setReplayUploadState] = useState<{
     status: "idle" | "uploading" | "success" | "error";
     message: string | null;
@@ -326,31 +321,17 @@ export function ActiveMatchRoom({
     currentPlayer.userId === vetoTurn?.captainId,
   );
   const cancelState = match.runtime?.cancel;
-  const canRequestCancel =
+  const canRequestCancel = Boolean(
     isParticipant &&
     currentPlayer?.isCaptain &&
-    ["VETOING", "PLAYING", "VOTING"].includes(match.status);
+    ["VETOING", "PLAYING", "VOTING"].includes(match.status),
+  );
   const canUploadReplay =
     match.status === "COMPLETED" &&
     (currentUserRole === "ADMIN" ||
       (isParticipant && Boolean(currentPlayer?.isCaptain)));
   const cancelRequestedByMe =
     cancelState?.requestedBy.includes(currentUserId) ?? false;
-  const canSendChat =
-    isParticipant &&
-    ["ACCEPTING", "VETOING", "PLAYING", "VOTING"].includes(match.status);
-  const chatRemainingChars = 500 - chatInput.length;
-  const currentTeam =
-    currentPlayer?.team === 1 || currentPlayer?.team === 2
-      ? currentPlayer.team
-      : null;
-  const visibleChatMessages = chatMessages.filter((message) =>
-    activeChatChannel === "GLOBAL"
-      ? message.channel !== "TEAM"
-      : currentTeam != null &&
-        message.channel === "TEAM" &&
-        message.team === currentTeam,
-  );
   const statusMeta = getMatchLifecycleMeta(match.status, allConnected);
   const isTablet = viewportWidth < 1320;
   const isMobile = viewportWidth < 940;
@@ -366,14 +347,6 @@ export function ActiveMatchRoom({
       return { mapId: map.id, mapName: map.name, veto };
     });
   }, [match.vetoes]);
-  function handleSendChat(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!canSendChat) return;
-    const nextMessage = chatInput.trim();
-    if (!nextMessage) return;
-    onSendMessage(nextMessage, activeChatChannel);
-    setChatInput("");
-  }
 
   async function handleReplayFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.target.files?.[0];
@@ -748,22 +721,6 @@ export function ActiveMatchRoom({
         </StageCard>
       )}
 
-      {match.status === "COMPLETED" && (
-        <ReplayUploadCard
-          uploads={match.replayUploads ?? []}
-          canUpload={canUploadReplay}
-          uploadState={replayUploadState}
-          winnerName={
-            match.winner === 1
-              ? teams.left.name
-              : match.winner === 2
-                ? teams.right.name
-                : null
-          }
-          onChooseFile={() => replayInputRef.current?.click()}
-        />
-      )}
-
       {match.status === "VOTING" && !match.winner && (
         <StageCard
           title="Votación de ganador"
@@ -964,49 +921,17 @@ export function ActiveMatchRoom({
   return (
     <div style={pageShellStyle}>
       <div style={panelStyle}>
-        <div style={headerStyle}>
-          <div>
-            <div style={eyebrowStyle}>Match room</div>
-            <div
-              style={{
-                marginTop: "0.15rem",
-                color: "rgba(232,244,255,0.54)",
-                fontSize: "0.8rem",
-              }}
-            >
-              <span
-                style={{
-                  color: statusMeta.tone,
-                  fontFamily: "var(--font-display)",
-                  letterSpacing: "0.08em",
-                  textTransform: "uppercase",
-                  marginRight: "0.55rem",
-                }}
-              >
-                {statusMeta.phase}
-              </span>
-              {statusMeta.stage ?? statusMeta.detail}
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: "0.75rem" }}>
-            {canRequestCancel && (
-              <button
-                onClick={onCancelMatch}
-                disabled={cancelRequestedByMe}
-                style={dangerButtonStyle(cancelRequestedByMe)}
-              >
-                {cancelRequestedByMe
-                  ? "Cancelación pedida"
-                  : "Cancelar match (test)"}
-              </button>
-            )}
-            {match.status !== "COMPLETED" && (
-              <button onClick={onBack} style={ghostButtonStyle}>
-                Volver
-              </button>
-            )}
-          </div>
-        </div>
+        <RoomCommandHeader
+          match={match}
+          selectedMap={selectedMap}
+          statusMeta={statusMeta}
+          teams={teams}
+          allConnected={allConnected}
+          canRequestCancel={canRequestCancel}
+          cancelRequestedByMe={cancelRequestedByMe}
+          onCancelMatch={onCancelMatch}
+          onBack={onBack}
+        />
 
         <MatchTimeline status={match.status} allConnected={allConnected} />
 
@@ -1046,30 +971,18 @@ export function ActiveMatchRoom({
           </div>
         )}
 
-        <MatchChatDock
-          activeChannel={activeChatChannel}
-          currentTeam={currentTeam}
-          canUseTeamChat={isParticipant && currentTeam != null}
-          canSend={canSendChat}
-          messageCount={chatMessages.length}
-          onChannelChange={setActiveChatChannel}
-        >
-          <MatchChatPanel
-            currentUserId={currentUserId}
-            messages={visibleChatMessages}
-            draft={chatInput}
-            remainingChars={chatRemainingChars}
-            canSend={
-              canSendChat &&
-              (activeChatChannel === "GLOBAL" || currentTeam != null)
-            }
-            compact={isTablet}
-            activeChannel={activeChatChannel}
-            currentTeam={currentTeam}
-            onDraftChange={setChatInput}
-            onSubmit={handleSendChat}
-          />
-        </MatchChatDock>
+        <MatchTelemetryPanel
+          match={match}
+          selectedMap={selectedMap}
+          teams={teams}
+          currentUserId={currentUserId}
+          uploads={match.replayUploads ?? []}
+          canUpload={canUploadReplay}
+          uploadState={replayUploadState}
+          compact={isTablet}
+          narrow={isNarrow}
+          onChooseFile={() => replayInputRef.current?.click()}
+        />
         <input
           ref={replayInputRef}
           type="file"
@@ -1082,95 +995,204 @@ export function ActiveMatchRoom({
   );
 }
 
-function ReplayUploadCard({
+function RoomCommandHeader({
+  match,
+  selectedMap,
+  statusMeta,
+  teams,
+  allConnected,
+  canRequestCancel,
+  cancelRequestedByMe,
+  onCancelMatch,
+  onBack,
+}: {
+  match: MatchState;
+  selectedMap: string;
+  statusMeta: ReturnType<typeof getMatchLifecycleMeta>;
+  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> };
+  allConnected: boolean;
+  canRequestCancel: boolean;
+  cancelRequestedByMe: boolean;
+  onCancelMatch: () => void;
+  onBack: () => void;
+}) {
+  const winnerTeam = match.winner === 1 || match.winner === 2 ? match.winner : null;
+  const accent = winnerTeam ? TEAM_COLORS[winnerTeam].accent : statusMeta.tone;
+  const mapName = selectedMap || "Mapa pendiente";
+  const mapImageUrl = getMapImageUrl(mapName);
+  const leftWon = winnerTeam === 1;
+  const rightWon = winnerTeam === 2;
+  const humanPlayersCount = match.players.filter((player) => !player.isBot).length;
+
+  return (
+    <header style={commandHeaderStyle(mapImageUrl, accent)}>
+      <div style={commandHeaderOverlayStyle} />
+      <div style={commandHeaderToplineStyle}>
+        <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
+          <div style={{ ...eyebrowStyle, color: accent }}>Nexus command room</div>
+          <h1 style={commandTitleStyle}>MatchRoom Active</h1>
+          <div style={commandSublineStyle}>
+            <span style={{ color: accent, fontWeight: 950 }}>{statusMeta.phase}</span>
+            <span>{statusMeta.stage ?? statusMeta.detail}</span>
+            <span>·</span>
+            <span>{mapName}</span>
+          </div>
+        </div>
+
+        <div style={commandActionsStyle}>
+          {canRequestCancel && (
+            <button
+              onClick={onCancelMatch}
+              disabled={cancelRequestedByMe}
+              style={dangerButtonStyle(cancelRequestedByMe)}
+            >
+              {cancelRequestedByMe ? "Cancelación pedida" : "Cancelar match (test)"}
+            </button>
+          )}
+          {match.status !== "COMPLETED" && (
+            <button onClick={onBack} style={ghostButtonStyle}>
+              Volver
+            </button>
+          )}
+        </div>
+      </div>
+
+      <div style={commandVersusGridStyle}>
+        <CommandTeamPlate team={teams.left} teamNumber={1} won={leftWon} />
+        <div style={commandCenterBladeStyle(accent)}>
+          <span>{match.status === "COMPLETED" ? "Resultado" : allConnected ? "Lobby armado" : "Sincronizando"}</span>
+          <strong>{winnerTeam ? `Ganó Team ${winnerTeam}` : "VS"}</strong>
+          <small>
+            {match.status === "COMPLETED"
+              ? match.duration
+                ? formatDuration(match.duration)
+                : "Cierre competitivo"
+              : allConnected
+                ? `${humanPlayersCount} jugadores listos`
+                : "Esperando confirmaciones"}
+          </small>
+        </div>
+        <CommandTeamPlate team={teams.right} teamNumber={2} won={rightWon} />
+      </div>
+    </header>
+  );
+}
+
+function CommandTeamPlate({
+  team,
+  teamNumber,
+  won,
+}: {
+  team: ReturnType<typeof toDisplayTeam>;
+  teamNumber: 1 | 2;
+  won: boolean;
+}) {
+  const tone = TEAM_COLORS[teamNumber].accent;
+
+  return (
+    <div style={commandTeamPlateStyle(tone, won)}>
+      <div style={{ display: "grid", gap: "0.18rem", minWidth: 0 }}>
+        <span style={{ ...eyebrowStyle, color: tone }}>
+          {teamNumber === 1 ? "Blue side" : "Red side"}
+        </span>
+        <strong style={commandTeamNameStyle}>{team.name}</strong>
+      </div>
+      <div style={commandTeamMetaStyle}>
+        <span>{team.realPlayersCount}/5 activos</span>
+        <span>{team.avgWinrate}% WR avg</span>
+        {won && <span style={{ color: "#86efac" }}>Winner</span>}
+      </div>
+    </div>
+  );
+}
+
+type ReplayPlayerSummary = NonNullable<NonNullable<ReplayUpload["parsedSummary"]>["players"]>[number];
+type ReplayMetricKey =
+  | "takedowns"
+  | "kills"
+  | "deaths"
+  | "assists"
+  | "heroDamage"
+  | "siegeDamage"
+  | "healing"
+  | "experience";
+
+function MatchTelemetryPanel({
+  match,
+  selectedMap,
+  teams,
+  currentUserId,
   uploads,
   canUpload,
   uploadState,
-  winnerName,
+  compact,
+  narrow,
   onChooseFile,
 }: {
+  match: MatchState;
+  selectedMap: string;
+  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> };
+  currentUserId: string;
   uploads: ReplayUpload[];
   canUpload: boolean;
   uploadState: { status: "idle" | "uploading" | "success" | "error"; message: string | null };
-  winnerName: string | null;
+  compact: boolean;
+  narrow: boolean;
   onChooseFile: () => void;
 }) {
   const latest = uploads[0] ?? null;
-  const parsedPlayers = [...(latest?.parsedSummary?.players ?? [])].sort((a, b) => {
-    const teamA = a.team ?? 3;
-    const teamB = b.team ?? 3;
-    if (teamA !== teamB) return teamA - teamB;
-    if (a.won !== b.won) return a.won ? -1 : 1;
-    return (b.takedowns ?? -1) - (a.takedowns ?? -1);
-  });
+  const parsedPlayers = sortReplayPlayers(latest?.parsedSummary?.players ?? []);
   const validation = latest?.parsedSummary?.validation;
   const resolution = latest?.parsedSummary?.resolution;
-  const statusTone =
-    latest?.status === "PARSED"
-      ? "#4ade80"
-      : latest?.status === "FAILED"
-        ? "#f87171"
-        : "#fbbf24";
-  const resolutionTone =
-    resolution?.status === "winner_mismatch"
-      ? "#f87171"
-      : resolution?.status === "auto_result_applied"
-        ? "#4ade80"
-        : resolution?.status === "verified_existing_result"
-          ? "#38bdf8"
-          : "#fbbf24";
+  const replayMatch = latest?.parsedSummary?.match;
+  const mapName = latest?.parsedMap ?? replayMatch?.map ?? selectedMap;
+  const mapImageUrl = getMapImageUrl(mapName);
+  const winnerTeam =
+    match.winner ?? latest?.parsedWinnerTeam ?? replayMatch?.winnerTeam ?? null;
+  const winnerName = getTeamDisplayName(teams, winnerTeam);
+  const duration = latest?.parsedDuration ?? replayMatch?.duration ?? match.duration ?? null;
+  const statusTone = getReplayUploadStatusTone(latest?.status);
+  const resolutionTone = getReplayResolutionTone(resolution?.status);
+  const topDamage = getTopReplayPlayer(parsedPlayers, "heroDamage");
+  const topHealing = getTopReplayPlayer(parsedPlayers, "healing");
+  const topXp = getTopReplayPlayer(parsedPlayers, "experience");
+  const totalHeroDamage = sumReplayMetric(parsedPlayers, "heroDamage");
+  const totalHealing = sumReplayMetric(parsedPlayers, "healing");
+  const totalExperience = sumReplayMetric(parsedPlayers, "experience");
+  const totalTakedowns = sumReplayMetric(parsedPlayers, "takedowns");
+  const teamOneTotals = getTeamReplayTotals(parsedPlayers, 1);
+  const teamTwoTotals = getTeamReplayTotals(parsedPlayers, 2);
+  const maxValues = {
+    heroDamage: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "heroDamage"))),
+    siegeDamage: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "siegeDamage"))),
+    healing: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "healing"))),
+    experience: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "experience"))),
+  };
 
   return (
-    <StageCard
-      title="Replay oficial"
-      subtitle="Subida post-partida para validar mapa, ganador y jugadores sin depender de HeroesProfile"
-      tone="#38bdf8"
-    >
-      <div style={replayUploadShellStyle}>
+    <section style={telemetryPanelStyle(mapImageUrl)}>
+      <div style={telemetryPanelVeilStyle} />
+      <div style={telemetryHeaderStyle}>
         <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
-          <div
-            style={{
-              color: "#bae6fd",
-              fontSize: "0.66rem",
-              fontWeight: 900,
-              letterSpacing: "0.16em",
-              textTransform: "uppercase",
-            }}
-          >
-            Procesador StormReplay
-          </div>
-          <div
-            style={{
-              color: "#f8fafc",
-              fontFamily: "var(--font-display)",
-              fontSize: "1rem",
-              letterSpacing: "0.05em",
-            }}
-          >
-            {latest
-              ? latest.status === "PARSED"
-                ? `Replay leído · ${latest.parsedMap ?? "Mapa detectado"}`
-                : "Replay recibido"
-              : "Esperando archivo .StormReplay"}
-          </div>
-          <div style={{ color: "rgba(226,232,240,0.68)", fontSize: "0.84rem", lineHeight: 1.45 }}>
-            {latest
-              ? latest.status === "PARSED"
-                ? `Ganador detectado: ${latest.parsedWinnerTeam ? `Team ${latest.parsedWinnerTeam}` : winnerName ?? "pendiente"} · ${latest.parsedDuration ? formatDuration(latest.parsedDuration) : "duración pendiente"}`
-                : latest.parseError ?? "El archivo quedó guardado para revisar el parser."
-              : canUpload
-                ? "Capitanes y admins pueden subir el replay apenas termina la partida."
-                : "Esperando a un capitán o admin para subir el replay oficial."}
-          </div>
+          <div style={{ ...eyebrowStyle, color: "#7dd3fc" }}>StormReplay telemetry</div>
+          <h2 style={telemetryTitleStyle}>Estadísticas de la partida</h2>
+          <p style={telemetryDescriptionStyle}>
+            Panel post-partida separado del flujo del matchroom: resultado, héroes,
+            validación del replay y dossiers expandibles por jugador.
+          </p>
         </div>
 
         <button
           type="button"
           onClick={onChooseFile}
           disabled={!canUpload || uploadState.status === "uploading"}
-          style={replayUploadButtonStyle(!canUpload || uploadState.status === "uploading")}
+          style={telemetryUploadButtonStyle(!canUpload || uploadState.status === "uploading")}
         >
-          {uploadState.status === "uploading" ? "Procesando…" : latest ? "Subir otra replay" : "Subir replay"}
+          {uploadState.status === "uploading"
+            ? "Procesando replay…"
+            : latest
+              ? "Subir otra StormReplay"
+              : "Subir StormReplay"}
         </button>
       </div>
 
@@ -1183,117 +1205,290 @@ function ReplayUploadCard({
       {resolution?.message && (
         <div
           style={{
-            ...replayUploadNoticeStyle(resolution?.status === "winner_mismatch"),
-            borderColor: `${resolutionTone}55`,
-            color: resolutionTone,
+            ...telemetryNoticeStyle(resolutionTone),
             background:
               resolution?.status === "winner_mismatch"
-                ? "rgba(127, 29, 29, 0.22)"
-                : "rgba(15, 23, 42, 0.78)",
+                ? "rgba(127, 29, 29, 0.24)"
+                : "rgba(8, 18, 32, 0.72)",
           }}
         >
           {resolution.message}
         </div>
       )}
 
-      {latest && (
-        <div style={replayMetaGridStyle}>
-          <StatusTile label="Parser" value={latest.parserStatus ?? latest.status} tone={statusTone} />
-          <StatusTile label="Modo" value={latest.parsedGameMode ?? "—"} tone="#7dd3fc" />
-          <StatusTile
-            label="Mapa"
-            value={
-              validation?.mapMatches === false
-                ? "Revisar mapa"
-                : latest.parsedMap ?? "—"
-            }
-            tone={validation?.mapMatches === false ? "#fbbf24" : "#e2e8f0"}
-          />
-          <StatusTile
+      <div style={telemetryResultGridStyle(compact)}>
+        <div style={telemetryResultBladeStyle(winnerTeam, mapImageUrl)}>
+          <span style={telemetryMicroLabelStyle}>Resultado oficial</span>
+          <strong style={telemetryWinnerStyle(winnerTeam)}>
+            {winnerTeam ? `Ganó ${winnerName}` : "Resultado pendiente"}
+          </strong>
+          <div style={telemetryResultMetaStyle}>
+            <span>{mapName}</span>
+            <span>·</span>
+            <span>{duration ? formatDuration(duration) : "Duración pendiente"}</span>
+          </div>
+        </div>
+
+        <div style={telemetryKpiGridStyle(narrow)}>
+          <TelemetryKpi label="Parser" value={latest?.parserStatus ?? latest?.status ?? "Sin replay"} tone={statusTone} />
+          <TelemetryKpi label="Modo" value={latest?.parsedGameMode ?? replayMatch?.gameMode ?? "—"} tone="#7dd3fc" />
+          <TelemetryKpi
             label="Jugadores"
             value={
               typeof validation?.matchedPlayers === "number"
                 ? `${validation.matchedPlayers}/${validation.expectedHumanPlayers ?? "?"}`
-                : `${parsedPlayers.length}/10`
+                : parsedPlayers.length > 0
+                  ? `${parsedPlayers.length}/10`
+                  : "—"
             }
-            tone="#4ade80"
+            tone={validation?.matchedPlayers === validation?.expectedHumanPlayers ? "#4ade80" : "#fbbf24"}
           />
-          <StatusTile
-            label="Resolución"
-            value={getReplayResolutionLabel(resolution?.status)}
-            tone={resolutionTone}
-          />
+          <TelemetryKpi label="Resolución" value={getReplayResolutionLabel(resolution?.status)} tone={resolutionTone} />
+          <TelemetryKpi label="Build" value={formatNullableNumber(latest?.parsedBuild ?? replayMatch?.build)} tone="#c084fc" />
+          <TelemetryKpi label="Fecha" value={formatReplayDate(latest?.parsedGameDate ?? replayMatch?.gameDate)} tone="#e2e8f0" />
+        </div>
+      </div>
+
+      {latest && (
+        <div style={telemetryUploadMetaStyle}>
+          <span>Archivo: {latest.originalName}</span>
+          <span>{formatBytes(latest.fileSize)}</span>
+          <span>Subido por {latest.uploadedBy?.username ?? "Usuario"}</span>
+          <span>{latest.sha256 ? `SHA ${latest.sha256.slice(0, 10)}…` : "Hash pendiente"}</span>
         </div>
       )}
 
-      {parsedPlayers.length > 0 && (
+      {parsedPlayers.length > 0 ? (
         <>
-          <div style={replayPlayersStripStyle}>
-            {parsedPlayers.slice(0, 10).map((player, index) => (
-              <div key={`${player.name}-${index}`} style={replayPlayerPillStyle(player.team ?? 1)}>
-                <strong>{player.hero ?? "Hero"}</strong>
-                <span>{player.battleTag ?? player.name}</span>
-              </div>
-            ))}
+          <div style={combatKpiGridStyle(narrow)}>
+            <TelemetryKpi label="Takedowns" value={formatReplayNumber(totalTakedowns)} tone="#facc15" large />
+            <TelemetryKpi label="Hero damage" value={formatReplayNumber(totalHeroDamage)} tone="#38bdf8" large />
+            <TelemetryKpi label="Healing" value={formatReplayNumber(totalHealing)} tone="#4ade80" large />
+            <TelemetryKpi label="XP total" value={formatReplayNumber(totalExperience)} tone="#f59e0b" large />
+            <TelemetryKpi label="Top daño" value={topDamage ? getReplayPlayerShortName(topDamage) : "—"} tone="#38bdf8" />
+            <TelemetryKpi label="Top heal/soak" value={topHealing ? getReplayPlayerShortName(topHealing) : topXp ? getReplayPlayerShortName(topXp) : "—"} tone="#4ade80" />
           </div>
 
-          <div style={replayStatsWrapStyle}>
-            <div style={replayStatsHeaderStyle}>
-              Stats del mapa · {latest?.parsedMap ?? "Mapa detectado"}
+          <div style={teamTotalsGridStyle(narrow)}>
+            <TeamTelemetryCard
+              team={teams.left}
+              teamNumber={1}
+              totals={teamOneTotals}
+              winnerTeam={winnerTeam}
+            />
+            <TeamTelemetryCard
+              team={teams.right}
+              teamNumber={2}
+              totals={teamTwoTotals}
+              winnerTeam={winnerTeam}
+            />
+          </div>
+
+          <div style={dossierSectionHeaderStyle}>
+            <div>
+              <div style={{ ...eyebrowStyle, color: "#bae6fd" }}>Player dossiers</div>
+              <strong>Click en cualquier jugador para ver el detalle completo</strong>
             </div>
-            <div style={replayStatsTableScrollStyle}>
-              <table style={replayStatsTableStyle}>
-                <thead>
-                  <tr>
-                    <th style={replayStatsHeadCellStyle}>Jugador</th>
-                    <th style={replayStatsHeadCellStyle}>Héroe</th>
-                    <th style={replayStatsHeadCellStyle}>Team</th>
-                    <th style={replayStatsHeadCellStyle}>W/L</th>
-                    <th style={replayStatsHeadCellStyle}>TD</th>
-                    <th style={replayStatsHeadCellStyle}>K</th>
-                    <th style={replayStatsHeadCellStyle}>D</th>
-                    <th style={replayStatsHeadCellStyle}>A</th>
-                    <th style={replayStatsHeadCellStyle}>Hero Dmg</th>
-                    <th style={replayStatsHeadCellStyle}>Siege</th>
-                    <th style={replayStatsHeadCellStyle}>Healing</th>
-                    <th style={replayStatsHeadCellStyle}>XP</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {parsedPlayers.map((player, index) => (
-                    <tr key={`${player.name}-${index}`} style={replayStatsRowStyle(player.team ?? 1, player.won)}>
-                      <td style={replayStatsBodyCellStyle(true)}>
-                        <div style={{ display: "grid", gap: "0.16rem" }}>
-                          <strong style={{ color: "#f8fafc" }}>{player.battleTag ?? player.name}</strong>
-                          <span style={{ color: "rgba(191,219,254,0.72)", fontSize: "0.72rem" }}>
-                            {player.name}
-                          </span>
-                        </div>
-                      </td>
-                      <td style={replayStatsBodyCellStyle()}>{player.hero ?? "—"}</td>
-                      <td style={replayStatsBodyCellStyle()}>{player.team ? `Team ${player.team}` : "—"}</td>
-                      <td style={replayStatsBodyCellStyle()}>
-                        <span style={{ color: player.won ? "#4ade80" : "#f87171", fontWeight: 800 }}>
-                          {player.won ? "W" : "L"}
-                        </span>
-                      </td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.takedowns)}</td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.kills)}</td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.deaths)}</td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.assists)}</td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.heroDamage)}</td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.siegeDamage)}</td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.healing)}</td>
-                      <td style={replayStatsBodyCellStyle()}>{formatReplayNumber(player.experience)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            <span>{parsedPlayers.length} jugadores parseados</span>
+          </div>
+
+          <div style={playerDossierGridStyle(narrow)}>
+            {parsedPlayers.map((player, index) => {
+              const matchPlayer = findMatchPlayerForReplay(match.players, player);
+              return (
+                <ReplayPlayerDossier
+                  key={`${player.name}-${player.hero ?? "hero"}-${index}`}
+                  player={player}
+                  matchPlayer={matchPlayer}
+                  isCurrentUser={Boolean(matchPlayer?.userId && matchPlayer.userId === currentUserId)}
+                  maxValues={maxValues}
+                />
+              );
+            })}
           </div>
         </>
+      ) : (
+        <div style={telemetryEmptyStateStyle}>
+          <div style={{ ...eyebrowStyle, color: latest?.status === "FAILED" ? "#fca5a5" : "#7dd3fc" }}>
+            {latest?.status === "FAILED" ? "Replay no parseado" : "Esperando datos de combate"}
+          </div>
+          <strong>{latest?.status === "FAILED" ? "El parser no pudo leer esta StormReplay" : "Subí la StormReplay para abrir el tablero estadístico"}</strong>
+          <p>
+            {latest?.status === "FAILED"
+              ? latest.parseError ?? "El archivo quedó guardado, pero no hay stats disponibles todavía."
+              : "Cuando el replay esté procesado, este panel mostrará héroes, KDA, daño, healing, XP, resultado, validación y perfiles desplegables por jugador."}
+          </p>
+        </div>
       )}
-    </StageCard>
+    </section>
+  );
+}
+
+function TelemetryKpi({
+  label,
+  value,
+  tone,
+  large = false,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+  large?: boolean;
+}) {
+  return (
+    <div style={telemetryKpiStyle(tone, large)}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function TeamTelemetryCard({
+  team,
+  teamNumber,
+  totals,
+  winnerTeam,
+}: {
+  team: ReturnType<typeof toDisplayTeam>;
+  teamNumber: 1 | 2;
+  totals: ReturnType<typeof getTeamReplayTotals>;
+  winnerTeam: 1 | 2 | null;
+}) {
+  const tone = TEAM_COLORS[teamNumber].accent;
+  const won = winnerTeam === teamNumber;
+
+  return (
+    <div style={teamTelemetryCardStyle(tone, won)}>
+      <div style={teamTelemetryHeaderStyle}>
+        <div>
+          <div style={{ ...eyebrowStyle, color: tone }}>{teamNumber === 1 ? "Blue telemetry" : "Red telemetry"}</div>
+          <strong>{team.name}</strong>
+        </div>
+        <span style={teamTelemetryResultStyle(won)}>{won ? "Victoria" : winnerTeam ? "Derrota" : "Pendiente"}</span>
+      </div>
+      <div style={teamTelemetryStatsStyle}>
+        <TelemetryMiniStat label="TD" value={formatReplayNumber(totals.takedowns)} tone="#facc15" />
+        <TelemetryMiniStat label="K/D/A" value={`${formatReplayNumber(totals.kills)}/${formatReplayNumber(totals.deaths)}/${formatReplayNumber(totals.assists)}`} tone="#e2e8f0" />
+        <TelemetryMiniStat label="Hero dmg" value={formatReplayNumber(totals.heroDamage)} tone="#38bdf8" />
+        <TelemetryMiniStat label="Siege" value={formatReplayNumber(totals.siegeDamage)} tone="#fb7185" />
+        <TelemetryMiniStat label="Healing" value={formatReplayNumber(totals.healing)} tone="#4ade80" />
+        <TelemetryMiniStat label="XP" value={formatReplayNumber(totals.experience)} tone="#f59e0b" />
+      </div>
+    </div>
+  );
+}
+
+function TelemetryMiniStat({ label, value, tone }: { label: string; value: string; tone: string }) {
+  return (
+    <div style={telemetryMiniStatStyle(tone)}>
+      <span>{label}</span>
+      <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ReplayPlayerDossier({
+  player,
+  matchPlayer,
+  isCurrentUser,
+  maxValues,
+}: {
+  player: ReplayPlayerSummary;
+  matchPlayer: Player | null;
+  isCurrentUser: boolean;
+  maxValues: {
+    heroDamage: number;
+    siegeDamage: number;
+    healing: number;
+    experience: number;
+  };
+}) {
+  const team = player.team === 1 || player.team === 2 ? player.team : 1;
+  const tone = TEAM_COLORS[team].accent;
+  const displayName = matchPlayer?.user.username ?? player.battleTag ?? player.name;
+  const subtitle = player.battleTag && player.battleTag !== displayName ? player.battleTag : player.name;
+  const kda = `${formatReplayNumber(player.kills)}/${formatReplayNumber(player.deaths)}/${formatReplayNumber(player.assists)}`;
+
+  return (
+    <details style={playerDossierStyle(tone, player.won, isCurrentUser)}>
+      <summary style={playerDossierSummaryStyle}>
+        <div style={heroEmblemStyle(tone, player.won)}>
+          {(player.hero ?? "??").slice(0, 2).toUpperCase()}
+        </div>
+        <div style={{ minWidth: 0, display: "grid", gap: "0.2rem" }}>
+          <div style={playerDossierNameRowStyle}>
+            <strong>{displayName}</strong>
+            {isCurrentUser && <span style={currentUserTagStyle}>Vos</span>}
+            <span style={winLossTagStyle(player.won)}>{player.won ? "WIN" : "LOSS"}</span>
+          </div>
+          <span style={playerDossierHeroStyle}>{player.hero ?? "Héroe sin detectar"} · Team {player.team ?? "—"}</span>
+          <span style={playerDossierSubStyle}>{subtitle}</span>
+        </div>
+        <div style={playerDossierQuickStatsStyle}>
+          <TelemetryMiniStat label="TD" value={formatReplayNumber(player.takedowns)} tone="#facc15" />
+          <TelemetryMiniStat label="K/D/A" value={kda} tone="#e2e8f0" />
+          <TelemetryMiniStat label="Hero" value={formatReplayNumber(player.heroDamage)} tone="#38bdf8" />
+          <span style={expandHintStyle}>Detalle</span>
+        </div>
+      </summary>
+
+      <div style={playerDossierExpandedStyle(tone)}>
+        <div style={playerDetailGridStyle}>
+          <ReplayDetail label="Jugador replay" value={player.name} />
+          <ReplayDetail label="BattleTag" value={player.battleTag ?? "—"} />
+          <ReplayDetail label="Usuario match" value={matchPlayer?.user.username ?? "Sin match exacto"} />
+          <ReplayDetail label="Héroe" value={player.hero ?? "—"} />
+          <ReplayDetail label="Team" value={player.team ? `Team ${player.team}` : "—"} />
+          <ReplayDetail label="Resultado" value={player.won ? "Victoria" : "Derrota"} tone={player.won ? "#4ade80" : "#f87171"} />
+          <ReplayDetail label="Takedowns" value={formatReplayNumber(player.takedowns)} tone="#facc15" />
+          <ReplayDetail label="Solo kills" value={formatReplayNumber(player.kills)} />
+          <ReplayDetail label="Deaths" value={formatReplayNumber(player.deaths)} tone={getReplayMetricValue(player, "deaths") > 0 ? "#f87171" : "#4ade80"} />
+          <ReplayDetail label="Assists" value={formatReplayNumber(player.assists)} />
+        </div>
+
+        <div style={statBarGridStyle}>
+          <ReplayStatBar label="Hero damage" value={getReplayMetricValue(player, "heroDamage")} max={maxValues.heroDamage} tone="#38bdf8" />
+          <ReplayStatBar label="Siege damage" value={getReplayMetricValue(player, "siegeDamage")} max={maxValues.siegeDamage} tone="#fb7185" />
+          <ReplayStatBar label="Healing" value={getReplayMetricValue(player, "healing")} max={maxValues.healing} tone="#4ade80" />
+          <ReplayStatBar label="XP contribution" value={getReplayMetricValue(player, "experience")} max={maxValues.experience} tone="#f59e0b" />
+        </div>
+      </div>
+    </details>
+  );
+}
+
+function ReplayDetail({ label, value, tone }: { label: string; value: string; tone?: string }) {
+  return (
+    <div style={replayDetailStyle}>
+      <span>{label}</span>
+      <strong style={{ color: tone ?? "#e2e8f0" }}>{value}</strong>
+    </div>
+  );
+}
+
+function ReplayStatBar({
+  label,
+  value,
+  max,
+  tone,
+}: {
+  label: string;
+  value: number;
+  max: number;
+  tone: string;
+}) {
+  const width = max > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
+
+  return (
+    <div style={replayStatBarWrapStyle}>
+      <div style={replayStatBarLabelStyle}>
+        <span>{label}</span>
+        <strong style={{ color: tone }}>{formatReplayNumber(value)}</strong>
+      </div>
+      <div style={replayStatTrackStyle}>
+        <div style={replayStatFillStyle(width, tone)} />
+      </div>
+    </div>
   );
 }
 
@@ -1810,259 +2005,6 @@ function StageCallout({
   );
 }
 
-function MatchChatDock({
-  activeChannel,
-  currentTeam,
-  canUseTeamChat,
-  canSend,
-  messageCount,
-  onChannelChange,
-  children,
-}: {
-  activeChannel: ChatChannel;
-  currentTeam: 1 | 2 | null;
-  canUseTeamChat: boolean;
-  canSend: boolean;
-  messageCount: number;
-  onChannelChange: (channel: ChatChannel) => void;
-  children: ReactNode;
-}) {
-  return (
-    <section style={chatDockStyle}>
-      <div style={chatDockHeaderStyle}>
-        <div style={{ display: "grid", gap: "0.15rem" }}>
-          <div
-            style={{ ...eyebrowStyle, color: canSend ? "#38bdf8" : "#94a3b8" }}
-          >
-            Comunicaciones
-          </div>
-          <div style={{ color: "rgba(226,232,240,0.72)", fontSize: "0.82rem" }}>
-            Chat general y canal privado de equipo · {messageCount} mensajes
-            visibles
-          </div>
-        </div>
-        <div style={chatTabsStyle}>
-          <button
-            type="button"
-            onClick={() => onChannelChange("GLOBAL")}
-            style={chatTabStyle(activeChannel === "GLOBAL", "#38bdf8")}
-          >
-            Sala
-          </button>
-          <button
-            type="button"
-            onClick={() => canUseTeamChat && onChannelChange("TEAM")}
-            disabled={!canUseTeamChat}
-            title={
-              canUseTeamChat
-                ? `Chat privado Team ${currentTeam}`
-                : "Sólo disponible para jugadores del match"
-            }
-            style={chatTabStyle(
-              activeChannel === "TEAM",
-              currentTeam === 2 ? TEAM_COLORS[2].accent : TEAM_COLORS[1].accent,
-              !canUseTeamChat,
-            )}
-          >
-            Equipo {currentTeam ?? "—"}
-          </button>
-        </div>
-      </div>
-      {children}
-    </section>
-  );
-}
-
-function MatchChatPanel({
-  currentUserId,
-  messages,
-  draft,
-  remainingChars,
-  canSend,
-  compact = false,
-  activeChannel,
-  currentTeam,
-  onDraftChange,
-  onSubmit,
-}: {
-  currentUserId: string;
-  messages: ChatMessage[];
-  draft: string;
-  remainingChars: number;
-  canSend: boolean;
-  compact?: boolean;
-  activeChannel: ChatChannel;
-  currentTeam: 1 | 2 | null;
-  onDraftChange: (value: string) => void;
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-}) {
-  const chatListRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    const list = chatListRef.current;
-    if (!list) return;
-    list.scrollTop = list.scrollHeight;
-  }, [messages]);
-
-  const lastMessage = messages[messages.length - 1];
-  const quickPrompts = [
-    "Listos para entrar",
-    "Esperen 1 minuto",
-    "Ya conecté",
-    "GG, cerramos",
-  ];
-
-  return (
-    <div style={chatPanelStyle}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "0.75rem",
-          flexWrap: "wrap",
-          padding: "0.75rem 0.85rem",
-          border: "1px solid rgba(148,163,184,0.14)",
-          background:
-            "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015))",
-        }}
-      >
-        <div style={{ display: "flex", alignItems: "center", gap: "0.55rem" }}>
-          <span
-            style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "999px",
-              background: canSend ? "#4ade80" : "#f87171",
-              boxShadow: canSend ? "0 0 12px rgba(74,222,128,0.7)" : "none",
-              flexShrink: 0,
-            }}
-          />
-          <div style={{ display: "grid", gap: "0.08rem" }}>
-            <span
-              style={{
-                color: "#e2e8f0",
-                fontWeight: 800,
-                fontSize: "0.84rem",
-              }}
-            >
-              {activeChannel === "TEAM"
-                ? `Canal Team ${currentTeam ?? "—"}`
-                : "Canal sala"}
-            </span>
-            <span
-              style={{
-                color: "#94a3b8",
-                fontSize: "0.72rem",
-                letterSpacing: "0.04em",
-              }}
-            >
-              {messages.length} mensajes ·{" "}
-              {lastMessage
-                ? `último ${formatChatTime(lastMessage.timestamp)}`
-                : "sin actividad todavía"}
-            </span>
-          </div>
-        </div>
-        {canSend && (
-          <div
-            style={{
-              display: "flex",
-              gap: "0.45rem",
-              flexWrap: compact ? "nowrap" : "wrap",
-              overflowX: compact ? "auto" : "visible",
-              paddingBottom: compact ? "0.1rem" : 0,
-            }}
-          >
-            {quickPrompts.map((prompt) => (
-              <button
-                key={prompt}
-                type="button"
-                onClick={() => onDraftChange(prompt)}
-                style={quickPromptStyle}
-              >
-                {prompt}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div ref={chatListRef} style={chatListStyle}>
-        {messages.length === 0 ? (
-          <div style={chatEmptyStateStyle}>
-            {activeChannel === "TEAM"
-              ? "Todavía no hay mensajes de equipo. Coordiná rotaciones y lobby privado acá."
-              : "Todavía no hay mensajes de sala. Coordiná el lobby general acá."}
-          </div>
-        ) : (
-          messages.map((message) => {
-            const mine = message.userId === currentUserId;
-            return (
-              <div key={message.id} style={chatMessageRowStyle(mine)}>
-                <AvatarCell
-                  username={message.username}
-                  avatar={message.avatar}
-                  size={28}
-                />
-                <div style={{ display: "grid", gap: "0.2rem" }}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.45rem",
-                    }}
-                  >
-                    <span
-                      style={{
-                        color: mine ? "#7dd3fc" : "#e2e8f0",
-                        fontWeight: 800,
-                        fontSize: "0.85rem",
-                      }}
-                    >
-                      {mine ? "Vos" : message.username}
-                    </span>
-                    <span style={chatTimestampStyle}>
-                      {formatChatTime(message.timestamp)}
-                    </span>
-                  </div>
-                  <span style={chatContentStyle}>{message.content}</span>
-                </div>
-              </div>
-            );
-          })
-        )}
-      </div>
-
-      <form onSubmit={onSubmit} style={chatComposerStyle}>
-        <input
-          value={draft}
-          onChange={(event) => onDraftChange(event.target.value)}
-          maxLength={500}
-          disabled={!canSend}
-          placeholder={
-            canSend
-              ? activeChannel === "TEAM"
-                ? "Mensaje privado para tu equipo..."
-                : "Mensaje para toda la sala..."
-              : "Chat deshabilitado"
-          }
-          style={chatInputStyle}
-        />
-        <button
-          type="submit"
-          disabled={!canSend || !draft.trim()}
-          style={chatSendButtonStyle(!canSend || !draft.trim())}
-        >
-          Enviar
-        </button>
-      </form>
-      <div style={chatCounterStyle(remainingChars <= 50)}>
-        {remainingChars} caracteres restantes
-      </div>
-    </div>
-  );
-}
-
 function VotePill({
   label,
   votes,
@@ -2367,13 +2309,130 @@ function formatReplayNumber(value: number | null | undefined) {
   return new Intl.NumberFormat("es-AR").format(value);
 }
 
-function formatChatTime(value: string) {
+function formatNullableNumber(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  return String(value);
+}
+
+function formatReplayDate(value: string | Date | null | undefined) {
+  if (!value) return "—";
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "--:--";
-  return date.toLocaleTimeString("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
+  if (Number.isNaN(date.getTime())) return "—";
+  return date.toLocaleDateString("es-AR", {
+    day: "2-digit",
+    month: "short",
+    year: "2-digit",
   });
+}
+
+function formatBytes(value: number | null | undefined) {
+  if (typeof value !== "number" || Number.isNaN(value)) return "—";
+  if (value < 1024) return `${value} B`;
+  if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+  return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function sortReplayPlayers(players: ReplayPlayerSummary[]) {
+  return [...players].sort((a, b) => {
+    const teamA = a.team ?? 3;
+    const teamB = b.team ?? 3;
+    if (teamA !== teamB) return teamA - teamB;
+    if (a.won !== b.won) return a.won ? -1 : 1;
+    return getReplayMetricValue(b, "takedowns") - getReplayMetricValue(a, "takedowns");
+  });
+}
+
+function getReplayMetricValue(player: ReplayPlayerSummary, key: ReplayMetricKey) {
+  const value = player[key];
+  return typeof value === "number" && Number.isFinite(value) ? value : 0;
+}
+
+function sumReplayMetric(players: ReplayPlayerSummary[], key: ReplayMetricKey) {
+  return players.reduce((sum, player) => sum + getReplayMetricValue(player, key), 0);
+}
+
+function getTopReplayPlayer(players: ReplayPlayerSummary[], key: ReplayMetricKey) {
+  return players.reduce<ReplayPlayerSummary | null>((top, player) => {
+    if (!top) return player;
+    return getReplayMetricValue(player, key) > getReplayMetricValue(top, key)
+      ? player
+      : top;
+  }, null);
+}
+
+function getTeamReplayTotals(players: ReplayPlayerSummary[], team: 1 | 2) {
+  const teamPlayers = players.filter((player) => player.team === team);
+  return {
+    takedowns: sumReplayMetric(teamPlayers, "takedowns"),
+    kills: sumReplayMetric(teamPlayers, "kills"),
+    deaths: sumReplayMetric(teamPlayers, "deaths"),
+    assists: sumReplayMetric(teamPlayers, "assists"),
+    heroDamage: sumReplayMetric(teamPlayers, "heroDamage"),
+    siegeDamage: sumReplayMetric(teamPlayers, "siegeDamage"),
+    healing: sumReplayMetric(teamPlayers, "healing"),
+    experience: sumReplayMetric(teamPlayers, "experience"),
+  };
+}
+
+function getReplayPlayerShortName(player: ReplayPlayerSummary) {
+  return (player.battleTag ?? player.name).replace(/#\d+$/, "");
+}
+
+function getTeamDisplayName(
+  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> },
+  team: 1 | 2 | null,
+) {
+  if (team === 1) return teams.left.name;
+  if (team === 2) return teams.right.name;
+  return "Equipo pendiente";
+}
+
+function getReplayUploadStatusTone(status: string | null | undefined) {
+  if (status === "PARSED") return "#4ade80";
+  if (status === "FAILED") return "#f87171";
+  if (status === "UPLOADED") return "#fbbf24";
+  return "#94a3b8";
+}
+
+function getReplayResolutionTone(status?: ReplayResolutionStatus) {
+  if (status === "winner_mismatch") return "#f87171";
+  if (status === "auto_result_applied") return "#4ade80";
+  if (status === "verified_existing_result") return "#38bdf8";
+  if (status === "awaiting_manual_vote") return "#c084fc";
+  if (status === "parser_failed") return "#f87171";
+  return "#fbbf24";
+}
+
+function normalizeReplayIdentity(value: string | null | undefined) {
+  return (value ?? "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/#\d+$/, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function findMatchPlayerForReplay(
+  matchPlayers: Player[],
+  replayPlayer: ReplayPlayerSummary,
+) {
+  const replayName = normalizeReplayIdentity(replayPlayer.name);
+  const replayBattleTag = normalizeReplayIdentity(replayPlayer.battleTag);
+  const sameTeamPlayers = matchPlayers.filter(
+    (player) => player.team === replayPlayer.team && !player.isBot,
+  );
+
+  return (
+    sameTeamPlayers.find((player) => {
+      const username = normalizeReplayIdentity(player.user.username);
+      return (
+        username === replayName ||
+        username === replayBattleTag ||
+        Boolean(username && replayBattleTag.includes(username)) ||
+        Boolean(replayName && username.includes(replayName))
+      );
+    }) ?? null
+  );
 }
 
 const pageShellStyle: CSSProperties = {
@@ -2391,14 +2450,6 @@ const panelStyle: CSSProperties = {
   padding: "0",
   display: "grid",
   gap: "0.68rem",
-};
-
-const headerStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "0.75rem",
-  padding: "0.15rem 0 0.25rem",
 };
 
 const centerColumnStyle: CSSProperties = {
@@ -2612,178 +2663,218 @@ const stageCardStyle: CSSProperties = {
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
 };
 
-const chatDockStyle: CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gap: "0.62rem",
-  padding: "0.72rem",
-  border: "1px solid rgba(100,200,255,0.14)",
-  background: "linear-gradient(180deg, rgba(4,9,18,0.76), rgba(4,9,18,0.54))",
-};
-
-const chatDockHeaderStyle: CSSProperties = {
-  display: "flex",
-  alignItems: "center",
-  justifyContent: "space-between",
-  gap: "0.75rem",
-  flexWrap: "wrap",
-};
-
-const chatTabsStyle: CSSProperties = {
-  display: "flex",
-  gap: "0.4rem",
-  flexWrap: "wrap",
-};
-
-function chatTabStyle(
-  active: boolean,
-  tone: string,
-  disabled = false,
-): CSSProperties {
+function commandHeaderStyle(mapImageUrl: string, accent: string): CSSProperties {
   return {
-    border: `1px solid ${active ? `${tone}66` : "rgba(148,163,184,0.16)"}`,
-    background: active ? `${tone}18` : "rgba(2,6,23,0.5)",
-    color: disabled
-      ? "rgba(148,163,184,0.42)"
-      : active
-        ? tone
-        : "rgba(226,232,240,0.72)",
-    padding: "0.5rem 0.68rem",
-    cursor: disabled ? "not-allowed" : "pointer",
-    fontSize: "0.68rem",
-    fontWeight: 900,
-    letterSpacing: "0.1em",
-    textTransform: "uppercase",
-  };
-}
-
-const chatPanelStyle: CSSProperties = {
-  minWidth: 0,
-  display: "grid",
-  gap: "0.55rem",
-};
-
-const chatListStyle: CSSProperties = {
-  maxHeight: "142px",
-  overflowY: "auto",
-  border: "1px solid rgba(148,163,184,0.18)",
-  background: "rgba(2,6,23,0.55)",
-  padding: "0.55rem",
-  display: "grid",
-  gap: "0.45rem",
-};
-
-const chatEmptyStateStyle: CSSProperties = {
-  color: "#94a3b8",
-  fontSize: "0.9rem",
-  textAlign: "center",
-  padding: "0.75rem 0.5rem",
-};
-
-function chatMessageRowStyle(mine: boolean): CSSProperties {
-  return {
+    position: "relative",
+    overflow: "hidden",
+    minHeight: "238px",
+    border: `1px solid ${accent}30`,
+    backgroundColor: "#050b15",
+    backgroundImage: mapImageUrl
+      ? `linear-gradient(115deg, rgba(2,6,23,0.96) 0%, rgba(2,8,18,0.86) 42%, rgba(2,6,23,0.54) 100%), radial-gradient(circle at 18% 12%, ${accent}28, transparent 30%), url(${mapImageUrl})`
+      : `linear-gradient(115deg, rgba(2,6,23,0.96), rgba(4,13,26,0.86)), radial-gradient(circle at 18% 12%, ${accent}28, transparent 30%)`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    padding: "clamp(1rem, 2vw, 1.35rem)",
     display: "grid",
-    gridTemplateColumns: "28px 1fr",
-    gap: "0.55rem",
-    alignItems: "start",
-    border: "1px solid rgba(148,163,184,0.12)",
-    background: mine ? "rgba(14,116,144,0.18)" : "rgba(15,23,42,0.55)",
-    padding: "0.5rem",
+    alignContent: "space-between",
+    gap: "1.25rem",
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.05), 0 22px 54px rgba(0,0,0,0.28)",
   };
 }
 
-const chatTimestampStyle: CSSProperties = {
-  color: "#94a3b8",
-  fontSize: "0.72rem",
-  letterSpacing: "0.04em",
+const commandHeaderOverlayStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  pointerEvents: "none",
+  background:
+    "linear-gradient(90deg, rgba(255,255,255,0.035) 1px, transparent 1px), linear-gradient(0deg, rgba(255,255,255,0.025) 1px, transparent 1px)",
+  backgroundSize: "44px 44px",
+  maskImage: "linear-gradient(90deg, rgba(0,0,0,0.95), transparent 72%)",
 };
 
-const chatContentStyle: CSSProperties = {
-  color: "#e2e8f0",
-  fontSize: "0.9rem",
-  lineHeight: 1.35,
-  whiteSpace: "pre-wrap",
-  wordBreak: "break-word",
+const commandHeaderToplineStyle: CSSProperties = {
+  position: "relative",
+  zIndex: 1,
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "flex-start",
+  gap: "1rem",
+  flexWrap: "wrap",
 };
 
-const chatComposerStyle: CSSProperties = {
+const commandTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#f8fafc",
+  fontFamily: "var(--font-display)",
+  fontSize: "clamp(2rem, 5vw, 4.6rem)",
+  lineHeight: 0.86,
+  fontWeight: 950,
+  letterSpacing: "0.075em",
+  textTransform: "uppercase",
+  textShadow: "0 3px 28px rgba(0,0,0,0.75)",
+};
+
+const commandSublineStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.5rem",
+  alignItems: "center",
+  flexWrap: "wrap",
+  color: "rgba(226,232,240,0.68)",
+  fontSize: "0.82rem",
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const commandActionsStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.75rem",
+  alignItems: "center",
+  flexWrap: "wrap",
+  justifyContent: "flex-end",
+};
+
+const commandVersusGridStyle: CSSProperties = {
+  position: "relative",
+  zIndex: 1,
   display: "grid",
-  gridTemplateColumns: "1fr auto",
-  gap: "0.45rem",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "0.75rem",
+  alignItems: "stretch",
 };
 
-const chatInputStyle: CSSProperties = {
-  border: "1px solid rgba(148,163,184,0.3)",
-  background: "rgba(2,6,23,0.72)",
-  color: "#e2e8f0",
-  padding: "0.7rem 0.8rem",
-  outline: "none",
-};
-
-function chatSendButtonStyle(disabled: boolean): CSSProperties {
+function commandTeamPlateStyle(tone: string, won: boolean): CSSProperties {
   return {
-    border: "1px solid rgba(0,200,255,0.35)",
-    background: disabled
-      ? "rgba(30,41,59,0.6)"
-      : "linear-gradient(90deg, #00c8ff, #38bdf8)",
-    color: disabled ? "#94a3b8" : "#020617",
-    fontWeight: 800,
-    padding: "0.7rem 0.9rem",
-    cursor: disabled ? "not-allowed" : "pointer",
-    textTransform: "uppercase",
-    letterSpacing: "0.08em",
-    fontSize: "0.72rem",
+    minWidth: 0,
+    border: `1px solid ${won ? tone : `${tone}44`}`,
+    background: `linear-gradient(145deg, ${tone}${won ? "24" : "12"}, rgba(2,6,23,0.62) 48%, rgba(2,6,23,0.42))`,
+    padding: "0.82rem 0.9rem",
+    display: "flex",
+    justifyContent: "space-between",
+    gap: "0.8rem",
+    alignItems: "center",
+    boxShadow: won
+      ? `0 0 0 1px ${tone}22, 0 0 34px ${tone}18, inset 0 1px 0 rgba(255,255,255,0.05)`
+      : "inset 0 1px 0 rgba(255,255,255,0.035)",
   };
 }
 
-function chatCounterStyle(urgent: boolean): CSSProperties {
-  return {
-    color: urgent ? "#fda4af" : "#94a3b8",
-    fontSize: "0.75rem",
-    textAlign: "right",
-  };
-}
+const commandTeamNameStyle: CSSProperties = {
+  color: "#f8fafc",
+  fontFamily: "var(--font-display)",
+  fontSize: "clamp(1rem, 2vw, 1.45rem)",
+  fontWeight: 950,
+  letterSpacing: "0.055em",
+  textTransform: "uppercase",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
 
-const quickPromptStyle: CSSProperties = {
-  border: "1px solid rgba(125,211,252,0.18)",
-  background: "rgba(14,116,144,0.12)",
-  color: "#bae6fd",
-  padding: "0.32rem 0.5rem",
-  cursor: "pointer",
-  fontSize: "0.64rem",
-  fontWeight: 800,
-  letterSpacing: "0.06em",
+const commandTeamMetaStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.22rem",
+  justifyItems: "end",
+  color: "rgba(226,232,240,0.66)",
+  fontSize: "0.66rem",
+  fontWeight: 850,
+  letterSpacing: "0.09em",
+  textTransform: "uppercase",
   whiteSpace: "nowrap",
 };
 
-const replayUploadShellStyle: CSSProperties = {
-  position: "relative",
-  overflow: "hidden",
-  border: "1px solid rgba(56,189,248,0.26)",
+function commandCenterBladeStyle(accent: string): CSSProperties {
+  return {
+    border: `1px solid ${accent}46`,
+    background:
+      "linear-gradient(180deg, rgba(226,232,240,0.08), rgba(2,6,23,0.78))",
+    display: "grid",
+    placeItems: "center",
+    gap: "0.12rem",
+    padding: "0.72rem",
+    textAlign: "center",
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 28px ${accent}12`,
+    color: "#e2e8f0",
+    textTransform: "uppercase",
+  };
+}
+
+function telemetryPanelStyle(mapImageUrl: string): CSSProperties {
+  return {
+    position: "relative",
+    isolation: "isolate",
+    overflow: "hidden",
+    minWidth: 0,
+    display: "grid",
+    gap: "0.95rem",
+    padding: "clamp(0.9rem, 2vw, 1.25rem)",
+    border: "1px solid rgba(125,211,252,0.16)",
+    backgroundColor: "rgba(4,9,18,0.88)",
+    backgroundImage: mapImageUrl
+      ? `linear-gradient(180deg, rgba(3,8,18,0.94), rgba(3,8,18,0.88)), radial-gradient(circle at 12% 0%, rgba(0,200,255,0.18), transparent 28%), radial-gradient(circle at 88% 4%, rgba(255,71,87,0.14), transparent 30%), url(${mapImageUrl})`
+      : "linear-gradient(180deg, rgba(3,8,18,0.94), rgba(3,8,18,0.88)), radial-gradient(circle at 12% 0%, rgba(0,200,255,0.18), transparent 28%)",
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    boxShadow:
+      "inset 0 1px 0 rgba(255,255,255,0.04), 0 20px 48px rgba(0,0,0,0.22)",
+  };
+}
+
+const telemetryPanelVeilStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  zIndex: -1,
+  pointerEvents: "none",
   background:
-    "linear-gradient(135deg, rgba(14,116,144,0.22), rgba(2,6,23,0.78)), radial-gradient(circle at 85% 10%, rgba(56,189,248,0.22), transparent 32%)",
-  padding: "0.9rem",
+    "linear-gradient(90deg, rgba(125,211,252,0.045) 1px, transparent 1px), linear-gradient(0deg, rgba(125,211,252,0.035) 1px, transparent 1px)",
+  backgroundSize: "36px 36px",
+  maskImage: "linear-gradient(180deg, rgba(0,0,0,0.85), transparent 82%)",
+};
+
+const telemetryHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
-  alignItems: "center",
-  gap: "0.85rem",
+  alignItems: "flex-start",
+  gap: "1rem",
   flexWrap: "wrap",
 };
 
-function replayUploadButtonStyle(disabled: boolean): CSSProperties {
+const telemetryTitleStyle: CSSProperties = {
+  margin: 0,
+  color: "#f8fafc",
+  fontFamily: "var(--font-display)",
+  fontSize: "clamp(1.65rem, 3.2vw, 3.35rem)",
+  lineHeight: 0.9,
+  fontWeight: 950,
+  letterSpacing: "0.07em",
+  textTransform: "uppercase",
+};
+
+const telemetryDescriptionStyle: CSSProperties = {
+  margin: 0,
+  maxWidth: "760px",
+  color: "rgba(226,232,240,0.64)",
+  fontSize: "0.9rem",
+  lineHeight: 1.55,
+};
+
+function telemetryUploadButtonStyle(disabled: boolean): CSSProperties {
   return {
-    border: "1px solid rgba(56,189,248,0.5)",
+    border: `1px solid ${disabled ? "rgba(148,163,184,0.18)" : "rgba(125,211,252,0.55)"}`,
     background: disabled
-      ? "rgba(30,41,59,0.68)"
-      : "linear-gradient(90deg, rgba(56,189,248,0.96), rgba(34,211,238,0.86))",
+      ? "rgba(30,41,59,0.58)"
+      : "linear-gradient(90deg, rgba(125,211,252,0.96), rgba(34,211,238,0.9))",
     color: disabled ? "#94a3b8" : "#020617",
-    padding: "0.72rem 0.9rem",
-    minWidth: "148px",
+    padding: "0.84rem 1rem",
+    minWidth: "190px",
     cursor: disabled ? "not-allowed" : "pointer",
-    fontSize: "0.7rem",
-    fontWeight: 900,
-    letterSpacing: "0.1em",
+    fontFamily: "var(--font-display)",
+    fontSize: "0.78rem",
+    fontWeight: 950,
+    letterSpacing: "0.12em",
     textTransform: "uppercase",
+    boxShadow: disabled ? "none" : "0 0 24px rgba(34,211,238,0.14)",
   };
 }
 
@@ -2798,88 +2889,367 @@ function replayUploadNoticeStyle(error: boolean): CSSProperties {
   };
 }
 
-const replayMetaGridStyle: CSSProperties = {
+function telemetryNoticeStyle(tone: string): CSSProperties {
+  return {
+    border: `1px solid ${tone}55`,
+    color: tone,
+    padding: "0.68rem 0.78rem",
+    fontSize: "0.84rem",
+    lineHeight: 1.4,
+    fontWeight: 750,
+  };
+}
+
+function telemetryResultGridStyle(compact: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: compact ? "1fr" : "minmax(280px, 0.72fr) minmax(0, 1.28fr)",
+    gap: "0.75rem",
+    alignItems: "stretch",
+  };
+}
+
+function telemetryResultBladeStyle(winnerTeam: 1 | 2 | null, mapImageUrl: string): CSSProperties {
+  const tone = winnerTeam ? TEAM_COLORS[winnerTeam].accent : "#7dd3fc";
+  return {
+    position: "relative",
+    overflow: "hidden",
+    minHeight: "156px",
+    border: `1px solid ${tone}50`,
+    padding: "1rem",
+    display: "grid",
+    alignContent: "end",
+    gap: "0.28rem",
+    backgroundColor: "rgba(2,6,23,0.72)",
+    backgroundImage: mapImageUrl
+      ? `linear-gradient(180deg, rgba(2,6,23,0.18), rgba(2,6,23,0.92)), radial-gradient(circle at 8% 100%, ${tone}35, transparent 40%), url(${mapImageUrl})`
+      : `linear-gradient(180deg, rgba(2,6,23,0.48), rgba(2,6,23,0.92)), radial-gradient(circle at 8% 100%, ${tone}35, transparent 40%)`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 32px ${tone}12`,
+  };
+}
+
+const telemetryMicroLabelStyle: CSSProperties = {
+  color: "rgba(226,232,240,0.72)",
+  fontSize: "0.68rem",
+  fontWeight: 900,
+  letterSpacing: "0.16em",
+  textTransform: "uppercase",
+};
+
+function telemetryWinnerStyle(winnerTeam: 1 | 2 | null): CSSProperties {
+  const tone = winnerTeam ? TEAM_COLORS[winnerTeam].accent : "#e2e8f0";
+  return {
+    color: tone,
+    fontFamily: "var(--font-display)",
+    fontSize: "clamp(1.35rem, 3vw, 2.15rem)",
+    lineHeight: 0.95,
+    fontWeight: 950,
+    letterSpacing: "0.06em",
+    textTransform: "uppercase",
+    textShadow: `0 0 22px ${tone}30`,
+  };
+}
+
+const telemetryResultMetaStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.42rem",
+  flexWrap: "wrap",
+  color: "rgba(226,232,240,0.78)",
+  fontSize: "0.78rem",
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+function telemetryKpiGridStyle(narrow: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: narrow ? "1fr 1fr" : "repeat(3, minmax(0, 1fr))",
+    gap: "0.55rem",
+  };
+}
+
+function telemetryKpiStyle(tone: string, large: boolean): CSSProperties {
+  return {
+    minWidth: 0,
+    border: `1px solid ${tone}28`,
+    background: `linear-gradient(180deg, ${tone}12, rgba(2,6,23,0.62))`,
+    padding: large ? "0.82rem 0.9rem" : "0.68rem 0.72rem",
+    display: "grid",
+    gap: "0.18rem",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035)",
+  };
+}
+
+const telemetryUploadMetaStyle: CSSProperties = {
+  display: "flex",
+  gap: "0.6rem",
+  flexWrap: "wrap",
+  color: "rgba(226,232,240,0.58)",
+  fontSize: "0.72rem",
+  letterSpacing: "0.04em",
+};
+
+function combatKpiGridStyle(narrow: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: narrow ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(0, 1fr))",
+    gap: "0.58rem",
+  };
+}
+
+function teamTotalsGridStyle(narrow: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+    gap: "0.72rem",
+  };
+}
+
+function teamTelemetryCardStyle(tone: string, won: boolean): CSSProperties {
+  return {
+    border: `1px solid ${won ? tone : `${tone}33`}`,
+    background: `linear-gradient(145deg, ${tone}${won ? "1f" : "10"}, rgba(2,6,23,0.68) 54%, rgba(2,6,23,0.5))`,
+    padding: "0.82rem",
+    display: "grid",
+    gap: "0.75rem",
+    boxShadow: won ? `0 0 32px ${tone}14, inset 0 1px 0 rgba(255,255,255,0.04)` : "inset 0 1px 0 rgba(255,255,255,0.03)",
+  };
+}
+
+const teamTelemetryHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "0.75rem",
+  alignItems: "flex-start",
+};
+
+function teamTelemetryResultStyle(won: boolean): CSSProperties {
+  return {
+    border: `1px solid ${won ? "rgba(74,222,128,0.44)" : "rgba(148,163,184,0.16)"}`,
+    background: won ? "rgba(74,222,128,0.12)" : "rgba(15,23,42,0.58)",
+    color: won ? "#86efac" : "#94a3b8",
+    padding: "0.3rem 0.48rem",
+    fontSize: "0.62rem",
+    fontWeight: 950,
+    letterSpacing: "0.1em",
+    textTransform: "uppercase",
+    whiteSpace: "nowrap",
+  };
+}
+
+const teamTelemetryStatsStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "repeat(4, minmax(0, 1fr))",
+  gridTemplateColumns: "repeat(auto-fit, minmax(118px, 1fr))",
+  gap: "0.5rem",
+};
+
+function telemetryMiniStatStyle(tone: string): CSSProperties {
+  return {
+    minWidth: 0,
+    border: `1px solid ${tone}22`,
+    background: "rgba(2,6,23,0.44)",
+    padding: "0.48rem 0.52rem",
+    display: "grid",
+    gap: "0.1rem",
+  };
+}
+
+const dossierSectionHeaderStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "0.85rem",
+  alignItems: "end",
+  flexWrap: "wrap",
+  color: "#e2e8f0",
+};
+
+function playerDossierGridStyle(narrow: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
+    gap: "0.68rem",
+  };
+}
+
+function playerDossierStyle(tone: string, won: boolean, current: boolean): CSSProperties {
+  return {
+    border: `1px solid ${current ? "#facc15" : won ? `${tone}48` : "rgba(148,163,184,0.18)"}`,
+    background: `linear-gradient(145deg, ${tone}${won ? "16" : "0d"}, rgba(2,6,23,0.78) 42%, rgba(2,6,23,0.58))`,
+    boxShadow: current
+      ? "0 0 0 1px rgba(250,204,21,0.24), 0 0 28px rgba(250,204,21,0.12)"
+      : "inset 0 1px 0 rgba(255,255,255,0.03)",
+  };
+}
+
+const playerDossierSummaryStyle: CSSProperties = {
+  listStyle: "none",
+  cursor: "pointer",
+  display: "flex",
+  flexWrap: "wrap",
+  gap: "0.72rem",
+  alignItems: "center",
+  padding: "0.72rem",
+};
+
+function heroEmblemStyle(tone: string, won: boolean): CSSProperties {
+  return {
+    width: "48px",
+    height: "48px",
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${tone}5a`,
+    background: won ? `${tone}20` : "rgba(15,23,42,0.72)",
+    color: tone,
+    fontFamily: "var(--font-display)",
+    fontSize: "1.05rem",
+    fontWeight: 950,
+    letterSpacing: "0.08em",
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 20px ${tone}12`,
+  };
+}
+
+const playerDossierNameRowStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.38rem",
+  minWidth: 0,
+};
+
+const currentUserTagStyle: CSSProperties = {
+  border: "1px solid rgba(250,204,21,0.46)",
+  background: "rgba(250,204,21,0.13)",
+  color: "#fde68a",
+  padding: "0.12rem 0.32rem",
+  fontSize: "0.54rem",
+  fontWeight: 950,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+};
+
+function winLossTagStyle(won: boolean): CSSProperties {
+  return {
+    border: `1px solid ${won ? "rgba(74,222,128,0.42)" : "rgba(248,113,113,0.42)"}`,
+    background: won ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)",
+    color: won ? "#86efac" : "#fca5a5",
+    padding: "0.12rem 0.32rem",
+    fontSize: "0.54rem",
+    fontWeight: 950,
+    letterSpacing: "0.1em",
+  };
+}
+
+const playerDossierHeroStyle: CSSProperties = {
+  color: "#e2e8f0",
+  fontSize: "0.84rem",
+  fontWeight: 850,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const playerDossierSubStyle: CSSProperties = {
+  color: "rgba(148,163,184,0.78)",
+  fontSize: "0.72rem",
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const playerDossierQuickStatsStyle: CSSProperties = {
+  marginLeft: "auto",
+  display: "grid",
+  gridTemplateColumns: "repeat(3, minmax(72px, 1fr)) auto",
+  gap: "0.38rem",
+  alignItems: "stretch",
+};
+
+const expandHintStyle: CSSProperties = {
+  alignSelf: "stretch",
+  display: "grid",
+  placeItems: "center",
+  border: "1px solid rgba(125,211,252,0.2)",
+  background: "rgba(14,116,144,0.12)",
+  color: "#bae6fd",
+  padding: "0.35rem 0.48rem",
+  fontSize: "0.58rem",
+  fontWeight: 950,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+};
+
+function playerDossierExpandedStyle(tone: string): CSSProperties {
+  return {
+    borderTop: `1px solid ${tone}24`,
+    padding: "0 0.72rem 0.72rem",
+    display: "grid",
+    gap: "0.72rem",
+  };
+}
+
+const playerDetailGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))",
+  gap: "0.45rem",
+};
+
+const replayDetailStyle: CSSProperties = {
+  minWidth: 0,
+  border: "1px solid rgba(148,163,184,0.14)",
+  background: "rgba(2,6,23,0.46)",
+  padding: "0.5rem 0.55rem",
+  display: "grid",
+  gap: "0.12rem",
+};
+
+const statBarGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
   gap: "0.55rem",
 };
 
-const replayPlayersStripStyle: CSSProperties = {
-  display: "flex",
-  gap: "0.42rem",
-  overflowX: "auto",
-  paddingBottom: "0.1rem",
-};
-
-const replayStatsWrapStyle: CSSProperties = {
+const replayStatBarWrapStyle: CSSProperties = {
   display: "grid",
-  gap: "0.45rem",
-  border: "1px solid rgba(148,163,184,0.18)",
-  background: "rgba(2,6,23,0.62)",
-  padding: "0.75rem",
+  gap: "0.36rem",
 };
 
-const replayStatsHeaderStyle: CSSProperties = {
-  color: "#cbd5e1",
-  fontSize: "0.74rem",
-  fontWeight: 900,
-  letterSpacing: "0.12em",
+const replayStatBarLabelStyle: CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  gap: "0.65rem",
+  color: "rgba(226,232,240,0.7)",
+  fontSize: "0.72rem",
+  fontWeight: 850,
+  letterSpacing: "0.06em",
   textTransform: "uppercase",
 };
 
-const replayStatsTableScrollStyle: CSSProperties = {
-  overflowX: "auto",
+const replayStatTrackStyle: CSSProperties = {
+  height: "9px",
+  border: "1px solid rgba(148,163,184,0.15)",
+  background: "rgba(2,6,23,0.72)",
+  overflow: "hidden",
 };
 
-const replayStatsTableStyle: CSSProperties = {
-  width: "100%",
-  minWidth: "920px",
-  borderCollapse: "collapse",
-};
-
-const replayStatsHeadCellStyle: CSSProperties = {
-  textAlign: "left",
-  color: "#7dd3fc",
-  fontSize: "0.68rem",
-  letterSpacing: "0.12em",
-  textTransform: "uppercase",
-  fontWeight: 900,
-  padding: "0.55rem 0.6rem",
-  borderBottom: "1px solid rgba(125,211,252,0.16)",
-  whiteSpace: "nowrap",
-};
-
-function replayStatsRowStyle(team: 1 | 2, won: boolean): CSSProperties {
-  const tone = TEAM_COLORS[team].accent;
+function replayStatFillStyle(width: number, tone: string): CSSProperties {
   return {
-    background: won ? `${tone}08` : "rgba(15,23,42,0.55)",
-    borderBottom: `1px solid ${tone}18`,
+    width: `${width}%`,
+    height: "100%",
+    background: `linear-gradient(90deg, ${tone}, ${tone}aa)`,
+    boxShadow: `0 0 18px ${tone}44`,
   };
 }
 
-function replayStatsBodyCellStyle(emphasis = false): CSSProperties {
-  return {
-    padding: "0.58rem 0.6rem",
-    color: emphasis ? "#e2e8f0" : "#cbd5e1",
-    fontSize: "0.78rem",
-    whiteSpace: "nowrap",
-    verticalAlign: "middle",
-  };
-}
-
-function replayPlayerPillStyle(team: 1 | 2): CSSProperties {
-  const tone = TEAM_COLORS[team].accent;
-  return {
-    minWidth: "118px",
-    border: `1px solid ${tone}33`,
-    background: `${tone}10`,
-    padding: "0.45rem 0.55rem",
-    display: "grid",
-    gap: "0.12rem",
-    color: "#e2e8f0",
-    fontSize: "0.72rem",
-  };
-}
+const telemetryEmptyStateStyle: CSSProperties = {
+  border: "1px dashed rgba(125,211,252,0.24)",
+  background: "rgba(2,6,23,0.42)",
+  padding: "1rem",
+  display: "grid",
+  gap: "0.4rem",
+  color: "rgba(226,232,240,0.7)",
+};
 
 const vetoHintStripStyle: CSSProperties = {
   display: "flex",

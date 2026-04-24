@@ -720,3 +720,5 @@ Esto crea la base visual y de navegación para ordenar todo lo demás.
 ## URGENTES
 
 Cuando logueamos con discord nos manda a un /admin y sino nos loguea pero nos deja en /login, nos debe mandar al dashboard.
+
+Mejorar ampliamente las stats de la replay cargada.

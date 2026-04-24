@@ -24,65 +24,6 @@ function upsertMvpVote(
   return next
 }
 
-type MatchChatMessage = {
-  id: string
-  userId: string
-  username: string
-  avatar: string | null
-  content: string
-  channel: 'GLOBAL' | 'TEAM'
-  team: 1 | 2 | null
-  timestamp: string
-}
-
-function normalizeChatMessage(raw: any): MatchChatMessage | null {
-  const id = typeof raw?.id === 'string' ? raw.id : null
-  const userId = typeof raw?.userId === 'string' ? raw.userId : null
-  const username = typeof raw?.username === 'string'
-    ? raw.username
-    : typeof raw?.user?.username === 'string'
-      ? raw.user.username
-      : null
-  const avatar = typeof raw?.avatar === 'string'
-    ? raw.avatar
-    : typeof raw?.user?.avatar === 'string'
-      ? raw.user.avatar
-      : null
-  const content = typeof raw?.content === 'string' ? raw.content : null
-  const timestampRaw = raw?.timestamp ?? raw?.createdAt ?? raw?.updatedAt ?? null
-
-  if (!id || !userId || !username || !content || !timestampRaw) return null
-  const timestampDate = new Date(timestampRaw)
-  if (Number.isNaN(timestampDate.getTime())) return null
-
-  const rawChannel = typeof raw?.channel === 'string' ? raw.channel.toUpperCase() : 'GLOBAL'
-  const channel = rawChannel === 'TEAM' ? 'TEAM' : 'GLOBAL'
-  const team = raw?.team === 1 || raw?.team === 2 ? raw.team : null
-
-  return {
-    id,
-    userId,
-    username,
-    avatar: avatar ?? null,
-    content,
-    channel,
-    team,
-    timestamp: timestampDate.toISOString(),
-  }
-}
-
-function mergeChatMessages(
-  current: MatchChatMessage[],
-  incoming: MatchChatMessage[],
-): MatchChatMessage[] {
-  const byId = new Map<string, MatchChatMessage>()
-  for (const message of [...current, ...incoming]) {
-    byId.set(message.id, message)
-  }
-  return [...byId.values()].sort(
-    (a, b) => new Date(a.timestamp).getTime() - new Date(b.timestamp).getTime(),
-  )
-}
 
 export function MatchRoom() {
   const { matchId } = useParams({ strict: false }) as { matchId: string }
@@ -90,7 +31,6 @@ export function MatchRoom() {
   const { user } = useAuthStore()
   const resetMatchmaking = useMatchmakingStore((state) => state.resetMatchmaking)
   const [match, setMatch] = useState<any | null>(null)
-  const [chatMessages, setChatMessages] = useState<MatchChatMessage[]>([])
   const [loading, setLoading] = useState(true)
   const [loadError, setLoadError] = useState<string | null>(null)
 
@@ -112,13 +52,6 @@ export function MatchRoom() {
 
     const onMatchState = (payload: any) => {
       setMatch(payload)
-
-      if (Array.isArray(payload?.messages)) {
-        const normalized = payload.messages
-          .map(normalizeChatMessage)
-          .filter((message: MatchChatMessage | null): message is MatchChatMessage => message != null)
-        setChatMessages(normalized)
-      }
     }
     const onVetoStart = (payload: any) => {
       syncMatch((prev) => ({
@@ -305,11 +238,6 @@ export function MatchRoom() {
     const onCancelled = () => {
       syncMatch((prev) => ({ ...prev, status: 'CANCELLED' }))
     }
-    const onChatMessage = (payload: any) => {
-      const normalized = normalizeChatMessage(payload)
-      if (!normalized) return
-      setChatMessages((prev) => mergeChatMessages(prev, [normalized]))
-    }
     const onDiscordVoice = (payload: any) => {
       if (!payload || payload.matchId !== matchId) return
       syncMatch((prev) => ({
@@ -334,7 +262,6 @@ export function MatchRoom() {
     socket.on('match:cancel:update', onCancelUpdate)
     socket.on('match:cancelled', onCancelled)
     socket.on('matchmaking:cancelled', onCancelled)
-    socket.on('chat:message', onChatMessage)
     socket.on('match:discord_voice', onDiscordVoice)
 
     api
@@ -348,16 +275,6 @@ export function MatchRoom() {
       })
       .finally(() => setLoading(false))
 
-    api.get(`/matches/${matchId}/chat`)
-      .then(({ data }) => {
-        const normalized = Array.isArray(data)
-          ? data
-              .map(normalizeChatMessage)
-              .filter((message): message is MatchChatMessage => message != null)
-          : []
-        setChatMessages((prev) => mergeChatMessages(prev, normalized))
-      })
-      .catch(() => {})
 
     return () => {
       socket.off('match:state', onMatchState)
@@ -376,7 +293,6 @@ export function MatchRoom() {
       socket.off('match:cancel:update', onCancelUpdate)
       socket.off('match:cancelled', onCancelled)
       socket.off('matchmaking:cancelled', onCancelled)
-      socket.off('chat:message', onChatMessage)
       socket.off('match:discord_voice', onDiscordVoice)
       socket.off('connect', joinMatchRoom)
     }
@@ -396,7 +312,7 @@ export function MatchRoom() {
       <RoomShellCard
         eyebrow='Match room'
         title='Sincronizando sala'
-        description='Estamos trayendo el estado vivo del match, los equipos y el chat operativo.'
+        description='Estamos trayendo el estado vivo del match, equipos y telemetría competitiva.'
       />
     )
   }
@@ -418,10 +334,6 @@ export function MatchRoom() {
       currentUserId={user.id}
       currentUserRole={user.role}
       match={match}
-      chatMessages={chatMessages}
-      onSendMessage={(content, channel) => {
-        getSocket().emit('chat:send', { matchId: match.id, content, channel })
-      }}
       onBanMap={(mapId) => getSocket().emit('veto:ban', { matchId: match.id, mapId })}
       onReady={() => getSocket().emit('match:ready', { matchId: match.id })}
       onFinishMatch={() => getSocket().emit('match:finish', { matchId: match.id })}
