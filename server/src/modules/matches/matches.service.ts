@@ -61,6 +61,15 @@ type ReplayValidationSummary = {
   expectedHumanPlayers?: number
   matchedPlayers?: number
   minimumMatchedPlayers?: number
+  battleTagLinkedPlayers?: number
+  battleTagMatchedPlayers?: number
+  usernameMatchedPlayers?: number
+  missingBattleTagPlayers?: number
+  battleTagMismatches?: number
+  teamMismatches?: number
+  identityConfidence?: 'high' | 'medium' | 'low'
+  trustScore?: number
+  issues?: string[]
 }
 
 type ReplayDecisionStatus =
@@ -82,6 +91,11 @@ type ReplayDecision = {
   expectedHumanPlayers: number
   minimumMatchedPlayers: number
   eligibleForAutoWinner: boolean
+  identityConfidence: 'high' | 'medium' | 'low'
+  trustScore: number
+  battleTagMatchedPlayers: number
+  battleTagMismatches: number
+  teamMismatches: number
   decidedAt: string
 }
 
@@ -174,7 +188,19 @@ export async function applyReplayWinnerResolution(matchId: string, upload: {
     ? Math.max(4, validation?.minimumMatchedPlayers ?? Math.ceil(expectedHumanPlayers * 0.6))
     : 0
   const enoughPlayers = expectedHumanPlayers === 0 ? matchedPlayers > 0 : matchedPlayers >= minimumMatchedPlayers
-  const eligibleForAutoWinner = Boolean(upload.parsedWinnerTeam && mapMatches && enoughPlayers)
+  const trustScore = Math.max(0, Math.min(100, validation?.trustScore ?? 0))
+  const battleTagMismatches = Math.max(0, validation?.battleTagMismatches ?? 0)
+  const teamMismatches = Math.max(0, validation?.teamMismatches ?? 0)
+  const identityConfidence = validation?.identityConfidence ?? 'low'
+  const hasBlockingIdentityIssues = battleTagMismatches > 0 || teamMismatches > 0
+  const eligibleForAutoWinner = Boolean(
+    upload.parsedWinnerTeam &&
+    mapMatches &&
+    enoughPlayers &&
+    trustScore >= 60 &&
+    identityConfidence !== 'low' &&
+    !hasBlockingIdentityIssues,
+  )
 
   const match = await db.match.findUnique({
     where: { id: matchId },
@@ -200,6 +226,11 @@ export async function applyReplayWinnerResolution(matchId: string, upload: {
     expectedHumanPlayers,
     minimumMatchedPlayers,
     eligibleForAutoWinner,
+    identityConfidence,
+    trustScore,
+    battleTagMatchedPlayers: Math.max(0, validation?.battleTagMatchedPlayers ?? 0),
+    battleTagMismatches,
+    teamMismatches,
     decidedAt,
   }
 
@@ -232,6 +263,22 @@ export async function applyReplayWinnerResolution(matchId: string, upload: {
       ...baseDecision,
       status: 'awaiting_manual_vote',
       message: `El replay sólo matcheó ${matchedPlayers}/${expectedHumanPlayers || '?'} jugadores; dejamos la resolución manual.`,
+    }
+  }
+
+  if (hasBlockingIdentityIssues) {
+    return {
+      ...baseDecision,
+      status: 'awaiting_manual_vote',
+      message: 'El replay tiene inconsistencias de identidad/equipo; dejamos la resolución manual para evitar falsos positivos.',
+    }
+  }
+
+  if (!eligibleForAutoWinner) {
+    return {
+      ...baseDecision,
+      status: 'awaiting_manual_vote',
+      message: `Confianza del replay ${trustScore}/100 (${identityConfidence}); falta identidad BattleTag suficiente para autocerrar.`,
     }
   }
 

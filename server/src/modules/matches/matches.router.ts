@@ -10,12 +10,13 @@ import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
 import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
 import { ingestMatchReplay, listMatchReplayUploads, persistReplayUploadSummary } from './replay-processor.service'
+import { getReplayUploadTempDir } from './replay-storage.service'
 
 export const matchesRouter = Router()
 
 matchesRouter.use(authenticate)
 
-const replayUploadDir = process.env.REPLAY_UPLOAD_DIR || path.join(process.cwd(), 'uploads', 'replays')
+const replayUploadDir = getReplayUploadTempDir()
 fs.mkdirSync(replayUploadDir, { recursive: true })
 
 const replayUpload = multer({
@@ -263,7 +264,23 @@ matchesRouter.post('/:matchId/replays', replayUpload.single('replay'), async (re
         result.upload.parsedWinnerTeam === 1 || result.upload.parsedWinnerTeam === 2
           ? result.upload.parsedWinnerTeam
           : null,
-      parsedSummary: normalizedSummary as { validation?: { mapMatches?: boolean; expectedHumanPlayers?: number; matchedPlayers?: number; minimumMatchedPlayers?: number } } | null,
+      parsedSummary: normalizedSummary as {
+        validation?: {
+          mapMatches?: boolean
+          expectedHumanPlayers?: number
+          matchedPlayers?: number
+          minimumMatchedPlayers?: number
+          battleTagLinkedPlayers?: number
+          battleTagMatchedPlayers?: number
+          usernameMatchedPlayers?: number
+          missingBattleTagPlayers?: number
+          battleTagMismatches?: number
+          teamMismatches?: number
+          identityConfidence?: 'high' | 'medium' | 'low'
+          trustScore?: number
+          issues?: string[]
+        }
+      } | null,
     })
     if (normalizedSummary) {
       const nextSummary = {

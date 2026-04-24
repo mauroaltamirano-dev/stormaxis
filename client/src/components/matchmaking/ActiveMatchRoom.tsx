@@ -110,6 +110,15 @@ type ReplayUpload = {
       matchedPlayers?: number;
       minimumMatchedPlayers?: number;
       winnerDetected?: 1 | 2 | null;
+      battleTagLinkedPlayers?: number;
+      battleTagMatchedPlayers?: number;
+      usernameMatchedPlayers?: number;
+      missingBattleTagPlayers?: number;
+      battleTagMismatches?: number;
+      teamMismatches?: number;
+      identityConfidence?: "high" | "medium" | "low";
+      trustScore?: number;
+      issues?: string[];
     };
     resolution?: {
       status?: ReplayResolutionStatus;
@@ -118,6 +127,11 @@ type ReplayUpload = {
       replayWinner?: 1 | 2 | null;
       existingWinner?: 1 | 2 | null;
       eligibleForAutoWinner?: boolean;
+      identityConfidence?: "high" | "medium" | "low";
+      trustScore?: number;
+      battleTagMatchedPlayers?: number;
+      battleTagMismatches?: number;
+      teamMismatches?: number;
       decidedAt?: string;
     };
     match?: {
@@ -144,6 +158,7 @@ type ReplayUpload = {
       healing?: number | null;
       experience?: number | null;
     }>;
+    warnings?: string[];
   } | null;
   uploadedBy?: { id: string; username: string } | null;
   createdAt: string;
@@ -309,11 +324,6 @@ export function ActiveMatchRoom({
     ? Math.max(0, Math.round((mvpVotingExpiresAt - now) / 1000))
     : null;
   const selectedMap = match.selectedMap ?? getSelectedMapFromVeto(match);
-  const mvpPlayer =
-    match.mvpUserId != null
-      ? (match.players.find((player) => player.userId === match.mvpUserId) ??
-        null)
-      : null;
   const isCaptainTurn = Boolean(
     isParticipant &&
     match.status === "VETOING" &&
@@ -337,8 +347,7 @@ export function ActiveMatchRoom({
   const isMobile = viewportWidth < 940;
   const isNarrow = viewportWidth < 720;
   const showDiscordVoicePanel =
-    Boolean(match.discordVoice?.enabled) &&
-    match.status === "PLAYING";
+    Boolean(match.discordVoice?.enabled) && match.status === "PLAYING";
   const mapCards = useMemo(() => {
     return HOTS_MAPS.map((map) => {
       const veto = match.vetoes.find(
@@ -368,8 +377,10 @@ export function ActiveMatchRoom({
             : "success",
         message:
           upload.status === "FAILED"
-            ? upload.parseError ?? "El archivo se subió, pero el parser no pudo leerlo."
-            : resolutionMessage ?? "Replay procesado. Ya tenemos metadata real de la partida.",
+            ? (upload.parseError ??
+              "El archivo se subió, pero el parser no pudo leerlo.")
+            : (resolutionMessage ??
+              "Replay procesado. Ya tenemos metadata real de la partida."),
       });
     } catch (err) {
       setReplayUploadState({
@@ -537,11 +548,7 @@ export function ActiveMatchRoom({
                 }
                 compact
               />
-              <MapSelectedCard
-                mapName={selectedMap}
-                compact={isNarrow}
-                dense
-              />
+              <MapSelectedCard mapName={selectedMap} compact={isNarrow} dense />
               <ProgressRail
                 label="Operatividad de lobby"
                 value={connectedCount}
@@ -855,40 +862,6 @@ export function ActiveMatchRoom({
             }
             compact
           />
-          {mvpPlayer && (
-            <StageCallout
-              tone="#facc15"
-              label="MVP oficial"
-              title={mvpPlayer.user.username}
-              description="El MVP ya quedó consolidado junto al resultado. Las variaciones de MMR ahora viven dentro de la ficha de cada jugador."
-              rightSlot={
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "0.65rem",
-                    padding: "0.55rem 0.65rem",
-                    border: "1px solid rgba(250,204,21,0.32)",
-                    background: "rgba(250,204,21,0.12)",
-                  }}
-                >
-                  <AvatarCell
-                    username={mvpPlayer.user.username}
-                    avatar={mvpPlayer.user.avatar}
-                    size={42}
-                  />
-                  <div style={{ display: "grid", gap: "0.12rem" }}>
-                    <strong style={{ color: "#fef08a" }}>
-                      {mvpPlayer.user.username}
-                    </strong>
-                    <small style={{ color: "rgba(254,240,138,0.8)" }}>
-                      Team {mvpPlayer.team} · {mvpPlayer.user.rank}
-                    </small>
-                  </div>
-                </div>
-              }
-            />
-          )}
           <button type="button" onClick={onBack} style={playAgainButtonStyle}>
             Volver a jugar
           </button>
@@ -955,19 +928,35 @@ export function ActiveMatchRoom({
           <div style={{ display: "grid", gap: "0.8rem" }}>
             {centerColumn}
             <div style={mobileTeamGridStyle(isNarrow)}>
-              <TeamColumn team={teams.left} teamNumber={1} compact={isTablet} />
+              <TeamColumn
+                team={teams.left}
+                teamNumber={1}
+                compact={isTablet}
+                completed={match.status === "COMPLETED"}
+              />
               <TeamColumn
                 team={teams.right}
                 teamNumber={2}
                 compact={isTablet}
+                completed={match.status === "COMPLETED"}
               />
             </div>
           </div>
         ) : (
           <div style={teamsGridStyle(isTablet)}>
-            <TeamColumn team={teams.left} teamNumber={1} compact={isTablet} />
+            <TeamColumn
+              team={teams.left}
+              teamNumber={1}
+              compact={isTablet}
+              completed={match.status === "COMPLETED"}
+            />
             {centerColumn}
-            <TeamColumn team={teams.right} teamNumber={2} compact={isTablet} />
+            <TeamColumn
+              team={teams.right}
+              teamNumber={2}
+              compact={isTablet}
+              completed={match.status === "COMPLETED"}
+            />
           </div>
         )}
 
@@ -1009,30 +998,40 @@ function RoomCommandHeader({
   match: MatchState;
   selectedMap: string;
   statusMeta: ReturnType<typeof getMatchLifecycleMeta>;
-  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> };
+  teams: {
+    left: ReturnType<typeof toDisplayTeam>;
+    right: ReturnType<typeof toDisplayTeam>;
+  };
   allConnected: boolean;
   canRequestCancel: boolean;
   cancelRequestedByMe: boolean;
   onCancelMatch: () => void;
   onBack: () => void;
 }) {
-  const winnerTeam = match.winner === 1 || match.winner === 2 ? match.winner : null;
+  const winnerTeam =
+    match.winner === 1 || match.winner === 2 ? match.winner : null;
   const accent = winnerTeam ? TEAM_COLORS[winnerTeam].accent : statusMeta.tone;
   const mapName = selectedMap || "Mapa pendiente";
   const mapImageUrl = getMapImageUrl(mapName);
   const leftWon = winnerTeam === 1;
   const rightWon = winnerTeam === 2;
-  const humanPlayersCount = match.players.filter((player) => !player.isBot).length;
+  const humanPlayersCount = match.players.filter(
+    (player) => !player.isBot,
+  ).length;
 
   return (
     <header style={commandHeaderStyle(mapImageUrl, accent)}>
       <div style={commandHeaderOverlayStyle} />
       <div style={commandHeaderToplineStyle}>
         <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
-          <div style={{ ...eyebrowStyle, color: accent }}>Nexus command room</div>
+          <div style={{ ...eyebrowStyle, color: accent }}>
+            Nexus command room
+          </div>
           <h1 style={commandTitleStyle}>MatchRoom Active</h1>
           <div style={commandSublineStyle}>
-            <span style={{ color: accent, fontWeight: 950 }}>{statusMeta.phase}</span>
+            <span style={{ color: accent, fontWeight: 950 }}>
+              {statusMeta.phase}
+            </span>
             <span>{statusMeta.stage ?? statusMeta.detail}</span>
             <span>·</span>
             <span>{mapName}</span>
@@ -1046,7 +1045,9 @@ function RoomCommandHeader({
               disabled={cancelRequestedByMe}
               style={dangerButtonStyle(cancelRequestedByMe)}
             >
-              {cancelRequestedByMe ? "Cancelación pedida" : "Cancelar match (test)"}
+              {cancelRequestedByMe
+                ? "Cancelación pedida"
+                : "Cancelar match (test)"}
             </button>
           )}
           {match.status !== "COMPLETED" && (
@@ -1058,21 +1059,37 @@ function RoomCommandHeader({
       </div>
 
       <div style={commandVersusGridStyle}>
-        <CommandTeamPlate team={teams.left} teamNumber={1} won={leftWon} />
+        <CommandTeamPlate
+          team={teams.left}
+          teamNumber={1}
+          won={leftWon}
+          completed={match.status === "COMPLETED"}
+        />
         <div style={commandCenterBladeStyle(accent)}>
-          <span>{match.status === "COMPLETED" ? "Resultado" : allConnected ? "Lobby armado" : "Sincronizando"}</span>
-          <strong>{winnerTeam ? `Ganó Team ${winnerTeam}` : "VS"}</strong>
+          <span>
+            {match.status === "COMPLETED"
+              ? "Match finalizado"
+              : allConnected
+                ? "Lobby armado"
+                : "Sincronizando"}
+          </span>
+          <strong>VS</strong>
           <small>
             {match.status === "COMPLETED"
               ? match.duration
-                ? formatDuration(match.duration)
+                ? `Duración: ${formatDuration(match.duration)}`
                 : "Cierre competitivo"
               : allConnected
                 ? `${humanPlayersCount} jugadores listos`
                 : "Esperando confirmaciones"}
           </small>
         </div>
-        <CommandTeamPlate team={teams.right} teamNumber={2} won={rightWon} />
+        <CommandTeamPlate
+          team={teams.right}
+          teamNumber={2}
+          won={rightWon}
+          completed={match.status === "COMPLETED"}
+        />
       </div>
     </header>
   );
@@ -1082,10 +1099,12 @@ function CommandTeamPlate({
   team,
   teamNumber,
   won,
+  completed,
 }: {
   team: ReturnType<typeof toDisplayTeam>;
   teamNumber: 1 | 2;
   won: boolean;
+  completed: boolean;
 }) {
   const tone = TEAM_COLORS[teamNumber].accent;
 
@@ -1098,15 +1117,22 @@ function CommandTeamPlate({
         <strong style={commandTeamNameStyle}>{team.name}</strong>
       </div>
       <div style={commandTeamMetaStyle}>
-        <span>{team.realPlayersCount}/5 activos</span>
-        <span>{team.avgWinrate}% WR avg</span>
-        {won && <span style={{ color: "#86efac" }}>Winner</span>}
+        {completed ? (
+          <span style={commandOutcomeBadgeStyle(won)}>{won ? "W" : "L"}</span>
+        ) : (
+          <>
+            <span>{team.realPlayersCount}/5 activos</span>
+            <span>{team.avgWinrate}% WR avg</span>
+          </>
+        )}
       </div>
     </div>
   );
 }
 
-type ReplayPlayerSummary = NonNullable<NonNullable<ReplayUpload["parsedSummary"]>["players"]>[number];
+type ReplayPlayerSummary = NonNullable<
+  NonNullable<ReplayUpload["parsedSummary"]>["players"]
+>[number];
 type ReplayMetricKey =
   | "takedowns"
   | "kills"
@@ -1116,6 +1142,7 @@ type ReplayMetricKey =
   | "siegeDamage"
   | "healing"
   | "experience";
+type MatchPostTab = "overview" | "stats";
 
 function MatchTelemetryPanel({
   match,
@@ -1131,26 +1158,40 @@ function MatchTelemetryPanel({
 }: {
   match: MatchState;
   selectedMap: string;
-  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> };
+  teams: {
+    left: ReturnType<typeof toDisplayTeam>;
+    right: ReturnType<typeof toDisplayTeam>;
+  };
   currentUserId: string;
   uploads: ReplayUpload[];
   canUpload: boolean;
-  uploadState: { status: "idle" | "uploading" | "success" | "error"; message: string | null };
+  uploadState: {
+    status: "idle" | "uploading" | "success" | "error";
+    message: string | null;
+  };
   compact: boolean;
   narrow: boolean;
   onChooseFile: () => void;
 }) {
   const latest = uploads[0] ?? null;
   const parsedPlayers = sortReplayPlayers(latest?.parsedSummary?.players ?? []);
+  const hasReplayStats = parsedPlayers.length > 0;
+  const [activeTab, setActiveTab] = useState<MatchPostTab>("overview");
   const validation = latest?.parsedSummary?.validation;
   const resolution = latest?.parsedSummary?.resolution;
   const replayMatch = latest?.parsedSummary?.match;
+  const trustScore = validation?.trustScore ?? resolution?.trustScore ?? null;
+  const identityConfidence =
+    validation?.identityConfidence ?? resolution?.identityConfidence ?? null;
+  const replayWarnings =
+    validation?.issues ?? latest?.parsedSummary?.warnings ?? [];
   const mapName = latest?.parsedMap ?? replayMatch?.map ?? selectedMap;
   const mapImageUrl = getMapImageUrl(mapName);
   const winnerTeam =
     match.winner ?? latest?.parsedWinnerTeam ?? replayMatch?.winnerTeam ?? null;
   const winnerName = getTeamDisplayName(teams, winnerTeam);
-  const duration = latest?.parsedDuration ?? replayMatch?.duration ?? match.duration ?? null;
+  const duration =
+    latest?.parsedDuration ?? replayMatch?.duration ?? match.duration ?? null;
   const statusTone = getReplayUploadStatusTone(latest?.status);
   const resolutionTone = getReplayResolutionTone(resolution?.status);
   const topDamage = getTopReplayPlayer(parsedPlayers, "heroDamage");
@@ -1163,22 +1204,48 @@ function MatchTelemetryPanel({
   const teamOneTotals = getTeamReplayTotals(parsedPlayers, 1);
   const teamTwoTotals = getTeamReplayTotals(parsedPlayers, 2);
   const maxValues = {
-    heroDamage: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "heroDamage"))),
-    siegeDamage: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "siegeDamage"))),
-    healing: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "healing"))),
-    experience: Math.max(1, ...parsedPlayers.map((player) => getReplayMetricValue(player, "experience"))),
+    heroDamage: Math.max(
+      1,
+      ...parsedPlayers.map((player) =>
+        getReplayMetricValue(player, "heroDamage"),
+      ),
+    ),
+    siegeDamage: Math.max(
+      1,
+      ...parsedPlayers.map((player) =>
+        getReplayMetricValue(player, "siegeDamage"),
+      ),
+    ),
+    healing: Math.max(
+      1,
+      ...parsedPlayers.map((player) => getReplayMetricValue(player, "healing")),
+    ),
+    experience: Math.max(
+      1,
+      ...parsedPlayers.map((player) =>
+        getReplayMetricValue(player, "experience"),
+      ),
+    ),
   };
+
+  useEffect(() => {
+    if (!hasReplayStats && activeTab !== "overview") {
+      setActiveTab("overview");
+    }
+  }, [activeTab, hasReplayStats]);
 
   return (
     <section style={telemetryPanelStyle(mapImageUrl)}>
       <div style={telemetryPanelVeilStyle} />
       <div style={telemetryHeaderStyle}>
         <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
-          <div style={{ ...eyebrowStyle, color: "#7dd3fc" }}>StormReplay telemetry</div>
-          <h2 style={telemetryTitleStyle}>Estadísticas de la partida</h2>
+          <div style={{ ...eyebrowStyle, color: "#7dd3fc" }}>
+            StormReplay telemetry
+          </div>
+          <h2 style={telemetryTitleStyle}>Post-partida</h2>
           <p style={telemetryDescriptionStyle}>
-            Panel post-partida separado del flujo del matchroom: resultado, héroes,
-            validación del replay y dossiers expandibles por jugador.
+            Resumen competitivo, validación de StormReplay y tablero estadístico
+            cuando el archivo ya fue procesado.
           </p>
         </div>
 
@@ -1186,7 +1253,9 @@ function MatchTelemetryPanel({
           type="button"
           onClick={onChooseFile}
           disabled={!canUpload || uploadState.status === "uploading"}
-          style={telemetryUploadButtonStyle(!canUpload || uploadState.status === "uploading")}
+          style={telemetryUploadButtonStyle(
+            !canUpload || uploadState.status === "uploading",
+          )}
         >
           {uploadState.status === "uploading"
             ? "Procesando replay…"
@@ -1216,57 +1285,170 @@ function MatchTelemetryPanel({
         </div>
       )}
 
-      <div style={telemetryResultGridStyle(compact)}>
-        <div style={telemetryResultBladeStyle(winnerTeam, mapImageUrl)}>
-          <span style={telemetryMicroLabelStyle}>Resultado oficial</span>
-          <strong style={telemetryWinnerStyle(winnerTeam)}>
-            {winnerTeam ? `Ganó ${winnerName}` : "Resultado pendiente"}
-          </strong>
-          <div style={telemetryResultMetaStyle}>
-            <span>{mapName}</span>
-            <span>·</span>
-            <span>{duration ? formatDuration(duration) : "Duración pendiente"}</span>
-          </div>
+      {replayWarnings.length > 0 && (
+        <div style={telemetryNoticeStyle("#fbbf24")}>
+          Confianza replay: {formatReplayTrust(identityConfidence, trustScore)} ·{" "}
+          {formatReplayWarnings(replayWarnings)}
         </div>
-
-        <div style={telemetryKpiGridStyle(narrow)}>
-          <TelemetryKpi label="Parser" value={latest?.parserStatus ?? latest?.status ?? "Sin replay"} tone={statusTone} />
-          <TelemetryKpi label="Modo" value={latest?.parsedGameMode ?? replayMatch?.gameMode ?? "—"} tone="#7dd3fc" />
-          <TelemetryKpi
-            label="Jugadores"
-            value={
-              typeof validation?.matchedPlayers === "number"
-                ? `${validation.matchedPlayers}/${validation.expectedHumanPlayers ?? "?"}`
-                : parsedPlayers.length > 0
-                  ? `${parsedPlayers.length}/10`
-                  : "—"
-            }
-            tone={validation?.matchedPlayers === validation?.expectedHumanPlayers ? "#4ade80" : "#fbbf24"}
-          />
-          <TelemetryKpi label="Resolución" value={getReplayResolutionLabel(resolution?.status)} tone={resolutionTone} />
-          <TelemetryKpi label="Build" value={formatNullableNumber(latest?.parsedBuild ?? replayMatch?.build)} tone="#c084fc" />
-          <TelemetryKpi label="Fecha" value={formatReplayDate(latest?.parsedGameDate ?? replayMatch?.gameDate)} tone="#e2e8f0" />
-        </div>
-      </div>
+      )}
 
       {latest && (
         <div style={telemetryUploadMetaStyle}>
           <span>Archivo: {latest.originalName}</span>
           <span>{formatBytes(latest.fileSize)}</span>
           <span>Subido por {latest.uploadedBy?.username ?? "Usuario"}</span>
-          <span>{latest.sha256 ? `SHA ${latest.sha256.slice(0, 10)}…` : "Hash pendiente"}</span>
+          <span>
+            {latest.sha256
+              ? `SHA ${latest.sha256.slice(0, 10)}…`
+              : "Hash pendiente"}
+          </span>
         </div>
       )}
 
-      {parsedPlayers.length > 0 ? (
+      {hasReplayStats && (
+        <MatchPostTabs activeTab={activeTab} onChange={setActiveTab} />
+      )}
+
+      {activeTab === "overview" ? (
+        <>
+          <div style={telemetryResultGridStyle(compact)}>
+            <div style={telemetryResultBladeStyle(winnerTeam, mapImageUrl)}>
+              <span style={telemetryMicroLabelStyle}>Resultado oficial</span>
+              <strong style={telemetryWinnerStyle(winnerTeam)}>
+                {winnerTeam ? `Ganó ${winnerName}` : "Resultado pendiente"}
+              </strong>
+              <div style={telemetryResultMetaStyle}>
+                <span>{mapName}</span>
+                <span>·</span>
+                <span>
+                  {duration ? formatDuration(duration) : "Duración pendiente"}
+                </span>
+              </div>
+            </div>
+
+            <div style={telemetryKpiGridStyle(narrow)}>
+              <TelemetryKpi
+                label="Parser"
+                value={latest?.parserStatus ?? latest?.status ?? "Sin replay"}
+                tone={statusTone}
+              />
+              <TelemetryKpi
+                label="Modo"
+                value={latest?.parsedGameMode ?? replayMatch?.gameMode ?? "—"}
+                tone="#7dd3fc"
+              />
+              <TelemetryKpi
+                label="Jugadores"
+                value={
+                  typeof validation?.matchedPlayers === "number"
+                    ? `${validation.matchedPlayers}/${validation.expectedHumanPlayers ?? "?"}`
+                    : hasReplayStats
+                      ? `${parsedPlayers.length}/10`
+                      : "—"
+                }
+                tone={
+                  validation?.matchedPlayers ===
+                  validation?.expectedHumanPlayers
+                    ? "#4ade80"
+                    : "#fbbf24"
+                }
+              />
+              <TelemetryKpi
+                label="Confianza"
+                value={formatReplayTrust(identityConfidence, trustScore)}
+                tone={getReplayTrustTone(identityConfidence, trustScore)}
+              />
+              <TelemetryKpi
+                label="Resolución"
+                value={getReplayResolutionLabel(resolution?.status)}
+                tone={resolutionTone}
+              />
+              <TelemetryKpi
+                label="Build"
+                value={formatNullableNumber(
+                  latest?.parsedBuild ?? replayMatch?.build,
+                )}
+                tone="#c084fc"
+              />
+              <TelemetryKpi
+                label="Fecha"
+                value={formatReplayDate(
+                  latest?.parsedGameDate ?? replayMatch?.gameDate,
+                )}
+                tone="#e2e8f0"
+              />
+            </div>
+          </div>
+
+          {!hasReplayStats && (
+            <div style={telemetryEmptyStateStyle}>
+              <div
+                style={{
+                  ...eyebrowStyle,
+                  color: latest?.status === "FAILED" ? "#fca5a5" : "#7dd3fc",
+                }}
+              >
+                {latest?.status === "FAILED"
+                  ? "Replay no parseado"
+                  : "Esperando datos de combate"}
+              </div>
+              <strong>
+                {latest?.status === "FAILED"
+                  ? "El parser no pudo leer esta StormReplay"
+                  : "Subí la StormReplay para abrir el tablero estadístico"}
+              </strong>
+              <p>
+                {latest?.status === "FAILED"
+                  ? (latest.parseError ??
+                    "El archivo quedó guardado, pero no hay stats disponibles todavía.")
+                  : "Cuando el replay esté procesado, se habilitará la pestaña Estadísticas con héroes, KDA, daño, healing, XP y derribos por jugador."}
+              </p>
+            </div>
+          )}
+        </>
+      ) : (
         <>
           <div style={combatKpiGridStyle(narrow)}>
-            <TelemetryKpi label="Derribos" value={formatReplayNumber(totalTakedowns)} tone="#facc15" large />
-            <TelemetryKpi label="Hero damage" value={formatReplayNumber(totalHeroDamage)} tone="#38bdf8" large />
-            <TelemetryKpi label="Healing" value={formatReplayNumber(totalHealing)} tone="#4ade80" large />
-            <TelemetryKpi label="XP total" value={formatReplayNumber(totalExperience)} tone="#f59e0b" large />
-            <TelemetryKpi label="Top daño" value={topDamage ? getReplayPlayerShortName(topDamage) : "—"} tone="#38bdf8" />
-            <TelemetryKpi label="Top heal/soak" value={topHealing ? getReplayPlayerShortName(topHealing) : topXp ? getReplayPlayerShortName(topXp) : "—"} tone="#4ade80" />
+            <TelemetryKpi
+              label="Derribos"
+              value={formatReplayNumber(totalTakedowns)}
+              tone="#facc15"
+              large
+            />
+            <TelemetryKpi
+              label="Hero damage"
+              value={formatReplayNumber(totalHeroDamage)}
+              tone="#38bdf8"
+              large
+            />
+            <TelemetryKpi
+              label="Healing"
+              value={formatReplayNumber(totalHealing)}
+              tone="#4ade80"
+              large
+            />
+            <TelemetryKpi
+              label="XP total"
+              value={formatReplayNumber(totalExperience)}
+              tone="#f59e0b"
+              large
+            />
+            <TelemetryKpi
+              label="Top daño"
+              value={topDamage ? getReplayPlayerShortName(topDamage) : "—"}
+              tone="#38bdf8"
+            />
+            <TelemetryKpi
+              label="Top heal/soak"
+              value={
+                topHealing
+                  ? getReplayPlayerShortName(topHealing)
+                  : topXp
+                    ? getReplayPlayerShortName(topXp)
+                    : "—"
+              }
+              tone="#4ade80"
+            />
           </div>
 
           <ReplayTeamStatsBoard
@@ -1280,20 +1462,42 @@ function MatchTelemetryPanel({
             teamTwoTotals={teamTwoTotals}
           />
         </>
-      ) : (
-        <div style={telemetryEmptyStateStyle}>
-          <div style={{ ...eyebrowStyle, color: latest?.status === "FAILED" ? "#fca5a5" : "#7dd3fc" }}>
-            {latest?.status === "FAILED" ? "Replay no parseado" : "Esperando datos de combate"}
-          </div>
-          <strong>{latest?.status === "FAILED" ? "El parser no pudo leer esta StormReplay" : "Subí la StormReplay para abrir el tablero estadístico"}</strong>
-          <p>
-            {latest?.status === "FAILED"
-              ? latest.parseError ?? "El archivo quedó guardado, pero no hay stats disponibles todavía."
-              : "Cuando el replay esté procesado, este panel mostrará héroes, KDA, daño, healing, XP, resultado, validación y perfiles desplegables por jugador."}
-          </p>
-        </div>
       )}
     </section>
+  );
+}
+
+function MatchPostTabs({
+  activeTab,
+  onChange,
+}: {
+  activeTab: MatchPostTab;
+  onChange: (tab: MatchPostTab) => void;
+}) {
+  const tabs: Array<{ key: MatchPostTab; label: string; badge?: string }> = [
+    { key: "overview", label: "Descripción general" },
+    { key: "stats", label: "Estadísticas", badge: "Replay" },
+  ];
+
+  return (
+    <div style={matchPostTabsStyle}>
+      {tabs.map((tab) => {
+        const active = activeTab === tab.key;
+        return (
+          <button
+            key={tab.key}
+            type="button"
+            onClick={() => onChange(tab.key)}
+            style={matchPostTabButtonStyle(active)}
+          >
+            <span>{tab.label}</span>
+            {tab.badge && (
+              <span style={matchPostTabBadgeStyle}>{tab.badge}</span>
+            )}
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
@@ -1328,7 +1532,10 @@ function ReplayTeamStatsBoard({
 }: {
   matchPlayers: Player[];
   replayPlayers: ReplayPlayerSummary[];
-  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> };
+  teams: {
+    left: ReturnType<typeof toDisplayTeam>;
+    right: ReturnType<typeof toDisplayTeam>;
+  };
   winnerTeam: 1 | 2 | null;
   currentUserId: string;
   maxValues: {
@@ -1398,18 +1605,46 @@ function ReplayTeamStatsLane({
     <section style={replayTeamLaneStyle(tone, won)}>
       <div style={replayTeamLaneHeaderStyle}>
         <div>
-          <div style={{ ...eyebrowStyle, color: tone }}>{teamNumber === 1 ? "Blue telemetry" : "Red telemetry"}</div>
+          <div style={{ ...eyebrowStyle, color: tone }}>
+            {teamNumber === 1 ? "Blue telemetry" : "Red telemetry"}
+          </div>
           <strong>{team.name}</strong>
         </div>
-        <span style={teamTelemetryResultStyle(won)}>{won ? "Victoria" : winnerTeam ? "Derrota" : "Pendiente"}</span>
+        <span style={teamTelemetryResultStyle(won)}>
+          {won ? "Victoria" : winnerTeam ? "Derrota" : "Pendiente"}
+        </span>
       </div>
       <div style={teamTelemetryStatsStyle}>
-        <TelemetryMiniStat label="Derribos" value={formatReplayNumber(totals.takedowns)} tone="#facc15" />
-        <TelemetryMiniStat label="K/D/A" value={`${formatReplayNumber(totals.kills)}/${formatReplayNumber(totals.deaths)}/${formatReplayNumber(totals.assists)}`} tone="#e2e8f0" />
-        <TelemetryMiniStat label="Hero dmg" value={formatReplayNumber(totals.heroDamage)} tone="#38bdf8" />
-        <TelemetryMiniStat label="Siege" value={formatReplayNumber(totals.siegeDamage)} tone="#fb7185" />
-        <TelemetryMiniStat label="Healing" value={formatReplayNumber(totals.healing)} tone="#4ade80" />
-        <TelemetryMiniStat label="XP" value={formatReplayNumber(totals.experience)} tone="#f59e0b" />
+        <TelemetryMiniStat
+          label="Derribos"
+          value={formatReplayNumber(totals.takedowns)}
+          tone="#facc15"
+        />
+        <TelemetryMiniStat
+          label="K/D/A"
+          value={`${formatReplayNumber(totals.kills)}/${formatReplayNumber(totals.deaths)}/${formatReplayNumber(totals.assists)}`}
+          tone="#e2e8f0"
+        />
+        <TelemetryMiniStat
+          label="Hero dmg"
+          value={formatReplayNumber(totals.heroDamage)}
+          tone="#38bdf8"
+        />
+        <TelemetryMiniStat
+          label="Siege"
+          value={formatReplayNumber(totals.siegeDamage)}
+          tone="#fb7185"
+        />
+        <TelemetryMiniStat
+          label="Healing"
+          value={formatReplayNumber(totals.healing)}
+          tone="#4ade80"
+        />
+        <TelemetryMiniStat
+          label="XP"
+          value={formatReplayNumber(totals.experience)}
+          tone="#f59e0b"
+        />
       </div>
 
       <div style={replayPlayerTableScrollStyle}>
@@ -1432,7 +1667,9 @@ function ReplayTeamStatsLane({
                 key={`${teamNumber}-${player.name}-${player.hero ?? "hero"}-${index}`}
                 player={player}
                 matchPlayer={matchPlayer}
-                isCurrentUser={Boolean(matchPlayer?.userId && matchPlayer.userId === currentUserId)}
+                isCurrentUser={Boolean(
+                  matchPlayer?.userId && matchPlayer.userId === currentUserId,
+                )}
                 tone={tone}
                 maxValues={maxValues}
               />
@@ -1444,7 +1681,15 @@ function ReplayTeamStatsLane({
   );
 }
 
-function TelemetryMiniStat({ label, value, tone }: { label: string; value: string; tone: string }) {
+function TelemetryMiniStat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string;
+  tone: string;
+}) {
   return (
     <div style={telemetryMiniStatStyle(tone)}>
       <span>{label}</span>
@@ -1471,8 +1716,12 @@ function ReplayPlayerStatRow({
     experience: number;
   };
 }) {
-  const displayName = matchPlayer?.user.username ?? player.battleTag ?? player.name;
-  const subtitle = player.battleTag && player.battleTag !== displayName ? player.battleTag : player.name;
+  const displayName =
+    matchPlayer?.user.username ?? player.battleTag ?? player.name;
+  const subtitle =
+    player.battleTag && player.battleTag !== displayName
+      ? player.battleTag
+      : player.name;
   const kda = `${formatReplayNumber(player.kills)}/${formatReplayNumber(player.deaths)}/${formatReplayNumber(player.assists)}`;
 
   return (
@@ -1491,16 +1740,42 @@ function ReplayPlayerStatRow({
       </div>
       <div style={replayPlayerHeroCellStyle}>{player.hero ?? "—"}</div>
       <div style={replayPlayerMetricValueStyle}>{kda}</div>
-      <div style={replayPlayerMetricValueStyle}>{formatReplayNumber(player.takedowns)}</div>
-      <ReplayInlineMetric value={getReplayMetricValue(player, "heroDamage")} max={maxValues.heroDamage} tone="#38bdf8" />
-      <ReplayInlineMetric value={getReplayMetricValue(player, "siegeDamage")} max={maxValues.siegeDamage} tone="#fb7185" />
-      <ReplayInlineMetric value={getReplayMetricValue(player, "healing")} max={maxValues.healing} tone="#4ade80" />
-      <ReplayInlineMetric value={getReplayMetricValue(player, "experience")} max={maxValues.experience} tone="#f59e0b" />
+      <div style={replayPlayerMetricValueStyle}>
+        {formatReplayNumber(player.takedowns)}
+      </div>
+      <ReplayInlineMetric
+        value={getReplayMetricValue(player, "heroDamage")}
+        max={maxValues.heroDamage}
+        tone="#38bdf8"
+      />
+      <ReplayInlineMetric
+        value={getReplayMetricValue(player, "siegeDamage")}
+        max={maxValues.siegeDamage}
+        tone="#fb7185"
+      />
+      <ReplayInlineMetric
+        value={getReplayMetricValue(player, "healing")}
+        max={maxValues.healing}
+        tone="#4ade80"
+      />
+      <ReplayInlineMetric
+        value={getReplayMetricValue(player, "experience")}
+        max={maxValues.experience}
+        tone="#f59e0b"
+      />
     </div>
   );
 }
 
-function ReplayInlineMetric({ value, max, tone }: { value: number; max: number; tone: string }) {
+function ReplayInlineMetric({
+  value,
+  max,
+  tone,
+}: {
+  value: number;
+  max: number;
+  tone: string;
+}) {
   const width = Math.max(4, Math.min(100, (value / Math.max(1, max)) * 100));
 
   return (
@@ -1587,12 +1862,15 @@ function TeamColumn({
   team,
   teamNumber,
   compact = false,
+  completed = false,
 }: {
   team: ReturnType<typeof toDisplayTeam>;
   teamNumber: 1 | 2;
   compact?: boolean;
+  completed?: boolean;
 }) {
   const colors = TEAM_COLORS[teamNumber];
+  const teamWon = team.players.some((player) => player.isWinner);
 
   return (
     <section
@@ -1622,34 +1900,17 @@ function TeamColumn({
             justifyContent: "flex-end",
           }}
         >
-          <MetaChip label="Activos" value={`${team.realPlayersCount}/5`} />
-          <MetaChip label="Win avg" value={`${team.avgWinrate}%`} />
+          {completed ? (
+            <span style={teamPanelOutcomeBadgeStyle(teamWon)}>
+              {teamWon ? "W" : "L"}
+            </span>
+          ) : (
+            <>
+              <MetaChip label="Activos" value={`${team.realPlayersCount}/5`} />
+              <MetaChip label="Win avg" value={`${team.avgWinrate}%`} />
+            </>
+          )}
         </div>
-      </div>
-
-      <div style={captainPlateStyle(colors.accent)}>
-        <span
-          style={{
-            color: colors.accent,
-            fontSize: "0.64rem",
-            fontWeight: 900,
-            letterSpacing: "0.16em",
-            textTransform: "uppercase",
-          }}
-        >
-          Capitán
-        </span>
-        <strong
-          style={{
-            color: "#f8fafc",
-            minWidth: 0,
-            overflow: "hidden",
-            textOverflow: "ellipsis",
-            whiteSpace: "nowrap",
-          }}
-        >
-          {team.captainName}
-        </strong>
       </div>
 
       <div style={teamRosterStyle}>
@@ -1658,14 +1919,18 @@ function TeamColumn({
             key={player.id}
             style={{
               ...playerRowStyle(player.placeholder),
-              borderColor: player.isCaptain
-                ? `${colors.accent}55`
-                : player.placeholder
-                  ? "rgba(100,116,139,0.22)"
-                  : "rgba(148,163,184,0.14)",
-              boxShadow: player.isCaptain
-                ? `inset 2px 0 0 ${colors.accent}`
-                : undefined,
+              borderColor: player.isMvp
+                ? "rgba(250,204,21,0.62)"
+                : player.isCaptain
+                  ? `${colors.accent}55`
+                  : player.placeholder
+                    ? "rgba(100,116,139,0.22)"
+                    : "rgba(148,163,184,0.14)",
+              boxShadow: player.isMvp
+                ? "inset 2px 0 0 #facc15, 0 0 24px rgba(250,204,21,0.10)"
+                : player.isCaptain
+                  ? `inset 2px 0 0 ${colors.accent}`
+                  : undefined,
             }}
           >
             <AvatarCell
@@ -1677,9 +1942,10 @@ function TeamColumn({
               <div style={playerNameRowStyle}>
                 <span style={playerNameStyle}>{player.name}</span>
                 {player.isCaptain && (
-                  <span style={captainMiniTagStyle(colors.accent)}>CPT</span>
+                  <span style={captainMiniTagStyle(colors.accent)}>
+                    CAPITÁN
+                  </span>
                 )}
-                {player.isWinner && <span style={winnerMiniTagStyle}>WIN</span>}
                 {player.isMvp && <span style={mvpMiniTagStyle}>MVP</span>}
               </div>
               <div style={playerSublineStyle}>
@@ -2309,20 +2575,62 @@ function formatDuration(totalSeconds: number) {
 function getReplayResolutionLabel(status?: ReplayResolutionStatus) {
   switch (status) {
     case "auto_result_applied":
-      return "Auto-cierre"
+      return "Auto-cierre";
     case "verified_existing_result":
-      return "Verificado"
+      return "Verificado";
     case "winner_mismatch":
-      return "Discrepancia"
+      return "Discrepancia";
     case "awaiting_manual_vote":
-      return "Manual"
+      return "Manual";
     case "parser_failed":
-      return "Parser falló"
+      return "Parser falló";
     case "insufficient_data":
-      return "Insuficiente"
+      return "Insuficiente";
     default:
-      return "Pendiente"
+      return "Pendiente";
   }
+}
+
+function formatReplayTrust(
+  confidence: "high" | "medium" | "low" | null | undefined,
+  score: number | null | undefined,
+) {
+  const label =
+    confidence === "high"
+      ? "Alta"
+      : confidence === "medium"
+        ? "Media"
+        : confidence === "low"
+          ? "Baja"
+          : "Pendiente";
+  return typeof score === "number" ? `${label} · ${score}/100` : label;
+}
+
+function getReplayTrustTone(
+  confidence: "high" | "medium" | "low" | null | undefined,
+  score: number | null | undefined,
+) {
+  if (confidence === "high" || (typeof score === "number" && score >= 75)) {
+    return "#4ade80";
+  }
+  if (confidence === "medium" || (typeof score === "number" && score >= 55)) {
+    return "#fbbf24";
+  }
+  if (confidence === "low" || typeof score === "number") return "#f87171";
+  return "#94a3b8";
+}
+
+function formatReplayWarnings(warnings: string[]) {
+  const labels: Record<string, string> = {
+    map_mismatch: "mapa no coincide",
+    low_player_match_coverage: "pocos jugadores matcheados",
+    no_linked_battletags: "sin BattleTags vinculados",
+    username_only_identity: "identidad sólo por nombre",
+    matched_users_missing_battletag: "faltan BattleTags en perfiles",
+    battletag_mismatch: "BattleTag distinto",
+    team_mismatch: "equipo distinto",
+  };
+  return warnings.map((warning) => labels[warning] ?? warning).join(" · ");
 }
 
 function formatReplayNumber(value: number | null | undefined) {
@@ -2359,20 +2667,32 @@ function sortReplayPlayers(players: ReplayPlayerSummary[]) {
     const teamB = b.team ?? 3;
     if (teamA !== teamB) return teamA - teamB;
     if (a.won !== b.won) return a.won ? -1 : 1;
-    return getReplayMetricValue(b, "takedowns") - getReplayMetricValue(a, "takedowns");
+    return (
+      getReplayMetricValue(b, "takedowns") -
+      getReplayMetricValue(a, "takedowns")
+    );
   });
 }
 
-function getReplayMetricValue(player: ReplayPlayerSummary, key: ReplayMetricKey) {
+function getReplayMetricValue(
+  player: ReplayPlayerSummary,
+  key: ReplayMetricKey,
+) {
   const value = player[key];
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
 function sumReplayMetric(players: ReplayPlayerSummary[], key: ReplayMetricKey) {
-  return players.reduce((sum, player) => sum + getReplayMetricValue(player, key), 0);
+  return players.reduce(
+    (sum, player) => sum + getReplayMetricValue(player, key),
+    0,
+  );
 }
 
-function getTopReplayPlayer(players: ReplayPlayerSummary[], key: ReplayMetricKey) {
+function getTopReplayPlayer(
+  players: ReplayPlayerSummary[],
+  key: ReplayMetricKey,
+) {
   return players.reduce<ReplayPlayerSummary | null>((top, player) => {
     if (!top) return player;
     return getReplayMetricValue(player, key) > getReplayMetricValue(top, key)
@@ -2400,7 +2720,10 @@ function getReplayPlayerShortName(player: ReplayPlayerSummary) {
 }
 
 function getTeamDisplayName(
-  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> },
+  teams: {
+    left: ReturnType<typeof toDisplayTeam>;
+    right: ReturnType<typeof toDisplayTeam>;
+  },
   team: 1 | 2 | null,
 ) {
   if (team === 1) return teams.left.name;
@@ -2531,18 +2854,6 @@ const teamTitleStyle: CSSProperties = {
   textOverflow: "ellipsis",
 };
 
-function captainPlateStyle(accent: string): CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: "auto minmax(0, 1fr)",
-    alignItems: "center",
-    gap: "0.55rem",
-    padding: "0.5rem 0.6rem",
-    border: `1px solid ${accent}30`,
-    background: `${accent}10`,
-  };
-}
-
 const teamRosterStyle: CSSProperties = {
   display: "grid",
   gap: "0.42rem",
@@ -2604,36 +2915,27 @@ const recentFormStyle: CSSProperties = {
 function captainMiniTagStyle(accent: string): CSSProperties {
   return {
     flexShrink: 0,
-    padding: "0.12rem 0.28rem",
-    border: `1px solid ${accent}55`,
-    background: `${accent}14`,
+    padding: "0.18rem 0.38rem",
+    border: `1px solid ${accent}66`,
+    background: `${accent}20`,
     color: accent,
-    fontSize: "0.52rem",
-    fontWeight: 900,
-    letterSpacing: "0.1em",
+    fontSize: "0.56rem",
+    fontWeight: 950,
+    letterSpacing: "0.12em",
   };
 }
 
 const mvpMiniTagStyle: CSSProperties = {
   flexShrink: 0,
-  padding: "0.12rem 0.28rem",
-  border: "1px solid rgba(250,204,21,0.55)",
-  background: "rgba(250,204,21,0.14)",
+  padding: "0.18rem 0.42rem",
+  border: "1px solid rgba(250,204,21,0.68)",
+  background:
+    "linear-gradient(180deg, rgba(250,204,21,0.28), rgba(161,98,7,0.24))",
   color: "#facc15",
-  fontSize: "0.52rem",
-  fontWeight: 900,
-  letterSpacing: "0.1em",
-};
-
-const winnerMiniTagStyle: CSSProperties = {
-  flexShrink: 0,
-  padding: "0.12rem 0.28rem",
-  border: "1px solid rgba(74,222,128,0.5)",
-  background: "rgba(74,222,128,0.12)",
-  color: "#4ade80",
-  fontSize: "0.52rem",
-  fontWeight: 900,
-  letterSpacing: "0.1em",
+  boxShadow: "0 0 18px rgba(250,204,21,0.18)",
+  fontSize: "0.58rem",
+  fontWeight: 950,
+  letterSpacing: "0.12em",
 };
 
 const botTagStyle: CSSProperties = {
@@ -2684,7 +2986,10 @@ const stageCardStyle: CSSProperties = {
   boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
 };
 
-function commandHeaderStyle(mapImageUrl: string, accent: string): CSSProperties {
+function commandHeaderStyle(
+  mapImageUrl: string,
+  accent: string,
+): CSSProperties {
   return {
     position: "relative",
     overflow: "hidden",
@@ -2805,6 +3110,48 @@ const commandTeamMetaStyle: CSSProperties = {
   whiteSpace: "nowrap",
 };
 
+function commandOutcomeBadgeStyle(won: boolean): CSSProperties {
+  return {
+    minWidth: "48px",
+    minHeight: "48px",
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${won ? "rgba(74,222,128,0.75)" : "rgba(248,113,113,0.72)"}`,
+    background: won
+      ? "linear-gradient(180deg, rgba(34,197,94,0.24), rgba(20,83,45,0.18))"
+      : "linear-gradient(180deg, rgba(239,68,68,0.24), rgba(127,29,29,0.18))",
+    color: won ? "#4ade80" : "#f87171",
+    boxShadow: won
+      ? "0 0 24px rgba(74,222,128,0.18)"
+      : "0 0 24px rgba(248,113,113,0.16)",
+    fontFamily: "var(--font-display)",
+    fontSize: "1.25rem",
+    fontWeight: 950,
+    letterSpacing: "0.08em",
+  };
+}
+
+function teamPanelOutcomeBadgeStyle(won: boolean): CSSProperties {
+  return {
+    minWidth: "54px",
+    minHeight: "54px",
+    display: "grid",
+    placeItems: "center",
+    border: `1px solid ${won ? "rgba(74,222,128,0.75)" : "rgba(248,113,113,0.72)"}`,
+    background: won
+      ? "linear-gradient(180deg, rgba(34,197,94,0.26), rgba(20,83,45,0.18))"
+      : "linear-gradient(180deg, rgba(239,68,68,0.22), rgba(127,29,29,0.18))",
+    color: won ? "#4ade80" : "#f87171",
+    boxShadow: won
+      ? "0 0 26px rgba(74,222,128,0.16)"
+      : "0 0 26px rgba(248,113,113,0.14)",
+    fontFamily: "var(--font-display)",
+    fontSize: "1.35rem",
+    fontWeight: 950,
+    letterSpacing: "0.08em",
+  };
+}
+
 function commandCenterBladeStyle(accent: string): CSSProperties {
   return {
     border: `1px solid ${accent}46`,
@@ -2921,16 +3268,63 @@ function telemetryNoticeStyle(tone: string): CSSProperties {
   };
 }
 
+const matchPostTabsStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  gap: "0.35rem",
+  borderBottom: "1px solid rgba(148,163,184,0.16)",
+  marginTop: "0.08rem",
+};
+
+function matchPostTabButtonStyle(active: boolean): CSSProperties {
+  return {
+    position: "relative",
+    border: "none",
+    borderBottom: `2px solid ${active ? "#ff6b00" : "transparent"}`,
+    background: active
+      ? "linear-gradient(180deg, rgba(255,107,0,0.10), rgba(255,107,0,0.02))"
+      : "transparent",
+    color: active ? "#ff8a2a" : "rgba(226,232,240,0.62)",
+    padding: "0.72rem 0.78rem 0.62rem",
+    cursor: "pointer",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: "0.4rem",
+    fontFamily: "var(--font-display)",
+    fontSize: "0.76rem",
+    fontWeight: 950,
+    letterSpacing: "0.11em",
+    textTransform: "uppercase",
+  };
+}
+
+const matchPostTabBadgeStyle: CSSProperties = {
+  borderRadius: "999px",
+  background: "#ff6b00",
+  color: "#120602",
+  padding: "0.1rem 0.32rem",
+  fontFamily: "var(--font-body)",
+  fontSize: "0.55rem",
+  fontWeight: 950,
+  letterSpacing: "0.02em",
+  textTransform: "uppercase",
+};
+
 function telemetryResultGridStyle(compact: boolean): CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: compact ? "1fr" : "minmax(280px, 0.72fr) minmax(0, 1.28fr)",
+    gridTemplateColumns: compact
+      ? "1fr"
+      : "minmax(280px, 0.72fr) minmax(0, 1.28fr)",
     gap: "0.75rem",
     alignItems: "stretch",
   };
 }
 
-function telemetryResultBladeStyle(winnerTeam: 1 | 2 | null, mapImageUrl: string): CSSProperties {
+function telemetryResultBladeStyle(
+  winnerTeam: 1 | 2 | null,
+  mapImageUrl: string,
+): CSSProperties {
   const tone = winnerTeam ? TEAM_COLORS[winnerTeam].accent : "#7dd3fc";
   return {
     position: "relative",
@@ -3016,7 +3410,9 @@ const telemetryUploadMetaStyle: CSSProperties = {
 function combatKpiGridStyle(narrow: boolean): CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: narrow ? "repeat(2, minmax(0, 1fr))" : "repeat(6, minmax(0, 1fr))",
+    gridTemplateColumns: narrow
+      ? "repeat(2, minmax(0, 1fr))"
+      : "repeat(6, minmax(0, 1fr))",
     gap: "0.58rem",
   };
 }
@@ -3087,7 +3483,8 @@ const replayPlayerTableStyle: CSSProperties = {
 
 const replayPlayerHeaderRowStyle: CSSProperties = {
   display: "grid",
-  gridTemplateColumns: "minmax(220px, 1.3fr) minmax(140px, 0.9fr) 88px 92px repeat(4, minmax(112px, 0.74fr))",
+  gridTemplateColumns:
+    "minmax(220px, 1.3fr) minmax(140px, 0.9fr) 88px 92px repeat(4, minmax(112px, 0.74fr))",
   gap: "0.45rem",
   alignItems: "center",
   padding: "0 0.58rem",
@@ -3098,10 +3495,15 @@ const replayPlayerHeaderRowStyle: CSSProperties = {
   textTransform: "uppercase",
 };
 
-function replayPlayerRowStyle(tone: string, won: boolean, current: boolean): CSSProperties {
+function replayPlayerRowStyle(
+  tone: string,
+  won: boolean,
+  current: boolean,
+): CSSProperties {
   return {
     display: "grid",
-    gridTemplateColumns: "minmax(220px, 1.3fr) minmax(140px, 0.9fr) 88px 92px repeat(4, minmax(112px, 0.74fr))",
+    gridTemplateColumns:
+      "minmax(220px, 1.3fr) minmax(140px, 0.9fr) 88px 92px repeat(4, minmax(112px, 0.74fr))",
     gap: "0.45rem",
     alignItems: "center",
     border: `1px solid ${current ? "#facc15" : won ? `${tone}40` : "rgba(148,163,184,0.14)"}`,
@@ -3155,7 +3557,10 @@ const replayInlineMetricTrackStyle: CSSProperties = {
   overflow: "hidden",
 };
 
-function replayInlineMetricFillStyle(width: number, tone: string): CSSProperties {
+function replayInlineMetricFillStyle(
+  width: number,
+  tone: string,
+): CSSProperties {
   return {
     display: "block",
     width: `${width}%`,

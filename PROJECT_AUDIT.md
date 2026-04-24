@@ -669,8 +669,11 @@ Estado: **MVP + AUTO-VALIDACIÓN BASE** (2026-04-23).
 - [x] Tabla post-partida con stats por jugador traídas del replay (hero, team, W/L, takedowns, K/D/A, damage, healing, XP).
 - [ ] Validar con replays reales recientes de HOTS.
 - [x] Usar el replay para resolver ganador automáticamente o levantar discrepancia.
-- [ ] Afinar reglas de confianza del replay con casos reales (smurfs, BattleTag ausente, aliases/nombres distintos).
-- [ ] Endurecer storage para producción Render: disco persistente externo/S3/R2 antes de depender del filesystem efímero.
+- [x] Afinar reglas de confianza del replay con casos reales (smurfs, BattleTag ausente, aliases/nombres distintos).
+  - 2026-04-24: `parsedSummary.validation` ahora calcula `trustScore`, confianza alta/media/baja, match por BattleTag vs username/alias, warnings por BattleTag ausente, mismatch de BattleTag/equipo y cobertura baja. El auto-cierre exige confianza mínima y bloquea discrepancias de identidad/equipo; MatchRoom muestra confianza/warnings.
+- [x] Endurecer storage para producción Render: disco persistente externo/S3/R2 antes de depender del filesystem efímero.
+  - 2026-04-24: agregado `REPLAY_STORAGE_DRIVER=local|r2|s3`; local queda como fallback/dev, y R2/S3 sube el `.StormReplay` parseado a object storage con key por match + sha256. Falta cargar credenciales reales en Render/Cloudflare antes de producción.
+  - 2026-04-24: política MVP ajustada a `REPLAY_RAW_RETENTION=delete_after_parse`: se guarda el snapshot JSON en DB (`parsedSummary`) y se elimina la replay cruda para evitar costo/acumulación. `keep` + R2/S3 queda como opción futura para torneos/disputas.
 
 ---
 

@@ -1,9 +1,9 @@
 import { createHash, randomUUID } from 'crypto'
 import { promises as fs } from 'fs'
-import path from 'path'
 import type { Prisma } from '@prisma/client'
 import { db } from '../../infrastructure/database/client'
 import { Errors } from '../../shared/errors/AppError'
+import { storeReplayFile } from './replay-storage.service'
 
 // hots-parser no publica tipos TypeScript.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
@@ -83,6 +83,21 @@ type ReplaySummary = {
   match?: Record<string, unknown>
   players?: Array<Record<string, unknown>>
   resolution?: Record<string, unknown>
+  identityMatches?: Array<Record<string, unknown>>
+  warnings?: string[]
+}
+
+type ReplayIdentityMatch = {
+  userId: string | null
+  expectedUsername: string
+  expectedBattleTag: string | null
+  replayName: string | null
+  replayBattleTag: string | null
+  expectedTeam: number
+  replayTeam: 1 | 2 | null
+  method: 'battletag' | 'username' | 'loose_name' | 'unmatched'
+  confidence: 'high' | 'medium' | 'low' | 'none'
+  issues: string[]
 }
 
 const GAME_MODE_NAMES: Record<number, string> = {
@@ -123,7 +138,6 @@ export async function ingestMatchReplay({
   fileSize: number
 }): Promise<ReplayUploadResult> {
   const sha256 = await hashFile(filePath)
-  const storagePath = path.relative(process.cwd(), filePath)
 
   const existing = await findReplayUploadBySha(sha256)
   if (existing) {
@@ -138,6 +152,13 @@ export async function ingestMatchReplay({
   const parserStatus = Parser.StatusString?.[parsed.status] ?? String(parsed.status)
   const parsedOk = parsed.status === 1 && parsed.match && parsed.players
   const summary = parsedOk ? buildReplaySummary(parsed, match) : null
+  const storedFile = await storeReplayFile({
+    filePath,
+    matchId: match.id,
+    sha256,
+    originalName,
+    contentType: 'application/octet-stream',
+  })
 
   const upload = await createReplayUpload({
     id: randomUUID(),
@@ -145,7 +166,7 @@ export async function ingestMatchReplay({
     uploadedById,
     status: parsedOk ? 'PARSED' : 'FAILED',
     originalName,
-    storagePath,
+    storagePath: storedFile.storagePath,
     fileSize,
     sha256,
     parsedMap: parsed.match?.map ?? null,
@@ -159,6 +180,10 @@ export async function ingestMatchReplay({
     parseError: parsedOk ? null : `Parser status: ${parserStatus}`,
     parsedSummary: summary,
   })
+
+  if (storedFile.removeLocalAfterStore) {
+    await safeUnlink(filePath)
+  }
 
   return { upload: serializeReplayUpload(upload), duplicate: false }
 }
@@ -289,25 +314,55 @@ function buildReplaySummary(parsed: ParsedReplayResult, expectedMatch: ExpectedM
   })
 
   const expectedHumans = expectedMatch.players.filter((player) => !player.isBot && player.user)
-  const matchedPlayers = expectedHumans.filter((expected) => {
-    const expectedBattleTag = normalizeIdentity(expected.user?.bnetBattletag)
-    const expectedName = normalizeIdentity(expected.user?.username)
-    return replayPlayers.some((player) => {
-      const replayBattleTag = normalizeIdentity(player.battleTag)
-      const replayName = normalizeIdentity(player.name)
-      return (expectedBattleTag && replayBattleTag === expectedBattleTag) || replayName === expectedName
-    })
+  const identityMatches = matchExpectedPlayersToReplay(expectedHumans, replayPlayers)
+  const matchedPlayers = identityMatches.filter((entry) => entry.method !== 'unmatched')
+  const battleTagLinkedPlayers = expectedHumans.filter((entry) => entry.user?.bnetBattletag).length
+  const battleTagMatchedPlayers = matchedPlayers.filter((entry) => entry.method === 'battletag').length
+  const usernameMatchedPlayers = matchedPlayers.filter((entry) => entry.method === 'username' || entry.method === 'loose_name').length
+  const missingBattleTagPlayers = matchedPlayers.filter((entry) => !entry.expectedBattleTag && entry.replayBattleTag).length
+  const battleTagMismatches = identityMatches.filter((entry) => entry.issues.includes('battletag_mismatch')).length
+  const teamMismatches = identityMatches.filter((entry) => entry.issues.includes('team_mismatch')).length
+  const mapMatches = normalizeMap(parsed.match?.map) === normalizeMap(expectedMatch.selectedMap)
+  const trustScore = calculateReplayTrustScore({
+    expectedHumanPlayers: expectedHumans.length,
+    matchedPlayers: matchedPlayers.length,
+    battleTagMatchedPlayers,
+    mapMatches,
+    battleTagMismatches,
+    teamMismatches,
+    missingBattleTagPlayers,
+  })
+  const identityConfidence = trustScore >= 75 ? 'high' : trustScore >= 55 ? 'medium' : 'low'
+  const warnings = buildReplayWarnings({
+    mapMatches,
+    expectedHumanPlayers: expectedHumans.length,
+    matchedPlayers: matchedPlayers.length,
+    battleTagLinkedPlayers,
+    battleTagMatchedPlayers,
+    usernameMatchedPlayers,
+    missingBattleTagPlayers,
+    battleTagMismatches,
+    teamMismatches,
   })
 
   return {
     validation: {
-      mapMatches: normalizeMap(parsed.match?.map) === normalizeMap(expectedMatch.selectedMap),
+      mapMatches,
       expectedMap: expectedMatch.selectedMap,
       replayMap: parsed.match?.map ?? null,
       expectedHumanPlayers: expectedHumans.length,
       matchedPlayers: matchedPlayers.length,
       minimumMatchedPlayers: expectedHumans.length > 0 ? Math.max(4, Math.ceil(expectedHumans.length * 0.6)) : 0,
       winnerDetected: toStormAxisTeam(parsed.match?.winner),
+      battleTagLinkedPlayers,
+      battleTagMatchedPlayers,
+      usernameMatchedPlayers,
+      missingBattleTagPlayers,
+      battleTagMismatches,
+      teamMismatches,
+      identityConfidence,
+      trustScore,
+      issues: warnings,
     },
     match: {
       map: parsed.match?.map ?? null,
@@ -319,7 +374,141 @@ function buildReplaySummary(parsed: ParsedReplayResult, expectedMatch: ExpectedM
       winnerTeam: toStormAxisTeam(parsed.match?.winner),
     },
     players: replayPlayers,
+    identityMatches,
+    warnings,
   }
+}
+
+function matchExpectedPlayersToReplay(
+  expectedHumans: ExpectedMatch['players'],
+  replayPlayers: Array<{
+    name: string
+    battleTag: string | null
+    team: 1 | 2 | null
+  }>,
+): ReplayIdentityMatch[] {
+  const usedReplayIndexes = new Set<number>()
+
+  return expectedHumans.map((expected) => {
+    const expectedBattleTag = normalizeIdentity(expected.user?.bnetBattletag)
+    const expectedUsername = expected.user?.username ?? 'Usuario'
+    const expectedName = normalizeIdentity(expectedUsername)
+    const expectedLooseName = normalizePlayerName(expectedUsername)
+
+    let bestIndex = -1
+    let method: ReplayIdentityMatch['method'] = 'unmatched'
+    let confidence: ReplayIdentityMatch['confidence'] = 'none'
+
+    if (expectedBattleTag) {
+      bestIndex = replayPlayers.findIndex((player, index) => {
+        return !usedReplayIndexes.has(index) && normalizeIdentity(player.battleTag) === expectedBattleTag
+      })
+      if (bestIndex >= 0) {
+        method = 'battletag'
+        confidence = 'high'
+      }
+    }
+
+    if (bestIndex < 0) {
+      bestIndex = replayPlayers.findIndex((player, index) => {
+        return !usedReplayIndexes.has(index) && normalizeIdentity(player.name) === expectedName
+      })
+      if (bestIndex >= 0) {
+        method = 'username'
+        confidence = expectedBattleTag ? 'low' : 'medium'
+      }
+    }
+
+    if (bestIndex < 0 && expectedLooseName) {
+      bestIndex = replayPlayers.findIndex((player, index) => {
+        return !usedReplayIndexes.has(index) && normalizePlayerName(player.name) === expectedLooseName
+      })
+      if (bestIndex >= 0) {
+        method = 'loose_name'
+        confidence = 'low'
+      }
+    }
+
+    const replay = bestIndex >= 0 ? replayPlayers[bestIndex] : null
+    if (bestIndex >= 0) usedReplayIndexes.add(bestIndex)
+
+    const issues: string[] = []
+    const replayBattleTag = replay?.battleTag ?? null
+    const normalizedReplayBattleTag = normalizeIdentity(replayBattleTag)
+    if (!expectedBattleTag) issues.push('missing_expected_battletag')
+    if (
+      expectedBattleTag &&
+      normalizedReplayBattleTag &&
+      normalizedReplayBattleTag !== expectedBattleTag
+    ) {
+      issues.push('battletag_mismatch')
+    }
+    if (replay?.team && replay.team !== expected.team) issues.push('team_mismatch')
+    if (!replay) issues.push('not_found_in_replay')
+
+    return {
+      userId: expected.userId,
+      expectedUsername,
+      expectedBattleTag: expected.user?.bnetBattletag ?? null,
+      replayName: replay?.name ?? null,
+      replayBattleTag,
+      expectedTeam: expected.team,
+      replayTeam: replay?.team ?? null,
+      method,
+      confidence,
+      issues,
+    }
+  })
+}
+
+function calculateReplayTrustScore(input: {
+  expectedHumanPlayers: number
+  matchedPlayers: number
+  battleTagMatchedPlayers: number
+  mapMatches: boolean
+  battleTagMismatches: number
+  teamMismatches: number
+  missingBattleTagPlayers: number
+}) {
+  const expected = Math.max(1, input.expectedHumanPlayers)
+  const matchCoverage = input.matchedPlayers / expected
+  const battleTagCoverage = input.battleTagMatchedPlayers / expected
+  const score =
+    matchCoverage * 45 +
+    battleTagCoverage * 35 +
+    (input.mapMatches ? 10 : 0) +
+    (input.teamMismatches === 0 ? 10 : 0) -
+    input.battleTagMismatches * 25 -
+    input.teamMismatches * 15 -
+    input.missingBattleTagPlayers * 3
+
+  return Math.max(0, Math.min(100, Math.round(score)))
+}
+
+function buildReplayWarnings(input: {
+  mapMatches: boolean
+  expectedHumanPlayers: number
+  matchedPlayers: number
+  battleTagLinkedPlayers: number
+  battleTagMatchedPlayers: number
+  usernameMatchedPlayers: number
+  missingBattleTagPlayers: number
+  battleTagMismatches: number
+  teamMismatches: number
+}) {
+  const warnings: string[] = []
+  if (!input.mapMatches) warnings.push('map_mismatch')
+  if (input.matchedPlayers < Math.max(4, Math.ceil(input.expectedHumanPlayers * 0.6))) {
+    warnings.push('low_player_match_coverage')
+  }
+  if (input.battleTagLinkedPlayers === 0) warnings.push('no_linked_battletags')
+  if (input.battleTagMatchedPlayers === 0 && input.usernameMatchedPlayers > 0) {
+    warnings.push('username_only_identity')
+  }
+  if (input.missingBattleTagPlayers > 0) warnings.push('matched_users_missing_battletag')
+  if (input.battleTagMismatches > 0) warnings.push('battletag_mismatch')
+  if (input.teamMismatches > 0) warnings.push('team_mismatch')
+  return warnings
 }
 
 async function hashFile(filePath: string) {
@@ -354,6 +543,10 @@ function toDateOrNull(value: unknown) {
 
 function normalizeIdentity(value: string | null | undefined) {
   return value?.trim().toLowerCase() ?? ''
+}
+
+function normalizePlayerName(value: string | null | undefined) {
+  return normalizeIdentity(value).replace(/#[0-9]+$/, '').replace(/[^a-z0-9]+/g, '')
 }
 
 function normalizeMap(value: string | null | undefined) {
