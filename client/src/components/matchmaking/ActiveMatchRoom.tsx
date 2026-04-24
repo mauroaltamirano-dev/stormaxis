@@ -1261,7 +1261,7 @@ function MatchTelemetryPanel({
       {parsedPlayers.length > 0 ? (
         <>
           <div style={combatKpiGridStyle(narrow)}>
-            <TelemetryKpi label="Takedowns" value={formatReplayNumber(totalTakedowns)} tone="#facc15" large />
+            <TelemetryKpi label="Derribos" value={formatReplayNumber(totalTakedowns)} tone="#facc15" large />
             <TelemetryKpi label="Hero damage" value={formatReplayNumber(totalHeroDamage)} tone="#38bdf8" large />
             <TelemetryKpi label="Healing" value={formatReplayNumber(totalHealing)} tone="#4ade80" large />
             <TelemetryKpi label="XP total" value={formatReplayNumber(totalExperience)} tone="#f59e0b" large />
@@ -1269,43 +1269,16 @@ function MatchTelemetryPanel({
             <TelemetryKpi label="Top heal/soak" value={topHealing ? getReplayPlayerShortName(topHealing) : topXp ? getReplayPlayerShortName(topXp) : "—"} tone="#4ade80" />
           </div>
 
-          <div style={teamTotalsGridStyle(narrow)}>
-            <TeamTelemetryCard
-              team={teams.left}
-              teamNumber={1}
-              totals={teamOneTotals}
-              winnerTeam={winnerTeam}
-            />
-            <TeamTelemetryCard
-              team={teams.right}
-              teamNumber={2}
-              totals={teamTwoTotals}
-              winnerTeam={winnerTeam}
-            />
-          </div>
-
-          <div style={dossierSectionHeaderStyle}>
-            <div>
-              <div style={{ ...eyebrowStyle, color: "#bae6fd" }}>Player dossiers</div>
-              <strong>Click en cualquier jugador para ver el detalle completo</strong>
-            </div>
-            <span>{parsedPlayers.length} jugadores parseados</span>
-          </div>
-
-          <div style={playerDossierGridStyle(narrow)}>
-            {parsedPlayers.map((player, index) => {
-              const matchPlayer = findMatchPlayerForReplay(match.players, player);
-              return (
-                <ReplayPlayerDossier
-                  key={`${player.name}-${player.hero ?? "hero"}-${index}`}
-                  player={player}
-                  matchPlayer={matchPlayer}
-                  isCurrentUser={Boolean(matchPlayer?.userId && matchPlayer.userId === currentUserId)}
-                  maxValues={maxValues}
-                />
-              );
-            })}
-          </div>
+          <ReplayTeamStatsBoard
+            matchPlayers={match.players}
+            replayPlayers={parsedPlayers}
+            teams={teams}
+            winnerTeam={winnerTeam}
+            currentUserId={currentUserId}
+            maxValues={maxValues}
+            teamOneTotals={teamOneTotals}
+            teamTwoTotals={teamTwoTotals}
+          />
         </>
       ) : (
         <div style={telemetryEmptyStateStyle}>
@@ -1343,23 +1316,87 @@ function TelemetryKpi({
   );
 }
 
-function TeamTelemetryCard({
+function ReplayTeamStatsBoard({
+  matchPlayers,
+  replayPlayers,
+  teams,
+  winnerTeam,
+  currentUserId,
+  maxValues,
+  teamOneTotals,
+  teamTwoTotals,
+}: {
+  matchPlayers: Player[];
+  replayPlayers: ReplayPlayerSummary[];
+  teams: { left: ReturnType<typeof toDisplayTeam>; right: ReturnType<typeof toDisplayTeam> };
+  winnerTeam: 1 | 2 | null;
+  currentUserId: string;
+  maxValues: {
+    heroDamage: number;
+    siegeDamage: number;
+    healing: number;
+    experience: number;
+  };
+  teamOneTotals: ReturnType<typeof getTeamReplayTotals>;
+  teamTwoTotals: ReturnType<typeof getTeamReplayTotals>;
+}) {
+  return (
+    <div style={replayTeamBoardStyle}>
+      <ReplayTeamStatsLane
+        team={teams.left}
+        teamNumber={1}
+        totals={teamOneTotals}
+        winnerTeam={winnerTeam}
+        players={replayPlayers.filter((player) => player.team === 1)}
+        matchPlayers={matchPlayers}
+        currentUserId={currentUserId}
+        maxValues={maxValues}
+      />
+      <div style={replayTeamDividerStyle} />
+      <ReplayTeamStatsLane
+        team={teams.right}
+        teamNumber={2}
+        totals={teamTwoTotals}
+        winnerTeam={winnerTeam}
+        players={replayPlayers.filter((player) => player.team === 2)}
+        matchPlayers={matchPlayers}
+        currentUserId={currentUserId}
+        maxValues={maxValues}
+      />
+    </div>
+  );
+}
+
+function ReplayTeamStatsLane({
   team,
   teamNumber,
   totals,
   winnerTeam,
+  players,
+  matchPlayers,
+  currentUserId,
+  maxValues,
 }: {
   team: ReturnType<typeof toDisplayTeam>;
   teamNumber: 1 | 2;
   totals: ReturnType<typeof getTeamReplayTotals>;
   winnerTeam: 1 | 2 | null;
+  players: ReplayPlayerSummary[];
+  matchPlayers: Player[];
+  currentUserId: string;
+  maxValues: {
+    heroDamage: number;
+    siegeDamage: number;
+    healing: number;
+    experience: number;
+  };
 }) {
   const tone = TEAM_COLORS[teamNumber].accent;
   const won = winnerTeam === teamNumber;
 
   return (
-    <div style={teamTelemetryCardStyle(tone, won)}>
-      <div style={teamTelemetryHeaderStyle}>
+    <section style={replayTeamLaneStyle(tone, won)}>
+      <div style={replayTeamLaneHeaderStyle}>
         <div>
           <div style={{ ...eyebrowStyle, color: tone }}>{teamNumber === 1 ? "Blue telemetry" : "Red telemetry"}</div>
           <strong>{team.name}</strong>
@@ -1367,14 +1404,43 @@ function TeamTelemetryCard({
         <span style={teamTelemetryResultStyle(won)}>{won ? "Victoria" : winnerTeam ? "Derrota" : "Pendiente"}</span>
       </div>
       <div style={teamTelemetryStatsStyle}>
-        <TelemetryMiniStat label="TD" value={formatReplayNumber(totals.takedowns)} tone="#facc15" />
+        <TelemetryMiniStat label="Derribos" value={formatReplayNumber(totals.takedowns)} tone="#facc15" />
         <TelemetryMiniStat label="K/D/A" value={`${formatReplayNumber(totals.kills)}/${formatReplayNumber(totals.deaths)}/${formatReplayNumber(totals.assists)}`} tone="#e2e8f0" />
         <TelemetryMiniStat label="Hero dmg" value={formatReplayNumber(totals.heroDamage)} tone="#38bdf8" />
         <TelemetryMiniStat label="Siege" value={formatReplayNumber(totals.siegeDamage)} tone="#fb7185" />
         <TelemetryMiniStat label="Healing" value={formatReplayNumber(totals.healing)} tone="#4ade80" />
         <TelemetryMiniStat label="XP" value={formatReplayNumber(totals.experience)} tone="#f59e0b" />
       </div>
-    </div>
+
+      <div style={replayPlayerTableScrollStyle}>
+        <div style={replayPlayerTableStyle}>
+          <div style={replayPlayerHeaderRowStyle}>
+            <span>Jugador</span>
+            <span>Héroe</span>
+            <span>K/D/A</span>
+            <span>Derribos</span>
+            <span>Hero dmg</span>
+            <span>Siege</span>
+            <span>Healing</span>
+            <span>XP</span>
+          </div>
+
+          {players.map((player, index) => {
+            const matchPlayer = findMatchPlayerForReplay(matchPlayers, player);
+            return (
+              <ReplayPlayerStatRow
+                key={`${teamNumber}-${player.name}-${player.hero ?? "hero"}-${index}`}
+                player={player}
+                matchPlayer={matchPlayer}
+                isCurrentUser={Boolean(matchPlayer?.userId && matchPlayer.userId === currentUserId)}
+                tone={tone}
+                maxValues={maxValues}
+              />
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -1387,15 +1453,17 @@ function TelemetryMiniStat({ label, value, tone }: { label: string; value: strin
   );
 }
 
-function ReplayPlayerDossier({
+function ReplayPlayerStatRow({
   player,
   matchPlayer,
   isCurrentUser,
+  tone,
   maxValues,
 }: {
   player: ReplayPlayerSummary;
   matchPlayer: Player | null;
   isCurrentUser: boolean;
+  tone: string;
   maxValues: {
     heroDamage: number;
     siegeDamage: number;
@@ -1403,91 +1471,44 @@ function ReplayPlayerDossier({
     experience: number;
   };
 }) {
-  const team = player.team === 1 || player.team === 2 ? player.team : 1;
-  const tone = TEAM_COLORS[team].accent;
   const displayName = matchPlayer?.user.username ?? player.battleTag ?? player.name;
   const subtitle = player.battleTag && player.battleTag !== displayName ? player.battleTag : player.name;
   const kda = `${formatReplayNumber(player.kills)}/${formatReplayNumber(player.deaths)}/${formatReplayNumber(player.assists)}`;
 
   return (
-    <details style={playerDossierStyle(tone, player.won, isCurrentUser)}>
-      <summary style={playerDossierSummaryStyle}>
+    <div style={replayPlayerRowStyle(tone, player.won, isCurrentUser)}>
+      <div style={replayPlayerIdentityCellStyle}>
         <div style={heroEmblemStyle(tone, player.won)}>
           {(player.hero ?? "??").slice(0, 2).toUpperCase()}
         </div>
-        <div style={{ minWidth: 0, display: "grid", gap: "0.2rem" }}>
+        <div style={{ minWidth: 0 }}>
           <div style={playerDossierNameRowStyle}>
             <strong>{displayName}</strong>
             {isCurrentUser && <span style={currentUserTagStyle}>Vos</span>}
-            <span style={winLossTagStyle(player.won)}>{player.won ? "WIN" : "LOSS"}</span>
           </div>
-          <span style={playerDossierHeroStyle}>{player.hero ?? "Héroe sin detectar"} · Team {player.team ?? "—"}</span>
           <span style={playerDossierSubStyle}>{subtitle}</span>
         </div>
-        <div style={playerDossierQuickStatsStyle}>
-          <TelemetryMiniStat label="TD" value={formatReplayNumber(player.takedowns)} tone="#facc15" />
-          <TelemetryMiniStat label="K/D/A" value={kda} tone="#e2e8f0" />
-          <TelemetryMiniStat label="Hero" value={formatReplayNumber(player.heroDamage)} tone="#38bdf8" />
-          <span style={expandHintStyle}>Detalle</span>
-        </div>
-      </summary>
-
-      <div style={playerDossierExpandedStyle(tone)}>
-        <div style={playerDetailGridStyle}>
-          <ReplayDetail label="Jugador replay" value={player.name} />
-          <ReplayDetail label="BattleTag" value={player.battleTag ?? "—"} />
-          <ReplayDetail label="Usuario match" value={matchPlayer?.user.username ?? "Sin match exacto"} />
-          <ReplayDetail label="Héroe" value={player.hero ?? "—"} />
-          <ReplayDetail label="Team" value={player.team ? `Team ${player.team}` : "—"} />
-          <ReplayDetail label="Resultado" value={player.won ? "Victoria" : "Derrota"} tone={player.won ? "#4ade80" : "#f87171"} />
-          <ReplayDetail label="Takedowns" value={formatReplayNumber(player.takedowns)} tone="#facc15" />
-          <ReplayDetail label="Solo kills" value={formatReplayNumber(player.kills)} />
-          <ReplayDetail label="Deaths" value={formatReplayNumber(player.deaths)} tone={getReplayMetricValue(player, "deaths") > 0 ? "#f87171" : "#4ade80"} />
-          <ReplayDetail label="Assists" value={formatReplayNumber(player.assists)} />
-        </div>
-
-        <div style={statBarGridStyle}>
-          <ReplayStatBar label="Hero damage" value={getReplayMetricValue(player, "heroDamage")} max={maxValues.heroDamage} tone="#38bdf8" />
-          <ReplayStatBar label="Siege damage" value={getReplayMetricValue(player, "siegeDamage")} max={maxValues.siegeDamage} tone="#fb7185" />
-          <ReplayStatBar label="Healing" value={getReplayMetricValue(player, "healing")} max={maxValues.healing} tone="#4ade80" />
-          <ReplayStatBar label="XP contribution" value={getReplayMetricValue(player, "experience")} max={maxValues.experience} tone="#f59e0b" />
-        </div>
       </div>
-    </details>
-  );
-}
-
-function ReplayDetail({ label, value, tone }: { label: string; value: string; tone?: string }) {
-  return (
-    <div style={replayDetailStyle}>
-      <span>{label}</span>
-      <strong style={{ color: tone ?? "#e2e8f0" }}>{value}</strong>
+      <div style={replayPlayerHeroCellStyle}>{player.hero ?? "—"}</div>
+      <div style={replayPlayerMetricValueStyle}>{kda}</div>
+      <div style={replayPlayerMetricValueStyle}>{formatReplayNumber(player.takedowns)}</div>
+      <ReplayInlineMetric value={getReplayMetricValue(player, "heroDamage")} max={maxValues.heroDamage} tone="#38bdf8" />
+      <ReplayInlineMetric value={getReplayMetricValue(player, "siegeDamage")} max={maxValues.siegeDamage} tone="#fb7185" />
+      <ReplayInlineMetric value={getReplayMetricValue(player, "healing")} max={maxValues.healing} tone="#4ade80" />
+      <ReplayInlineMetric value={getReplayMetricValue(player, "experience")} max={maxValues.experience} tone="#f59e0b" />
     </div>
   );
 }
 
-function ReplayStatBar({
-  label,
-  value,
-  max,
-  tone,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  tone: string;
-}) {
-  const width = max > 0 ? Math.max(2, Math.min(100, (value / max) * 100)) : 0;
+function ReplayInlineMetric({ value, max, tone }: { value: number; max: number; tone: string }) {
+  const width = Math.max(4, Math.min(100, (value / Math.max(1, max)) * 100));
 
   return (
-    <div style={replayStatBarWrapStyle}>
-      <div style={replayStatBarLabelStyle}>
-        <span>{label}</span>
-        <strong style={{ color: tone }}>{formatReplayNumber(value)}</strong>
-      </div>
-      <div style={replayStatTrackStyle}>
-        <div style={replayStatFillStyle(width, tone)} />
-      </div>
+    <div style={replayInlineMetricStyle}>
+      <strong>{formatReplayNumber(value)}</strong>
+      <span style={replayInlineMetricTrackStyle}>
+        <span style={replayInlineMetricFillStyle(width, tone)} />
+      </span>
     </div>
   );
 }
@@ -3000,26 +3021,33 @@ function combatKpiGridStyle(narrow: boolean): CSSProperties {
   };
 }
 
-function teamTotalsGridStyle(narrow: boolean): CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
-    gap: "0.72rem",
-  };
-}
+const replayTeamBoardStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.92rem",
+};
 
-function teamTelemetryCardStyle(tone: string, won: boolean): CSSProperties {
+const replayTeamDividerStyle: CSSProperties = {
+  width: "min(320px, 52%)",
+  height: "1px",
+  justifySelf: "center",
+  background:
+    "linear-gradient(90deg, transparent, rgba(148,163,184,0.7), transparent)",
+};
+
+function replayTeamLaneStyle(tone: string, won: boolean): CSSProperties {
   return {
-    border: `1px solid ${won ? tone : `${tone}33`}`,
-    background: `linear-gradient(145deg, ${tone}${won ? "1f" : "10"}, rgba(2,6,23,0.68) 54%, rgba(2,6,23,0.5))`,
+    border: `1px solid ${won ? tone : `${tone}38`}`,
+    background: `linear-gradient(180deg, ${tone}${won ? "1d" : "10"}, rgba(2,6,23,0.76) 34%, rgba(2,6,23,0.58))`,
     padding: "0.82rem",
     display: "grid",
-    gap: "0.75rem",
-    boxShadow: won ? `0 0 32px ${tone}14, inset 0 1px 0 rgba(255,255,255,0.04)` : "inset 0 1px 0 rgba(255,255,255,0.03)",
+    gap: "0.72rem",
+    boxShadow: won
+      ? `0 0 34px ${tone}16, inset 0 1px 0 rgba(255,255,255,0.05)`
+      : "inset 0 1px 0 rgba(255,255,255,0.035)",
   };
 }
 
-const teamTelemetryHeaderStyle: CSSProperties = {
+const replayTeamLaneHeaderStyle: CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   gap: "0.75rem",
@@ -3046,6 +3074,97 @@ const teamTelemetryStatsStyle: CSSProperties = {
   gap: "0.5rem",
 };
 
+const replayPlayerTableScrollStyle: CSSProperties = {
+  overflowX: "auto",
+  paddingBottom: "0.1rem",
+};
+
+const replayPlayerTableStyle: CSSProperties = {
+  minWidth: "980px",
+  display: "grid",
+  gap: "0.4rem",
+};
+
+const replayPlayerHeaderRowStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "minmax(220px, 1.3fr) minmax(140px, 0.9fr) 88px 92px repeat(4, minmax(112px, 0.74fr))",
+  gap: "0.45rem",
+  alignItems: "center",
+  padding: "0 0.58rem",
+  color: "rgba(186,230,253,0.62)",
+  fontSize: "0.62rem",
+  fontWeight: 950,
+  letterSpacing: "0.11em",
+  textTransform: "uppercase",
+};
+
+function replayPlayerRowStyle(tone: string, won: boolean, current: boolean): CSSProperties {
+  return {
+    display: "grid",
+    gridTemplateColumns: "minmax(220px, 1.3fr) minmax(140px, 0.9fr) 88px 92px repeat(4, minmax(112px, 0.74fr))",
+    gap: "0.45rem",
+    alignItems: "center",
+    border: `1px solid ${current ? "#facc15" : won ? `${tone}40` : "rgba(148,163,184,0.14)"}`,
+    background: `linear-gradient(90deg, ${tone}${won ? "18" : "0d"}, rgba(2,6,23,0.62))`,
+    padding: "0.52rem 0.58rem",
+    minHeight: "72px",
+    boxShadow: current
+      ? "0 0 0 1px rgba(250,204,21,0.22), 0 0 22px rgba(250,204,21,0.12)"
+      : "inset 0 1px 0 rgba(255,255,255,0.025)",
+  };
+}
+
+const replayPlayerIdentityCellStyle: CSSProperties = {
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: "0.62rem",
+};
+
+const replayPlayerHeroCellStyle: CSSProperties = {
+  minWidth: 0,
+  color: "#e2e8f0",
+  fontSize: "0.8rem",
+  fontWeight: 850,
+  whiteSpace: "nowrap",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+};
+
+const replayPlayerMetricValueStyle: CSSProperties = {
+  color: "#f8fafc",
+  fontSize: "0.8rem",
+  fontWeight: 900,
+  letterSpacing: "0.04em",
+};
+
+const replayInlineMetricStyle: CSSProperties = {
+  minWidth: 0,
+  display: "grid",
+  gap: "0.28rem",
+  color: "#f8fafc",
+  fontSize: "0.76rem",
+  fontWeight: 900,
+};
+
+const replayInlineMetricTrackStyle: CSSProperties = {
+  position: "relative",
+  height: "5px",
+  border: "1px solid rgba(148,163,184,0.16)",
+  background: "rgba(2,6,23,0.7)",
+  overflow: "hidden",
+};
+
+function replayInlineMetricFillStyle(width: number, tone: string): CSSProperties {
+  return {
+    display: "block",
+    width: `${width}%`,
+    height: "100%",
+    background: `linear-gradient(90deg, ${tone}, ${tone}aa)`,
+    boxShadow: `0 0 14px ${tone}44`,
+  };
+}
+
 function telemetryMiniStatStyle(tone: string): CSSProperties {
   return {
     minWidth: 0,
@@ -3056,43 +3175,6 @@ function telemetryMiniStatStyle(tone: string): CSSProperties {
     gap: "0.1rem",
   };
 }
-
-const dossierSectionHeaderStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "0.85rem",
-  alignItems: "end",
-  flexWrap: "wrap",
-  color: "#e2e8f0",
-};
-
-function playerDossierGridStyle(narrow: boolean): CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: narrow ? "1fr" : "repeat(2, minmax(0, 1fr))",
-    gap: "0.68rem",
-  };
-}
-
-function playerDossierStyle(tone: string, won: boolean, current: boolean): CSSProperties {
-  return {
-    border: `1px solid ${current ? "#facc15" : won ? `${tone}48` : "rgba(148,163,184,0.18)"}`,
-    background: `linear-gradient(145deg, ${tone}${won ? "16" : "0d"}, rgba(2,6,23,0.78) 42%, rgba(2,6,23,0.58))`,
-    boxShadow: current
-      ? "0 0 0 1px rgba(250,204,21,0.24), 0 0 28px rgba(250,204,21,0.12)"
-      : "inset 0 1px 0 rgba(255,255,255,0.03)",
-  };
-}
-
-const playerDossierSummaryStyle: CSSProperties = {
-  listStyle: "none",
-  cursor: "pointer",
-  display: "flex",
-  flexWrap: "wrap",
-  gap: "0.72rem",
-  alignItems: "center",
-  padding: "0.72rem",
-};
 
 function heroEmblemStyle(tone: string, won: boolean): CSSProperties {
   return {
@@ -3129,27 +3211,6 @@ const currentUserTagStyle: CSSProperties = {
   textTransform: "uppercase",
 };
 
-function winLossTagStyle(won: boolean): CSSProperties {
-  return {
-    border: `1px solid ${won ? "rgba(74,222,128,0.42)" : "rgba(248,113,113,0.42)"}`,
-    background: won ? "rgba(74,222,128,0.12)" : "rgba(248,113,113,0.12)",
-    color: won ? "#86efac" : "#fca5a5",
-    padding: "0.12rem 0.32rem",
-    fontSize: "0.54rem",
-    fontWeight: 950,
-    letterSpacing: "0.1em",
-  };
-}
-
-const playerDossierHeroStyle: CSSProperties = {
-  color: "#e2e8f0",
-  fontSize: "0.84rem",
-  fontWeight: 850,
-  whiteSpace: "nowrap",
-  overflow: "hidden",
-  textOverflow: "ellipsis",
-};
-
 const playerDossierSubStyle: CSSProperties = {
   color: "rgba(148,163,184,0.78)",
   fontSize: "0.72rem",
@@ -3157,90 +3218,6 @@ const playerDossierSubStyle: CSSProperties = {
   overflow: "hidden",
   textOverflow: "ellipsis",
 };
-
-const playerDossierQuickStatsStyle: CSSProperties = {
-  marginLeft: "auto",
-  display: "grid",
-  gridTemplateColumns: "repeat(3, minmax(72px, 1fr)) auto",
-  gap: "0.38rem",
-  alignItems: "stretch",
-};
-
-const expandHintStyle: CSSProperties = {
-  alignSelf: "stretch",
-  display: "grid",
-  placeItems: "center",
-  border: "1px solid rgba(125,211,252,0.2)",
-  background: "rgba(14,116,144,0.12)",
-  color: "#bae6fd",
-  padding: "0.35rem 0.48rem",
-  fontSize: "0.58rem",
-  fontWeight: 950,
-  letterSpacing: "0.1em",
-  textTransform: "uppercase",
-};
-
-function playerDossierExpandedStyle(tone: string): CSSProperties {
-  return {
-    borderTop: `1px solid ${tone}24`,
-    padding: "0 0.72rem 0.72rem",
-    display: "grid",
-    gap: "0.72rem",
-  };
-}
-
-const playerDetailGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(132px, 1fr))",
-  gap: "0.45rem",
-};
-
-const replayDetailStyle: CSSProperties = {
-  minWidth: 0,
-  border: "1px solid rgba(148,163,184,0.14)",
-  background: "rgba(2,6,23,0.46)",
-  padding: "0.5rem 0.55rem",
-  display: "grid",
-  gap: "0.12rem",
-};
-
-const statBarGridStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-  gap: "0.55rem",
-};
-
-const replayStatBarWrapStyle: CSSProperties = {
-  display: "grid",
-  gap: "0.36rem",
-};
-
-const replayStatBarLabelStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: "0.65rem",
-  color: "rgba(226,232,240,0.7)",
-  fontSize: "0.72rem",
-  fontWeight: 850,
-  letterSpacing: "0.06em",
-  textTransform: "uppercase",
-};
-
-const replayStatTrackStyle: CSSProperties = {
-  height: "9px",
-  border: "1px solid rgba(148,163,184,0.15)",
-  background: "rgba(2,6,23,0.72)",
-  overflow: "hidden",
-};
-
-function replayStatFillStyle(width: number, tone: string): CSSProperties {
-  return {
-    width: `${width}%`,
-    height: "100%",
-    background: `linear-gradient(90deg, ${tone}, ${tone}aa)`,
-    boxShadow: `0 0 18px ${tone}44`,
-  };
-}
 
 const telemetryEmptyStateStyle: CSSProperties = {
   border: "1px dashed rgba(125,211,252,0.24)",
