@@ -177,7 +177,7 @@ function initialFromUser(user: ProfileUser | null) {
 
 export function Profile() {
   const navigate = useNavigate();
-  const { user, updateUser } = useAuthStore();
+  const { user, accessToken, updateUser } = useAuthStore();
   const pathname = useRouterState({
     select: (state) => state.location.pathname,
   });
@@ -420,12 +420,19 @@ export function Profile() {
 
   function handleLinkDiscord() {
     setAccountMessage(null);
-    window.location.href = buildApiUrl("/api/auth/link/discord");
+    window.location.href = getOAuthLinkUrl("discord");
   }
 
   function handleLinkBattleNet() {
     setAccountMessage(null);
-    window.location.href = buildApiUrl("/api/auth/link/bnet");
+    window.location.href = getOAuthLinkUrl("bnet");
+  }
+
+  function getOAuthLinkUrl(provider: "discord" | "bnet") {
+    const endpoint = buildApiUrl(`/api/auth/link/${provider}`);
+    if (!accessToken) return endpoint;
+    const separator = endpoint.includes("?") ? "&" : "?";
+    return `${endpoint}${separator}link_token=${encodeURIComponent(accessToken)}`;
   }
 
   async function handleUnlink(provider: LinkedAccountProvider) {
@@ -561,7 +568,7 @@ export function Profile() {
                       <BattleNetIdentityPill battletag={profile.bnetBattletag} />
                     ) : isOwnProfile ? (
                       <a
-                        href={buildApiUrl("/api/auth/link/bnet")}
+                        href={getOAuthLinkUrl("bnet")}
                         style={{
                           width: "fit-content",
                           color: "#5db7ff",

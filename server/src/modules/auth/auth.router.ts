@@ -147,6 +147,12 @@ async function getOAuthLinkUserId(req: any) {
     if (payload) return payload.sub
   }
 
+  const linkToken = req.query?.link_token
+  if (typeof linkToken === 'string') {
+    const payload = verifyAccessToken(linkToken)
+    if (payload) return payload.sub
+  }
+
   const refreshToken = req.cookies?.refreshToken as string | undefined
   if (!refreshToken) return null
 
