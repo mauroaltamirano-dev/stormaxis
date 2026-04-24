@@ -28,17 +28,22 @@ export function AuthCallback() {
       useAuthStore.getState().setAccessToken(callbackAccessToken)
     }
 
+    let resolvedUser: typeof user | null = null
+
     api
-      .get('/auth/me')
+      .get('/auth/me', callbackAccessToken
+        ? { headers: { Authorization: `Bearer ${callbackAccessToken}` } }
+        : undefined)
       .then((response) => {
         const nextUser = response.data
-        const token = useAuthStore.getState().accessToken
+        resolvedUser = nextUser
+        const token = callbackAccessToken || useAuthStore.getState().accessToken
         if (token) setAuth(nextUser, token)
         else updateUser(nextUser)
       })
       .catch(() => {})
       .finally(() => {
-        const currentUser = useAuthStore.getState().user
+        const currentUser = resolvedUser || useAuthStore.getState().user
         const nextTarget =
           currentUser
             ? mode === 'link'
