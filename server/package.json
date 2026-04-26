@@ -9,6 +9,7 @@
     "db:migrate:prod": "prisma migrate deploy",
     "db:studio": "prisma studio",
     "db:seed": "tsx prisma/seed.ts",
+    "db:recalculate-stats": "tsx prisma/recalculate-user-stats.ts",
     "db:generate": "prisma generate",
     "typecheck": "tsc --noEmit"
   },
