@@ -643,7 +643,8 @@ Notas de avance (2026-04-22):
 4. [x] Crear canales por match al pasar de accept a veto/playing.
 5. [x] Mostrar links por equipo en MatchRoom.
 6. [x] Programar cleanup.
-7. [ ] Pendiente UX: CTA más explícito para usuarios sin Discord vinculado.
+7. [x] Pendiente UX: CTA más explícito para usuarios sin Discord vinculado.
+   - 2026-04-26: Profile muestra un callout recomendado para vincular Discord y MatchRoom lleva directo a `/profile?tab=accounts` cuando falta el link para voice privado.
 
 ### Prioridad 4 — Battle.net
 
@@ -697,6 +698,7 @@ Esto crea la base visual y de navegación para ordenar todo lo demás.
    - 2026-04-23: las filas del historial abren la matchroom histórica correspondiente.
 3. [x] Habilitar la page estadísticas y empezar mostrando el historial de partidas detallado allí del usuario (simular datos de momento pero pedir que datos mostraremos de los que realmente nos entrega el juego).
    - 2026-04-23: agregada `/stats` con historial detallado real del usuario, filtros Todo/30d/7d, ELO neto, winrate, racha, últimos 10, mapas más jugados y slots explícitos para datos futuros de HeroesProfile/replays.
+   - 2026-04-26: copy actualizado para reflejar que ya usamos historial/replays como base y que lo siguiente es enriquecer tendencias individuales.
 4. [ ] Habilitar page de buscador de SCRIM para equipos vs equipos.
 5. [x] Añadir los heroes del juego en una base de datos e incluir imágenes y descripción de cada uno.
    - 2026-04-26: agregado catálogo canónico compartido `HOTS_HEROES` en `@nexusgg/shared` con 90 héroes, rol, universo y path de portrait; agregada página `/heroes` con búsqueda/filtro por rol. Las imágenes quedan preparadas vía `/heroes/{id}.webp` para incorporar assets reales después.

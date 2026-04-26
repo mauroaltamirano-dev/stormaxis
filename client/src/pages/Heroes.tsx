@@ -164,7 +164,7 @@ export function Heroes() {
       </section>
 
       {loading ? (
-        <EmptyState title="Analizando historial" text="Leyendo tus partidas y replays parseados..." />
+        <EmptyState title="Analizando historial" text="Cruzando partidas completadas con replays parseados..." />
       ) : tab === 'pool' ? (
         <section style={styles.poolLayout}>
           <aside style={styles.featureCard}>
@@ -182,20 +182,20 @@ export function Heroes() {
                 </div>
               </>
             ) : (
-              <p style={styles.mutedText}>Todavía no hay héroes detectados. Subí replays en partidas completadas para poblar este panel.</p>
+              <p style={styles.mutedText}>Todavía no hay héroes detectados. Cerrá partidas y subí el replay para convertir este espacio en tu pool real.</p>
             )}
           </aside>
 
           <div style={styles.heroGridCompact}>
             {filteredStats.length ? filteredStats.map((stat) => <HeroUsageCard key={stat.hero.id} stat={stat} />) : (
-              <EmptyState title="Sin héroes detectados" text="El historial puede existir sin replay parseado; cuando subas replays, acá aparecen tus picks reales." />
+              <EmptyState title="Sin héroes detectados" text="El historial por sí solo no trae picks: con replays cargados aparecen tus héroes, winrate, KDA y daño promedio." />
             )}
           </div>
         </section>
       ) : tab === 'maps' ? (
         <section style={styles.mapGrid}>
           {mapStats.length ? mapStats.map((map) => <MapCard key={map.name} stat={map} />) : (
-            <EmptyState title="Sin mapas jugados" text="Cuando completes partidas, vamos a cruzar tus mapas con picks, winrate y replay stats." />
+            <EmptyState title="Sin mapas jugados" text="Cuando completes partidas con replay, vamos a cruzar mapas, picks, winrate y rendimiento individual." />
           )}
         </section>
       ) : (

@@ -15,6 +15,7 @@ import {
 } from "lucide-react";
 import { api } from "../lib/api";
 import { useAuthStore } from "../stores/auth.store";
+import { PageHeader } from "../components/PageHeader";
 
 type AdminStats = {
   totalUsers: number;
@@ -416,29 +417,27 @@ export function Admin() {
 
   return (
     <div style={pageStyle}>
-      <section style={heroStyle}>
-        <div style={{ display: "grid", gap: "0.45rem" }}>
-          <div style={eyebrowStyle}>Admin · War room</div>
-          <h1 style={titleStyle}>Centro de control competitivo</h1>
-          <p style={subtitleStyle}>
-            Operá cola, matches, usuarios y telemetría sin depender del dashboard de jugador.
-          </p>
-        </div>
-
-        <div style={heroActionsStyle}>
-          <button
-            type="button"
-            onClick={() => void loadAdminSurface()}
-            style={primaryActionStyle}
-          >
-            <RefreshCw size={16} />
-            {isRefreshing ? "Actualizando…" : "Refrescar panel"}
-          </button>
-          <Link to="/dashboard" style={secondaryActionStyle}>
-            Ir a jugar
-          </Link>
-        </div>
-      </section>
+      <PageHeader
+        eyebrow="Admin · War room"
+        title="Centro de control competitivo"
+        description="Operá cola, matches, usuarios, anti-smurf y telemetría sin depender del dashboard de jugador."
+        icon={<Shield size={18} />}
+        actions={
+          <div style={heroActionsStyle}>
+            <button
+              type="button"
+              onClick={() => void loadAdminSurface()}
+              style={primaryActionStyle}
+            >
+              <RefreshCw size={16} />
+              {isRefreshing ? "Actualizando…" : "Refrescar panel"}
+            </button>
+            <Link to="/dashboard" style={secondaryActionStyle}>
+              Ir a jugar
+            </Link>
+          </div>
+        }
+      />
 
       {surfaceError && (
         <div style={errorBannerStyle}>
@@ -986,18 +985,6 @@ const pageStyle: CSSProperties = {
   gap: "1rem",
 };
 
-const heroStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-end",
-  gap: "1rem",
-  flexWrap: "wrap",
-  padding: "1.2rem",
-  border: "1px solid rgba(125,211,252,0.16)",
-  background:
-    "linear-gradient(135deg, rgba(4,10,20,0.98), rgba(7,18,35,0.96) 55%, rgba(0,200,255,0.08))",
-};
-
 const heroActionsStyle: CSSProperties = {
   display: "flex",
   gap: "0.7rem",
@@ -1010,22 +997,6 @@ const eyebrowStyle: CSSProperties = {
   fontWeight: 900,
   letterSpacing: "0.16em",
   textTransform: "uppercase",
-};
-
-const titleStyle: CSSProperties = {
-  margin: 0,
-  color: "#f8fafc",
-  fontFamily: "var(--font-display)",
-  fontSize: "clamp(1.6rem, 3vw, 2.1rem)",
-  letterSpacing: "0.05em",
-  textTransform: "uppercase",
-};
-
-const subtitleStyle: CSSProperties = {
-  margin: 0,
-  color: "rgba(226,232,240,0.68)",
-  maxWidth: "72ch",
-  lineHeight: 1.55,
 };
 
 const primaryActionStyle: CSSProperties = {

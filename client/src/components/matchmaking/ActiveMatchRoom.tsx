@@ -451,6 +451,10 @@ export function ActiveMatchRoom({
                 >
                   Entrar al voice
                 </a>
+              ) : match.discordVoice?.status === "missing_link" ? (
+                <a href="/profile?tab=accounts" style={primaryButtonStyle}>
+                  Vincular Discord
+                </a>
               ) : null
             }
           />

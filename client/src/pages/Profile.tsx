@@ -116,6 +116,12 @@ function parseRouteUsername(pathname: string) {
   return decodeURIComponent(pathname.replace("/profile/", "").trim());
 }
 
+function getInitialProfileTab(): ProfileTab {
+  if (typeof window === "undefined") return "overview";
+  const tab = new URLSearchParams(window.location.search).get("tab");
+  return tab === "history" || tab === "accounts" ? tab : "overview";
+}
+
 function formatShortDate(value: string) {
   return new Date(value).toLocaleDateString("es-AR", {
     day: "2-digit",
@@ -192,7 +198,8 @@ export function Profile() {
   const [matches, setMatches] = useState<MatchHistoryEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [activeTab, setActiveTab] = useState<ProfileTab>("overview");
+  const [activeTab, setActiveTab] =
+    useState<ProfileTab>(getInitialProfileTab);
   const [matchFilter, setMatchFilter] = useState<MatchFilter>("all");
   const [historyPage, setHistoryPage] = useState(1);
 
@@ -503,6 +510,15 @@ export function Profile() {
       </section>
     );
   }
+
+  const linkedDiscordAccount =
+    profile.linkedAccounts?.find((entry) => entry.provider === "discord") ??
+    null;
+  const linkedGoogleAccount =
+    profile.linkedAccounts?.find((entry) => entry.provider === "google") ??
+    null;
+  const linkedBattleNetAccount =
+    profile.linkedAccounts?.find((entry) => entry.provider === "bnet") ?? null;
 
   return (
     <div style={{ display: "grid", gap: "18px" }}>
@@ -1281,20 +1297,23 @@ export function Profile() {
                   Cuentas vinculadas
                 </div>
                 <div style={{ color: "var(--nexus-muted)", fontSize: "13px" }}>
-                  Hoy Discord y Battle.net ya tienen flujo real de vinculación.
-                  Google queda preparado visualmente, pero sin OAuth funcional todavía.
+                  Vinculá las cuentas que destraban funciones reales: voice privado
+                  por equipo, identidad Battle.net y futuras señales sociales.
                 </div>
               </div>
 
               {accountMessage ? <MessageBanner text={accountMessage} /> : null}
 
+              {!linkedDiscordAccount ? (
+                <DiscordLinkCallout
+                  busy={accountBusyProvider === "discord"}
+                  onLink={handleLinkDiscord}
+                />
+              ) : null}
+
               <AccountCard
                 provider="discord"
-                account={
-                  profile.linkedAccounts?.find(
-                    (entry) => entry.provider === "discord",
-                  ) ?? null
-                }
+                account={linkedDiscordAccount}
                 busy={accountBusyProvider === "discord"}
                 status="ready"
                 onLink={handleLinkDiscord}
@@ -1303,22 +1322,14 @@ export function Profile() {
 
               <AccountCard
                 provider="google"
-                account={
-                  profile.linkedAccounts?.find(
-                    (entry) => entry.provider === "google",
-                  ) ?? null
-                }
+                account={linkedGoogleAccount}
                 busy={false}
                 status="coming-soon"
               />
 
               <AccountCard
                 provider="bnet"
-                account={
-                  profile.linkedAccounts?.find(
-                    (entry) => entry.provider === "bnet",
-                  ) ?? null
-                }
+                account={linkedBattleNetAccount}
                 busy={accountBusyProvider === "bnet"}
                 status="ready"
                 onLink={handleLinkBattleNet}
@@ -1862,6 +1873,81 @@ function BattleNetIdentityPill({ battletag }: { battletag: string }) {
   );
 }
 
+function DiscordLinkCallout({
+  busy,
+  onLink,
+}: {
+  busy: boolean;
+  onLink: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "relative",
+        overflow: "hidden",
+        border: "1px solid rgba(88,101,242,0.42)",
+        background:
+          "radial-gradient(circle at top right, rgba(88,101,242,0.24), transparent 42%), linear-gradient(135deg, rgba(88,101,242,0.13), rgba(2,6,14,0.78))",
+        padding: "14px",
+        display: "flex",
+        justifyContent: "space-between",
+        gap: "14px",
+        alignItems: "center",
+        flexWrap: "wrap",
+      }}
+    >
+      <div style={{ display: "grid", gap: "4px", minWidth: 0 }}>
+        <div
+          style={{
+            color: "#a5b4fc",
+            fontFamily: "var(--font-display)",
+            fontSize: "12px",
+            fontWeight: 900,
+            letterSpacing: "1.6px",
+            textTransform: "uppercase",
+          }}
+        >
+          Acción recomendada
+        </div>
+        <div
+          style={{
+            color: "var(--nexus-text)",
+            fontSize: "14px",
+            fontWeight: 850,
+          }}
+        >
+          Vinculá Discord para recibir el voice privado de tu equipo.
+        </div>
+        <div style={{ color: "rgba(226,232,240,0.62)", fontSize: "12px" }}>
+          Sin Discord podés jugar, pero durante la partida no se te expone el
+          invite automático del canal.
+        </div>
+      </div>
+      <button
+        onClick={onLink}
+        disabled={busy}
+        style={{
+          border: "1px solid rgba(165,180,252,0.52)",
+          background: busy
+            ? "rgba(148,163,184,0.16)"
+            : "linear-gradient(90deg, #5865f2, #8b5cf6)",
+          color: "#fff",
+          padding: "10px 12px",
+          fontFamily: "var(--font-display)",
+          fontSize: "12px",
+          fontWeight: 900,
+          letterSpacing: "1px",
+          textTransform: "uppercase",
+          cursor: busy ? "not-allowed" : "pointer",
+          boxShadow: busy ? "none" : "0 0 24px rgba(88,101,242,0.22)",
+        }}
+      >
+        {busy ? "Conectando..." : "Vincular Discord"}
+      </button>
+    </div>
+  );
+}
+
 function AccountCard({
   provider,
   account,
@@ -1879,6 +1965,13 @@ function AccountCard({
 }) {
   const linked = Boolean(account);
   const accent = getProviderAccent(provider);
+  const unavailable = status !== "ready";
+  const description =
+    provider === "discord"
+      ? "Voice privado, verificación social y acceso operativo a salas."
+      : provider === "bnet"
+        ? "Identidad Battle.net para validar cuenta y cruzar datos competitivos."
+        : "Reservado para login alternativo cuando activemos OAuth de Google.";
 
   return (
     <div
@@ -1914,9 +2007,12 @@ function AccountCard({
           <span style={{ color: "var(--nexus-text)", fontSize: "13px" }}>
             {linked
               ? (account?.displayName ?? "Cuenta vinculada")
-              : status === "ready"
-                ? "Disponible para vincular"
-                : "Próximamente"}
+              : provider === "google"
+                ? "Reservado para próximo OAuth"
+                : "Lista para vincular ahora"}
+          </span>
+          <span style={{ color: "var(--nexus-muted)", fontSize: "12px" }}>
+            {description}
           </span>
         </div>
 
@@ -1951,10 +2047,10 @@ function AccountCard({
         ) : (
           <button
             onClick={onLink}
-            disabled={busy || status !== "ready"}
-            style={secondaryButtonStyle(busy || status !== "ready")}
+            disabled={busy || unavailable}
+            style={secondaryButtonStyle(busy || unavailable)}
           >
-            {status === "ready" ? "Vincular" : "Próximamente"}
+            {unavailable ? "No activo" : busy ? "Conectando..." : "Vincular"}
           </button>
         )}
       </div>

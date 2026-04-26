@@ -225,9 +225,9 @@ export function Stats() {
             subtitle="Datos reales actuales: mapa, resultado, team, delta ELO y estado."
           >
             {loading ? (
-              <EmptyState text="Cargando historial competitivo..." />
+              <EmptyState text="Sincronizando tu historial competitivo..." />
             ) : visibleMatches.length === 0 ? (
-              <EmptyState text="Todavía no hay partidas en este rango." />
+              <EmptyState text="No hay partidas para este filtro. Cuando cierres una partida, este panel se llena solo con mapa, resultado y ELO." />
             ) : (
               <div style={historyListStyle}>
                 {visibleMatches.map((entry) => {
@@ -279,7 +279,7 @@ export function Stats() {
             subtitle="Lectura rápida tipo scouting."
           >
             {recentForm.length === 0 ? (
-              <EmptyState text="Sin matches completados todavía." />
+              <EmptyState text="Todavía no hay forma reciente; necesitás al menos una partida completada." />
             ) : (
               <div style={formRailStyle}>
                 {recentForm.map((entry, index) => {
@@ -304,7 +304,7 @@ export function Stats() {
             subtitle="Con el MVP actual sólo podemos medir mapa/resultado."
           >
             {mapStats.length === 0 ? (
-              <EmptyState text="Sin mapas con resultado consolidado." />
+              <EmptyState text="Sin mapas consolidados en este rango. El map pool aparece apenas haya resultados cerrados." />
             ) : (
               <div style={{ display: "grid", gap: "0.6rem" }}>
                 {mapStats.map((map) => (
@@ -321,15 +321,15 @@ export function Stats() {
           </Panel>
 
           <Panel
-            eyebrow="Pendiente datos del juego"
-            title="Qué falta conectar"
-            subtitle="Slots preparados para cuando integremos HeroesProfile/replays."
+            eyebrow="Próximo upgrade"
+            title="Stats a enriquecer"
+            subtitle="La base ya usa historial y replays; el siguiente paso es convertir señales individuales en tendencias persistentes."
           >
             <div style={dataSlotsStyle}>
-              <DataSlot icon={Crosshair} label="Héroes" value="pick/ban, winrate, daño" />
-              <DataSlot icon={Clock3} label="Duración" value="minutos reales por replay" />
-              <DataSlot icon={Database} label="Stats" value="kills, deaths, assists" />
-              <DataSlot icon={MapIcon} label="Mapa" value="objetivos y rol por mapa" />
+              <DataSlot icon={Crosshair} label="Héroes" value="pool personal en Hero Lab" />
+              <DataSlot icon={Clock3} label="Duración" value="promedios por mapa" />
+              <DataSlot icon={Database} label="Combate" value="KDA, daño y presencia" />
+              <DataSlot icon={MapIcon} label="Mapa" value="objetivos y draft por mapa" />
             </div>
           </Panel>
         </aside>
