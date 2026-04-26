@@ -155,8 +155,26 @@ type ReplayUpload = {
       assists?: number | null;
       heroDamage?: number | null;
       siegeDamage?: number | null;
+      structureDamage?: number | null;
+      minionDamage?: number | null;
       healing?: number | null;
+      selfHealing?: number | null;
+      damageTaken?: number | null;
+      protection?: number | null;
       experience?: number | null;
+      mercCampCaptures?: number | null;
+      timeSpentDead?: number | null;
+      ccTime?: number | null;
+      stunTime?: number | null;
+      rootTime?: number | null;
+      silenceTime?: number | null;
+      teamfightHeroDamage?: number | null;
+      teamfightHealing?: number | null;
+      teamfightDamageTaken?: number | null;
+      gameScore?: number | null;
+      highestKillStreak?: number | null;
+      talents?: Array<{ tier: string; name: string }>;
+      awards?: string[];
     }>;
     warnings?: string[];
   } | null;
@@ -1140,8 +1158,24 @@ type ReplayMetricKey =
   | "assists"
   | "heroDamage"
   | "siegeDamage"
+  | "structureDamage"
+  | "minionDamage"
   | "healing"
-  | "experience";
+  | "selfHealing"
+  | "damageTaken"
+  | "protection"
+  | "experience"
+  | "mercCampCaptures"
+  | "timeSpentDead"
+  | "ccTime"
+  | "stunTime"
+  | "rootTime"
+  | "silenceTime"
+  | "teamfightHeroDamage"
+  | "teamfightHealing"
+  | "teamfightDamageTaken"
+  | "gameScore"
+  | "highestKillStreak";
 type MatchPostTab = "overview" | "stats";
 
 function MatchTelemetryPanel({
@@ -1195,12 +1229,23 @@ function MatchTelemetryPanel({
   const statusTone = getReplayUploadStatusTone(latest?.status);
   const resolutionTone = getReplayResolutionTone(resolution?.status);
   const topDamage = getTopReplayPlayer(parsedPlayers, "heroDamage");
+  const topSiege = getTopReplayPlayer(parsedPlayers, "siegeDamage");
   const topHealing = getTopReplayPlayer(parsedPlayers, "healing");
   const topXp = getTopReplayPlayer(parsedPlayers, "experience");
+  const topTank = getTopReplayPlayer(parsedPlayers, "damageTaken");
+  const topCc = getTopReplayPlayer(parsedPlayers, "ccTime");
+  const topMercs = getTopReplayPlayer(parsedPlayers, "mercCampCaptures");
+  const matchMvpPlayer = getReplayPlayerForMatchUser(
+    parsedPlayers,
+    match.players,
+    match.mvpUserId ?? null,
+  );
   const totalHeroDamage = sumReplayMetric(parsedPlayers, "heroDamage");
+  const totalSiegeDamage = sumReplayMetric(parsedPlayers, "siegeDamage");
   const totalHealing = sumReplayMetric(parsedPlayers, "healing");
   const totalExperience = sumReplayMetric(parsedPlayers, "experience");
   const totalTakedowns = sumReplayMetric(parsedPlayers, "takedowns");
+  const totalMercs = sumReplayMetric(parsedPlayers, "mercCampCaptures");
   const teamOneTotals = getTeamReplayTotals(parsedPlayers, 1);
   const teamTwoTotals = getTeamReplayTotals(parsedPlayers, 2);
   const maxValues = {
@@ -1408,6 +1453,17 @@ function MatchTelemetryPanel({
         </>
       ) : (
         <>
+          <ReplayReportHighlights
+            mvp={matchMvpPlayer}
+            topDamage={topDamage}
+            topSiege={topSiege}
+            topHealing={topHealing}
+            topXp={topXp}
+            topTank={topTank}
+            topCc={topCc}
+            topMercs={topMercs}
+          />
+
           <div style={combatKpiGridStyle(narrow)}>
             <TelemetryKpi
               label="Derribos"
@@ -1419,6 +1475,12 @@ function MatchTelemetryPanel({
               label="Hero damage"
               value={formatReplayNumber(totalHeroDamage)}
               tone="#38bdf8"
+              large
+            />
+            <TelemetryKpi
+              label="Siege damage"
+              value={formatReplayNumber(totalSiegeDamage)}
+              tone="#fb7185"
               large
             />
             <TelemetryKpi
@@ -1437,6 +1499,11 @@ function MatchTelemetryPanel({
               label="Top daño"
               value={topDamage ? getReplayPlayerShortName(topDamage) : "—"}
               tone="#38bdf8"
+            />
+            <TelemetryKpi
+              label="Merc camps"
+              value={formatReplayNumber(totalMercs)}
+              tone="#a78bfa"
             />
             <TelemetryKpi
               label="Top heal/soak"
@@ -1516,6 +1583,103 @@ function TelemetryKpi({
     <div style={telemetryKpiStyle(tone, large)}>
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  );
+}
+
+function ReplayReportHighlights({
+  mvp,
+  topDamage,
+  topSiege,
+  topHealing,
+  topXp,
+  topTank,
+  topCc,
+  topMercs,
+}: {
+  mvp: ReplayPlayerSummary | null;
+  topDamage: ReplayPlayerSummary | null;
+  topSiege: ReplayPlayerSummary | null;
+  topHealing: ReplayPlayerSummary | null;
+  topXp: ReplayPlayerSummary | null;
+  topTank: ReplayPlayerSummary | null;
+  topCc: ReplayPlayerSummary | null;
+  topMercs: ReplayPlayerSummary | null;
+}) {
+  const cards = [
+    {
+      label: "MVP votado",
+      player: mvp,
+      value: mvp?.hero ?? "Sin MVP",
+      tone: "#facc15",
+      metric: null,
+      fallback: "Se completa al cerrar la votación",
+    },
+    {
+      label: "Artillero",
+      player: topDamage,
+      value: formatReplayNumber(topDamage?.heroDamage),
+      tone: "#38bdf8",
+      metric: "Hero damage",
+      fallback: "—",
+    },
+    {
+      label: "Siege breaker",
+      player: topSiege,
+      value: formatReplayNumber(topSiege?.siegeDamage),
+      tone: "#fb7185",
+      metric: "Siege damage",
+      fallback: "—",
+    },
+    {
+      label: "Soporte clave",
+      player: topHealing ?? topXp,
+      value: topHealing
+        ? formatReplayNumber(topHealing.healing)
+        : formatReplayNumber(topXp?.experience),
+      tone: "#4ade80",
+      metric: topHealing ? "Healing" : "XP",
+      fallback: "—",
+    },
+    {
+      label: "Frontline",
+      player: topTank,
+      value: formatReplayNumber(topTank?.damageTaken),
+      tone: "#c084fc",
+      metric: "Daño recibido",
+      fallback: "—",
+    },
+    {
+      label: "Control",
+      player: topCc,
+      value: formatDuration(topCc?.ccTime ?? 0),
+      tone: "#22d3ee",
+      metric: "CC time",
+      fallback: "—",
+    },
+    {
+      label: "Macro",
+      player: topMercs,
+      value: formatReplayNumber(topMercs?.mercCampCaptures),
+      tone: "#a78bfa",
+      metric: "Merc camps",
+      fallback: "—",
+    },
+  ];
+
+  return (
+    <div style={replayHighlightsGridStyle}>
+      {cards.map((card) => (
+        <article key={card.label} style={replayHighlightCardStyle(card.tone)}>
+          <div style={{ ...eyebrowStyle, color: card.tone }}>{card.label}</div>
+          <strong>{card.player ? getReplayPlayerShortName(card.player) : card.fallback}</strong>
+          <span>
+            {card.player
+              ? `${card.value}${card.metric ? ` · ${card.metric}` : ""}`
+              : card.value}
+          </span>
+        </article>
+      ))}
     </div>
   );
 }
@@ -1645,6 +1809,26 @@ function ReplayTeamStatsLane({
           value={formatReplayNumber(totals.experience)}
           tone="#f59e0b"
         />
+        <TelemetryMiniStat
+          label="Mercs"
+          value={formatReplayNumber(totals.mercCampCaptures)}
+          tone="#a78bfa"
+        />
+        <TelemetryMiniStat
+          label="Daño recibido"
+          value={formatReplayNumber(totals.damageTaken)}
+          tone="#c084fc"
+        />
+        <TelemetryMiniStat
+          label="Tiempo muerto"
+          value={formatDuration(totals.timeSpentDead)}
+          tone="#f87171"
+        />
+        <TelemetryMiniStat
+          label="CC"
+          value={formatDuration(totals.ccTime)}
+          tone="#22d3ee"
+        />
       </div>
 
       <div style={replayPlayerTableScrollStyle}>
@@ -1738,7 +1922,12 @@ function ReplayPlayerStatRow({
           <span style={playerDossierSubStyle}>{subtitle}</span>
         </div>
       </div>
-      <div style={replayPlayerHeroCellStyle}>{player.hero ?? "—"}</div>
+      <div style={replayPlayerHeroCellStyle}>
+        <span>{player.hero ?? "—"}</span>
+        <small>
+          {formatReplayPlayerLoadout(player)}
+        </small>
+      </div>
       <div style={replayPlayerMetricValueStyle}>{kda}</div>
       <div style={replayPlayerMetricValueStyle}>
         {formatReplayNumber(player.takedowns)}
@@ -2567,8 +2756,9 @@ function getMapNameFromId(mapId: string) {
 }
 
 function formatDuration(totalSeconds: number) {
-  const minutes = Math.floor(totalSeconds / 60);
-  const seconds = totalSeconds % 60;
+  const safeSeconds = Math.max(0, Math.round(totalSeconds));
+  const minutes = Math.floor(safeSeconds / 60);
+  const seconds = safeSeconds % 60;
   return `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
@@ -2710,13 +2900,30 @@ function getTeamReplayTotals(players: ReplayPlayerSummary[], team: 1 | 2) {
     assists: sumReplayMetric(teamPlayers, "assists"),
     heroDamage: sumReplayMetric(teamPlayers, "heroDamage"),
     siegeDamage: sumReplayMetric(teamPlayers, "siegeDamage"),
+    structureDamage: sumReplayMetric(teamPlayers, "structureDamage"),
+    minionDamage: sumReplayMetric(teamPlayers, "minionDamage"),
     healing: sumReplayMetric(teamPlayers, "healing"),
+    selfHealing: sumReplayMetric(teamPlayers, "selfHealing"),
+    damageTaken: sumReplayMetric(teamPlayers, "damageTaken"),
+    protection: sumReplayMetric(teamPlayers, "protection"),
     experience: sumReplayMetric(teamPlayers, "experience"),
+    mercCampCaptures: sumReplayMetric(teamPlayers, "mercCampCaptures"),
+    timeSpentDead: sumReplayMetric(teamPlayers, "timeSpentDead"),
+    ccTime: sumReplayMetric(teamPlayers, "ccTime"),
   };
 }
 
 function getReplayPlayerShortName(player: ReplayPlayerSummary) {
   return (player.battleTag ?? player.name).replace(/#\d+$/, "");
+}
+
+function formatReplayPlayerLoadout(player: ReplayPlayerSummary) {
+  const talents = player.talents?.length ?? 0;
+  const awards = player.awards?.length ?? 0;
+  if (talents > 0 && awards > 0) return `${talents} talentos · ${awards} premios`;
+  if (talents > 0) return `${talents} talentos`;
+  if (awards > 0) return `${awards} premios`;
+  return "build pendiente";
 }
 
 function getTeamDisplayName(
@@ -2775,6 +2982,22 @@ function findMatchPlayerForReplay(
         Boolean(username && replayBattleTag.includes(username)) ||
         Boolean(replayName && username.includes(replayName))
       );
+    }) ?? null
+  );
+}
+
+function getReplayPlayerForMatchUser(
+  replayPlayers: ReplayPlayerSummary[],
+  matchPlayers: Player[],
+  userId: string | null,
+) {
+  if (!userId) return null;
+  const matchPlayer = matchPlayers.find((player) => player.userId === userId);
+  if (!matchPlayer) return null;
+  return (
+    replayPlayers.find((replayPlayer) => {
+      const resolved = findMatchPlayerForReplay(matchPlayers, replayPlayer);
+      return resolved?.userId === matchPlayer.userId;
     }) ?? null
   );
 }
@@ -3528,10 +3751,31 @@ const replayPlayerHeroCellStyle: CSSProperties = {
   color: "#e2e8f0",
   fontSize: "0.8rem",
   fontWeight: 850,
-  whiteSpace: "nowrap",
+  display: "grid",
+  gap: "0.16rem",
   overflow: "hidden",
-  textOverflow: "ellipsis",
 };
+
+const replayHighlightsGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
+  gap: "0.58rem",
+};
+
+function replayHighlightCardStyle(tone: string): CSSProperties {
+  return {
+    minWidth: 0,
+    position: "relative",
+    overflow: "hidden",
+    border: `1px solid ${tone}30`,
+    background: `linear-gradient(135deg, ${tone}16, rgba(2,6,23,0.72) 58%, rgba(2,6,23,0.42))`,
+    padding: "0.78rem",
+    display: "grid",
+    gap: "0.18rem",
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), 0 0 28px ${tone}0d`,
+    color: "rgba(226,232,240,0.72)",
+  };
+}
 
 const replayPlayerMetricValueStyle: CSSProperties = {
   color: "#f8fafc",

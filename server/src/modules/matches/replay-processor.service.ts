@@ -308,8 +308,26 @@ function buildReplaySummary(parsed: ParsedReplayResult, expectedMatch: ExpectedM
       assists: asNumberOrNull(stats.Assists),
       heroDamage: asNumberOrNull(stats.HeroDamage),
       siegeDamage: asNumberOrNull(stats.SiegeDamage),
+      structureDamage: asNumberOrNull(stats.StructureDamage),
+      minionDamage: asNumberOrNull(stats.MinionDamage),
       healing: asNumberOrNull(stats.Healing),
+      selfHealing: asNumberOrNull(stats.SelfHealing),
+      damageTaken: asNumberOrNull(stats.DamageTaken),
+      protection: asNumberOrNull(stats.ProtectionGivenToAllies),
       experience: asNumberOrNull(stats.ExperienceContribution),
+      mercCampCaptures: asNumberOrNull(stats.MercCampCaptures),
+      timeSpentDead: asNumberOrNull(stats.TimeSpentDead),
+      ccTime: asNumberOrNull(stats.TimeCCdEnemyHeroes),
+      stunTime: asNumberOrNull(stats.TimeStunningEnemyHeroes),
+      rootTime: asNumberOrNull(stats.TimeRootingEnemyHeroes),
+      silenceTime: asNumberOrNull(stats.TimeSilencingEnemyHeroes),
+      teamfightHeroDamage: asNumberOrNull(stats.TeamfightHeroDamage),
+      teamfightHealing: asNumberOrNull(stats.TeamfightHealingDone),
+      teamfightDamageTaken: asNumberOrNull(stats.TeamfightDamageTaken),
+      gameScore: asNumberOrNull(stats.GameScore),
+      highestKillStreak: asNumberOrNull(stats.HighestKillStreak),
+      talents: normalizeReplayTalents((player as { talents?: unknown }).talents),
+      awards: extractReplayAwards(stats),
     }
   })
 
@@ -533,6 +551,28 @@ function toGameModeName(mode: unknown) {
 
 function asNumberOrNull(value: unknown) {
   return typeof value === 'number' && Number.isFinite(value) ? value : null
+}
+
+function normalizeReplayTalents(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return []
+  return Object.entries(value as Record<string, unknown>)
+    .map(([tier, talent]) => ({
+      tier,
+      name: typeof talent === 'string' ? talent : String(talent ?? ''),
+    }))
+    .filter((entry) => entry.name.trim().length > 0)
+    .sort((a, b) => talentTierOrder(a.tier) - talentTierOrder(b.tier))
+}
+
+function talentTierOrder(tier: string) {
+  const match = tier.match(/(\d+)/)
+  return match ? Number(match[1]) : 99
+}
+
+function extractReplayAwards(stats: Record<string, unknown>) {
+  return Object.entries(stats)
+    .filter(([key, value]) => key.startsWith('EndOfMatchAward') && value === 1)
+    .map(([key]) => key.replace(/^EndOfMatchAward/, '').replace(/Boolean$/, ''))
 }
 
 function toDateOrNull(value: unknown) {

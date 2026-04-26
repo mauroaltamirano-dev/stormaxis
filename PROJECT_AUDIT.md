@@ -722,6 +722,8 @@ Esto crea la base visual y de navegación para ordenar todo lo demás.
 
 ## URGENTES
 
-Cuando logueamos con discord nos manda a un /admin y sino nos loguea pero nos deja en /login, nos debe mandar al dashboard.
+- [x] Cuando logueamos con discord nos manda a un /admin y sino nos loguea pero nos deja en /login, nos debe mandar al dashboard.
+  - 2026-04-26: `AuthCallback` mantiene `/profile` para vinculación y `/onboarding` si falta onboarding competitivo, pero el login normal de Discord/Battle.net ya cae siempre en `/dashboard` incluso para admins.
 
-Mejorar ampliamente las stats de la replay cargada.
+- [x] Mejorar ampliamente las stats de la replay cargada.
+  - 2026-04-26: el snapshot del replay ahora guarda métricas extendidas (`damageTaken`, `selfHealing`, `protection`, `mercCampCaptures`, `timeSpentDead`, CC/stun/root/silence, teamfight stats, talents y awards). La post-partida agrega highlights tipo reporte competitivo, MVP votado, líderes por daño/siege/healing/XP/frontline/control/macro, KPIs ampliados y totales de equipo extra.

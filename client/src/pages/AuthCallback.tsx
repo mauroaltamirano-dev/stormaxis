@@ -50,9 +50,7 @@ export function AuthCallback() {
               ? '/profile'
               : requiresCompetitiveOnboarding(currentUser)
                 ? '/onboarding'
-                : currentUser.role === 'ADMIN'
-                  ? '/admin'
-                  : '/dashboard'
+                : '/dashboard'
             : '/login'
 
         navigate({ to: nextTarget, replace: true })
