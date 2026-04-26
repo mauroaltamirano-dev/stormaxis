@@ -786,17 +786,6 @@ function BattleNetMiniTag({
     >
       <span
         style={{
-          width: "5px",
-          height: "5px",
-          borderRadius: "999px",
-          background: "#00aeff",
-          boxShadow: "0 0 9px #00aeff",
-          flexShrink: 0,
-        }}
-      />
-      <span style={{ color: "rgba(155,216,255,0.50)" }}>B.NET</span>
-      <span
-        style={{
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",

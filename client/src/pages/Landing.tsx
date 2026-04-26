@@ -2189,7 +2189,6 @@ function Navbar({ user }: { user: { username?: string | null } | null }) {
           >
             NexusGG
           </span>
-          <BetaPill compact />
         </div>
       </Link>
 
