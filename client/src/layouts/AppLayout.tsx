@@ -6,11 +6,7 @@ import {
   useRouterState,
 } from "@tanstack/react-router";
 import {
-  Activity,
   BarChart3,
-  Bell,
-  ChevronDown,
-  ChevronLeft,
   ChevronRight,
   ExternalLink,
   LogOut,
@@ -22,7 +18,6 @@ import {
   Trophy,
   User,
   Users,
-  Zap,
   Sparkles,
 } from "lucide-react";
 import { useAuthStore } from "../stores/auth.store";
@@ -32,7 +27,6 @@ import { useSocketStore } from "../stores/socket.store";
 import { useMatchmakingStore } from "../stores/matchmaking.store";
 import { getRoleIconSources, getRoleMeta } from "../lib/roles";
 import { getLevelMeta, getRankMeta } from "../lib/ranks";
-import { RankProgressBar } from "../components/RankProgressBar";
 import {
   getMatchLifecycleMeta,
   getQueueLifecycleMeta,
@@ -124,18 +118,10 @@ function formatQueueTime(seconds: number) {
   return `${minutes}:${rest}`;
 }
 
-function winrate(wins: number, losses: number) {
-  const total = wins + losses;
-  if (total === 0) return 0;
-  return Math.round((wins / total) * 100);
-}
-
 export function AppLayout() {
-  const { user, accessToken, logout, updateUser } = useAuthStore();
+  const { user, accessToken, logout } = useAuthStore();
   const {
     status: socketStatus,
-    reconnectAttempts,
-    lastError,
   } = useSocketStore();
   const {
     status: matchmakingStatus,
@@ -151,11 +137,9 @@ export function AppLayout() {
   });
 
   const [recentMatches, setRecentMatches] = useState<MatchHistoryEntry[]>([]);
-  const [isHistoryOpen, setIsHistoryOpen] = useState(true);
-  const [isPlayerSpineCollapsed, setIsPlayerSpineCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return window.localStorage.getItem("nexus:player-spine-collapsed") === "1";
-  });
+  const [activeSpinePanel, setActiveSpinePanel] = useState<
+    "history" | "friends" | null
+  >(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
@@ -166,8 +150,6 @@ export function AppLayout() {
     readyCount: number;
     totalPlayers: number;
   } | null>(null);
-  const [adminMmrBusy, setAdminMmrBusy] = useState<number | null>(null);
-  const [adminMmrError, setAdminMmrError] = useState<string | null>(null);
   const primaryNavItems = useMemo(
     () =>
       user?.role === "ADMIN"
@@ -180,8 +162,6 @@ export function AppLayout() {
   const level = levelMeta.level;
   const rankMeta = getRankMeta(level);
   const rankColor = rankMeta.color;
-  const nextRankMeta = getRankMeta(Math.min(10, level + 1));
-  const nextRankColor = level >= 10 ? rankColor : nextRankMeta.color;
   const pointsToNextLevel =
     !user || levelMeta.nextLevelAt == null
       ? 0
@@ -196,13 +176,6 @@ export function AppLayout() {
       activeMatchSnapshot.status,
     ),
   );
-
-  useEffect(() => {
-    window.localStorage.setItem(
-      "nexus:player-spine-collapsed",
-      isPlayerSpineCollapsed ? "1" : "0",
-    );
-  }, [isPlayerSpineCollapsed]);
 
   useEffect(() => {
     if (!isSearchingMatch || !searchStartedAt) {
@@ -422,39 +395,6 @@ export function AppLayout() {
     navigate({ to: "/" });
   }
 
-  async function handleAdminMmrDelta(delta: number) {
-    if (!user || user.role !== "ADMIN") return;
-
-    const nextMmr = Math.max(0, Math.min(5000, user.mmr + delta));
-    if (nextMmr === user.mmr) return;
-
-    try {
-      setAdminMmrBusy(delta);
-      setAdminMmrError(null);
-
-      const { data } = await api.patch<{ mmr: number; rank: string }>(
-        `/admin/users/${user.id}/mmr`,
-        { mmr: nextMmr },
-      );
-      const nextLevelMeta = getLevelMeta(data.mmr);
-
-      updateUser({
-        mmr: data.mmr,
-        rank: data.rank,
-        level: nextLevelMeta.level,
-        levelProgressPct: nextLevelMeta.progressPct,
-        nextLevelAt: nextLevelMeta.nextLevelAt,
-        displayLevel: getRankMeta(nextLevelMeta.level).label,
-      });
-    } catch (err: any) {
-      setAdminMmrError(
-        err.response?.data?.error?.message ?? "No pude ajustar el ELO.",
-      );
-    } finally {
-      setAdminMmrBusy(null);
-    }
-  }
-
   function openPlayer(username: string) {
     setSearchTerm("");
     setSearchResults([]);
@@ -468,14 +408,7 @@ export function AppLayout() {
   if (!user) return null;
 
   return (
-    <div
-      style={{
-        ...styles.shell,
-        gridTemplateColumns: isPlayerSpineCollapsed
-          ? "238px minmax(0, 1fr) 64px"
-          : styles.shell.gridTemplateColumns,
-      }}
-    >
+    <div style={styles.shell}>
       <aside style={styles.commandRail}>
         <Link to="/dashboard" style={styles.brandLockup}>
           <img
@@ -607,384 +540,134 @@ export function AppLayout() {
         <Outlet />
       </main>
 
-      <aside
-        style={{
-          ...styles.playerSpine,
-          ...(isPlayerSpineCollapsed ? styles.playerSpineCollapsed : {}),
-        }}
-      >
+      {activeSpinePanel === "history" && (
+        <SpineFlyout
+          title="Historial rápido"
+          subtitle="Últimas partidas guardadas"
+          icon={<Swords size={17} />}
+          onClose={() => setActiveSpinePanel(null)}
+        >
+          <div style={styles.historyList}>
+            {recentMatches.length === 0 ? (
+              <MiniState text="Todavía no hay partidas registradas" />
+            ) : (
+              recentMatches.map((entry) => (
+                <MatchHistoryItem key={entry.id} entry={entry} />
+              ))
+            )}
+          </div>
+        </SpineFlyout>
+      )}
+
+      {activeSpinePanel === "friends" && (
+        <SpineFlyout
+          title="Amigos"
+          subtitle="Estado social competitivo"
+          icon={<Users size={17} />}
+          onClose={() => setActiveSpinePanel(null)}
+        >
+          <div style={styles.friendStatusStack}>
+            <FriendStatusRow label="Conectado" tone="#4ade80" detail="Disponible para premade" />
+            <FriendStatusRow label="Jugando" tone="#38bdf8" detail="En partida activa" />
+            <FriendStatusRow label="Offline" tone="rgba(148,163,184,0.75)" detail="Sin conexión" />
+          </div>
+          <MiniState text="La lista real de amigos queda preparada para la próxima integración social." />
+        </SpineFlyout>
+      )}
+
+      <aside style={styles.playerSpine}>
         <button
           type="button"
-          onClick={() => setIsPlayerSpineCollapsed((current) => !current)}
-          style={{
-            ...styles.spineCollapseButton,
-            ...(isPlayerSpineCollapsed ? styles.spineCollapseButtonCompact : {}),
-          }}
-          aria-label={
-            isPlayerSpineCollapsed
-              ? "Expandir panel derecho"
-              : "Colapsar panel derecho"
-          }
-          title={
-            isPlayerSpineCollapsed
-              ? "Expandir player spine"
-              : "Colapsar player spine"
-          }
+          onClick={openOwnProfile}
+          style={styles.compactIdentityButton}
+          aria-label="Abrir mi perfil"
         >
-          {isPlayerSpineCollapsed ? (
-            <ChevronLeft size={16} />
-          ) : (
-            <ChevronRight size={16} />
-          )}
-          {!isPlayerSpineCollapsed ? <span>Colapsar spine</span> : null}
+          <div style={styles.compactAvatarWrap}>
+            <Avatar username={user.username} avatar={user.avatar} size={58} />
+            <img
+              src={rankMeta.iconSrc}
+              alt={rankMeta.label}
+              loading="lazy"
+              decoding="async"
+              style={{
+                ...styles.compactRankIcon,
+                filter: `drop-shadow(0 0 10px ${rankColor})`,
+              }}
+            />
+          </div>
+
+          <div style={{ ...styles.compactRankLabel, color: rankColor }}>
+            {rankMeta.label}
+          </div>
+          <div style={styles.compactMmrLine}>
+            {user.mmr.toLocaleString("es-AR")} MMR
+          </div>
+          <div style={{ ...styles.nextMmrPill, borderColor: `${rankColor}44`, color: rankColor }}>
+            {levelMeta.nextLevelAt == null ? "MAX" : `+${pointsToNextLevel}`}
+          </div>
+
+          <div style={styles.compactNameBlock}>
+            <div style={styles.compactNameRow}>
+              <span style={styles.spineNameFlag} title="Nacionalidad">
+                {getCountryFlag(user.countryCode)}
+              </span>
+              <span style={styles.compactName}>{user.username}</span>
+            </div>
+            {user.bnetBattletag ? (
+              <BattleNetMiniTag battletag={user.bnetBattletag} compact />
+            ) : (
+              <span style={styles.compactBattletag}>NexusGG · SA</span>
+            )}
+          </div>
         </button>
 
-        {isPlayerSpineCollapsed ? (
-          <div style={styles.collapsedSpineStack}>
-            <button
-              type="button"
-              onClick={openOwnProfile}
-              style={{
-                ...styles.collapsedAvatarButton,
-                borderColor: `${rankColor}66`,
-                boxShadow: `0 0 18px ${rankColor}22`,
-              }}
-              aria-label="Abrir mi perfil"
-            >
-              <Avatar username={user.username} avatar={user.avatar} size={38} />
-            </button>
-            <div
-              style={{
-                ...styles.collapsedRankRail,
-                color: rankColor,
-                borderColor: `${rankColor}55`,
-              }}
-              title={`${rankMeta.label} · ${user.mmr.toLocaleString("es-AR")} MMR`}
-            >
-              {level}
-            </div>
-            <span
-              style={{
-                ...styles.collapsedConnectionDot,
-                background: socketMeta.color,
-                boxShadow: `0 0 12px ${socketMeta.color}`,
-              }}
-              title={socketMeta.label}
-            />
-            {isSearchingMatch || isMatchFound || hasTrackedActiveMatch ? (
-              <span style={styles.collapsedQueueGlyph} title={railStatusMeta.navLabel}>
-                <Swords size={16} />
-              </span>
-            ) : null}
-          </div>
-        ) : (
-          <>
-        <section style={styles.playerCorePanel}>
-          <div style={styles.spineTopRow}>
-            <div>
-              <div style={styles.panelEyebrow}>Player spine</div>
-              <div style={styles.panelTitle}>Estado competitivo</div>
-            </div>
-            <div
-              style={{
-                ...styles.connectionPill,
-                borderColor: `${socketMeta.color}55`,
-              }}
-            >
-              <span
-                style={{
-                  ...styles.connectionDot,
-                  background: socketMeta.color,
-                }}
-              />
-              {socketMeta.label}
-            </div>
-          </div>
+        <div style={styles.compactRoleStack}>
+          <RoleBadge
+            role={user.mainRole as PlayerRole | null | undefined}
+            fallback="Main"
+            compact
+          />
+          <RoleBadge
+            role={user.secondaryRole as PlayerRole | null | undefined}
+            fallback="Alt"
+            muted
+            compact
+          />
+        </div>
 
-          <button
-            type="button"
-            onClick={openOwnProfile}
-            style={styles.identityButton}
+        <div style={styles.spineActionStack}>
+          <SpineActionButton
+            label="Historial"
+            active={activeSpinePanel === "history"}
+            onClick={() =>
+              setActiveSpinePanel((current) =>
+                current === "history" ? null : "history",
+              )
+            }
           >
-            {/* Hex avatar + floating rank icon */}
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "center",
-                marginBottom: "2px",
-              }}
-            >
-              <div style={{ position: "relative" }}>
-                <div
-                  style={{
-                    width: "82px",
-                    height: "82px",
-                    clipPath:
-                      "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
-                    background: `linear-gradient(135deg, ${rankColor}, ${rankColor}44)`,
-                    display: "grid",
-                    placeItems: "center",
-                  }}
-                >
-                  <div
-                    style={{
-                      width: "76px",
-                      height: "76px",
-                      clipPath:
-                        "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
-                      overflow: "hidden",
-                      display: "grid",
-                      placeItems: "center",
-                      background: "rgba(4,10,20,0.95)",
-                      color: rankColor,
-                      fontFamily: "var(--font-display)",
-                      fontWeight: 900,
-                      fontSize: "22px",
-                    }}
-                  >
-                    <Avatar
-                      username={user.username}
-                      avatar={user.avatar}
-                      size={76}
-                    />
-                  </div>
-                </div>
-                <img
-                  src={rankMeta.iconSrc}
-                  alt={rankMeta.label}
-                  loading="lazy"
-                  decoding="async"
-                  style={{
-                    position: "absolute",
-                    right: "-8px",
-                    bottom: "-4px",
-                    width: "30px",
-                    height: "30px",
-                    objectFit: "contain",
-                    filter: `drop-shadow(0 0 10px ${rankColor})`,
-                  }}
-                />
-              </div>
-            </div>
-
-            {/* Username + server tag */}
-            <div style={{ textAlign: "center", display: "grid", gap: "3px" }}>
-              <div style={styles.spineNameRow}>
-                <span style={styles.spineNameFlag} title="Nacionalidad">
-                  {getCountryFlag(user.countryCode)}
-                </span>
-                <span style={styles.spineName}>{user.username}</span>
-              </div>
-              {user.bnetBattletag ? (
-                <BattleNetMiniTag battletag={user.bnetBattletag} />
-              ) : (
-                <div
-                  style={{
-                    color: "rgba(232,244,255,0.28)",
-                    fontSize: "9.5px",
-                    fontWeight: 800,
-                    letterSpacing: "1.6px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  NexusGG · SA Server
-                </div>
-              )}
-            </div>
-
-            {/* Rank + MMR */}
-            <div
-              style={{
-                textAlign: "center",
-                borderTop: `1px solid ${rankColor}22`,
-                paddingTop: "12px",
-                display: "grid",
-                gap: "3px",
-              }}
-            >
-              <div
-                style={{
-                  color: rankColor,
-                  fontFamily: "var(--font-display)",
-                  fontSize: "14px",
-                  fontWeight: 900,
-                  letterSpacing: "1.4px",
-                  textTransform: "uppercase",
-                  textShadow: `0 0 14px ${rankColor}44`,
-                }}
-              >
-                {rankMeta.label}
-              </div>
-              <div
-                style={{
-                  color: "rgba(232,244,255,0.48)",
-                  fontFamily: "var(--font-display)",
-                  fontSize: "12px",
-                  fontWeight: 800,
-                  letterSpacing: "0.8px",
-                }}
-              >
-                {user.mmr.toLocaleString("es-AR")} MMR
-              </div>
-            </div>
-
-            {/* Roles */}
-            <div style={styles.roleRow}>
-              <RoleBadge
-                role={user.mainRole as PlayerRole | null | undefined}
-                fallback="Main sin definir"
-              />
-              <RoleBadge
-                role={user.secondaryRole as PlayerRole | null | undefined}
-                fallback="Alt sin definir"
-                muted
-              />
-            </div>
-          </button>
-
-          <div style={{ marginTop: "18px" }}>
-            <RankProgressBar
-              progressPct={levelMeta.progressPct}
-              pointsToNextLevel={
-                levelMeta.nextLevelAt == null
-                  ? null
-                  : pointsToNextLevel
-              }
-              rankColor={rankColor}
-              nextRankColor={nextRankColor}
-            />
-          </div>
-
-          <div style={styles.statsGrid}>
-            <SpineStat label="Wins" value={user.wins} tone="#4ade80" />
-            <SpineStat label="Losses" value={user.losses} tone="#fb7185" />
-            <SpineStat
-              label="WR"
-              value={`${winrate(user.wins, user.losses)}%`}
-              tone="#38bdf8"
-            />
-          </div>
-
-          {user.role === "ADMIN" && (
-            <div style={styles.adminMmrPanel}>
-              <div style={styles.adminMmrHeader}>
-                <span>Admin · ajuste manual</span>
-                <strong style={{ color: rankColor }}>
-                  {user.mmr.toLocaleString("es-AR")} MMR
-                </strong>
-              </div>
-              <div style={styles.adminMmrActions}>
-                {[
-                  { label: "-100", delta: -100 },
-                  { label: "-25", delta: -25 },
-                  { label: "+25", delta: 25 },
-                  { label: "+100", delta: 100 },
-                ].map((action) => (
-                  <button
-                    key={action.label}
-                    type="button"
-                    onClick={() => handleAdminMmrDelta(action.delta)}
-                    disabled={adminMmrBusy != null}
-                    style={{
-                      ...styles.adminMmrButton,
-                      borderColor:
-                        action.delta > 0
-                          ? "rgba(74,222,128,0.32)"
-                          : "rgba(248,113,113,0.28)",
-                      color: action.delta > 0 ? "#86efac" : "#fda4af",
-                      background:
-                        action.delta > 0
-                          ? "rgba(34,197,94,0.10)"
-                          : "rgba(239,68,68,0.10)",
-                      opacity:
-                        adminMmrBusy != null && adminMmrBusy !== action.delta
-                          ? 0.65
-                          : 1,
-                    }}
-                  >
-                    {adminMmrBusy === action.delta ? "..." : action.label}
-                  </button>
-                ))}
-              </div>
-              {adminMmrError && (
-                <div style={styles.adminMmrError}>{adminMmrError}</div>
-              )}
-            </div>
-          )}
-        </section>
-
-        <section style={styles.spinePanel}>
-          <button
-            type="button"
-            onClick={() => setIsHistoryOpen((current) => !current)}
-            style={styles.historyHeader}
+            <Swords size={20} />
+          </SpineActionButton>
+          <SpineActionButton
+            label="Amigos"
+            active={activeSpinePanel === "friends"}
+            onClick={() =>
+              setActiveSpinePanel((current) =>
+                current === "friends" ? null : "friends",
+              )
+            }
           >
-            <div style={styles.historyTitleWrap}>
-              <Swords size={16} color="var(--nexus-accent)" />
-              <div>
-                <div style={styles.panelTitle}>Historial rápido</div>
-                <div style={styles.panelSubline}>
-                  Últimas partidas guardadas
-                </div>
-              </div>
-            </div>
-            <ChevronDown
-              size={16}
-              style={{
-                transform: isHistoryOpen ? "rotate(180deg)" : "rotate(0deg)",
-                transition: "160ms",
-              }}
-            />
-          </button>
+            <Users size={20} />
+          </SpineActionButton>
+        </div>
 
-          {isHistoryOpen && (
-            <div style={styles.historyList}>
-              {recentMatches.length === 0 ? (
-                <MiniState text="Todavía no hay partidas registradas" />
-              ) : (
-                recentMatches.map((entry) => (
-                  <MatchHistoryItem key={entry.id} entry={entry} />
-                ))
-              )}
-            </div>
-          )}
-        </section>
-
-        <section style={styles.spinePanel}>
-          <div style={styles.panelHeaderRow}>
-            <div>
-              <div style={styles.panelTitle}>Beta telemetry</div>
-              <div style={styles.panelSubline}>Señales útiles para testers</div>
-            </div>
-            <Activity size={17} color="var(--nexus-accent)" />
-          </div>
-          <div style={styles.telemetryList}>
-            <TelemetryRow icon={Users} label="Amigos" value="Pendiente" />
-            <TelemetryRow
-              icon={Bell}
-              label="Notificaciones"
-              value="Próximamente"
-            />
-            <TelemetryRow
-              icon={Shield}
-              label="Anti-smurf"
-              value="Planificado"
-            />
-            {socketStatus === "reconnecting" && (
-              <TelemetryRow
-                icon={Zap}
-                label="Realtime"
-                value={`${reconnectAttempts} reintentos`}
-                warn
-              />
-            )}
-            {socketStatus === "error" && lastError && (
-              <div style={styles.errorNote}>{lastError}</div>
-            )}
-          </div>
-        </section>
-          </>
-        )}
+        <div
+          style={{
+            ...styles.compactConnectionDot,
+            background: socketMeta.color,
+            boxShadow: `0 0 14px ${socketMeta.color}`,
+          }}
+          title={socketMeta.label}
+        />
       </aside>
     </div>
   );
@@ -1078,7 +761,13 @@ function RailItem({
   );
 }
 
-function BattleNetMiniTag({ battletag }: { battletag: string }) {
+function BattleNetMiniTag({
+  battletag,
+  compact,
+}: {
+  battletag: string;
+  compact?: boolean;
+}) {
   return (
     <div
       title="Battle.net ID vinculado"
@@ -1089,9 +778,9 @@ function BattleNetMiniTag({ battletag }: { battletag: string }) {
         gap: "5px",
         minWidth: 0,
         color: "#9bd8ff",
-        fontSize: "9.5px",
+        fontSize: compact ? "8.5px" : "9.5px",
         fontWeight: 900,
-        letterSpacing: "1px",
+        letterSpacing: compact ? "0.6px" : "1px",
         textTransform: "uppercase",
       }}
     >
@@ -1111,7 +800,7 @@ function BattleNetMiniTag({ battletag }: { battletag: string }) {
           overflow: "hidden",
           textOverflow: "ellipsis",
           whiteSpace: "nowrap",
-          maxWidth: "150px",
+          maxWidth: compact ? "74px" : "150px",
           color: "#d8f2ff",
         }}
       >
@@ -1151,10 +840,12 @@ function RoleBadge({
   role,
   fallback,
   muted,
+  compact,
 }: {
   role?: PlayerRole | null;
   fallback: string;
   muted?: boolean;
+  compact?: boolean;
 }) {
   const meta = getRoleMeta(role);
   const iconSources = getRoleIconSources(role);
@@ -1163,6 +854,7 @@ function RoleBadge({
     <span
       style={{
         ...styles.roleBadge,
+        ...(compact ? styles.roleBadgeCompact : {}),
         color: muted ? "rgba(232,244,255,0.55)" : color,
         borderColor: role ? `${color}66` : "rgba(232,244,255,0.12)",
         background: role ? `${color}18` : "rgba(255,255,255,0.03)",
@@ -1184,32 +876,15 @@ function RoleBadge({
             event.currentTarget.src = iconSources.fallback;
           }}
           style={{
-            width: "15px",
-            height: "15px",
+            width: compact ? "14px" : "15px",
+            height: compact ? "14px" : "15px",
             objectFit: "contain",
             filter: `drop-shadow(0 0 5px ${color}66)`,
           }}
         />
       )}
-      {meta ? meta.label : fallback}
+      {compact ? (meta ? meta.label.slice(0, 4) : fallback) : meta ? meta.label : fallback}
     </span>
-  );
-}
-
-function SpineStat({
-  label,
-  value,
-  tone,
-}: {
-  label: string;
-  value: string | number;
-  tone: string;
-}) {
-  return (
-    <div style={styles.spineStat}>
-      <div style={{ ...styles.spineStatValue, color: tone }}>{value}</div>
-      <div style={styles.spineStatLabel}>{label}</div>
-    </div>
   );
 }
 
@@ -1266,24 +941,87 @@ function MatchHistoryItem({ entry }: { entry: MatchHistoryEntry }) {
   );
 }
 
-function TelemetryRow({
-  icon: Icon,
-  label,
-  value,
-  warn,
+function SpineFlyout({
+  title,
+  subtitle,
+  icon,
+  children,
+  onClose,
 }: {
-  icon: typeof Users;
-  label: string;
-  value: string;
-  warn?: boolean;
+  title: string;
+  subtitle: string;
+  icon: React.ReactNode;
+  children: React.ReactNode;
+  onClose: () => void;
 }) {
   return (
-    <div style={styles.telemetryRow}>
-      <Icon size={15} color={warn ? "#facc15" : "rgba(232,244,255,0.45)"} />
-      <span>{label}</span>
-      <strong style={{ color: warn ? "#facc15" : "rgba(232,244,255,0.62)" }}>
-        {value}
-      </strong>
+    <section style={styles.spineFlyout}>
+      <div style={styles.flyoutHeader}>
+        <div style={styles.historyTitleWrap}>
+          <span style={styles.flyoutIcon}>{icon}</span>
+          <div>
+            <div style={styles.panelTitle}>{title}</div>
+            <div style={styles.panelSubline}>{subtitle}</div>
+          </div>
+        </div>
+        <button type="button" onClick={onClose} style={styles.flyoutClose}>
+          ×
+        </button>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function SpineActionButton({
+  label,
+  active,
+  children,
+  onClick,
+}: {
+  label: string;
+  active: boolean;
+  children: React.ReactNode;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      aria-label={label}
+      title={label}
+      style={{
+        ...styles.spineActionButton,
+        ...(active ? styles.spineActionButtonActive : {}),
+      }}
+    >
+      {children}
+    </button>
+  );
+}
+
+function FriendStatusRow({
+  label,
+  tone,
+  detail,
+}: {
+  label: string;
+  tone: string;
+  detail: string;
+}) {
+  return (
+    <div style={styles.friendStatusRow}>
+      <span
+        style={{
+          ...styles.friendStatusDot,
+          background: tone,
+          boxShadow: `0 0 12px ${tone}`,
+        }}
+      />
+      <div>
+        <strong style={{ color: tone }}>{label}</strong>
+        <span>{detail}</span>
+      </div>
     </div>
   );
 }
@@ -1314,7 +1052,7 @@ const styles: Record<string, React.CSSProperties> = {
   shell: {
     minHeight: "100vh",
     display: "grid",
-    gridTemplateColumns: "238px minmax(0, 1fr) 340px",
+    gridTemplateColumns: "238px minmax(0, 1fr) 104px",
     background:
       "radial-gradient(circle at 18% 0%, rgba(0,200,255,0.10), transparent 28%), radial-gradient(circle at 100% 12%, rgba(124,77,255,0.10), transparent 30%), var(--nexus-bg)",
     color: "var(--nexus-text)",
@@ -1577,14 +1315,222 @@ const styles: Record<string, React.CSSProperties> = {
   },
   playerSpine: {
     height: "100vh",
-    overflow: "auto",
-    padding: "18px 16px",
+    overflow: "visible",
+    padding: "14px 8px",
     borderLeft: "1px solid rgba(100,200,255,0.10)",
     background:
       "linear-gradient(180deg, rgba(6,11,20,0.95), rgba(8,12,20,0.90)), linear-gradient(270deg, rgba(124,77,255,0.07), transparent 35%)",
     display: "flex",
     flexDirection: "column",
-    gap: "14px",
+    alignItems: "center",
+    gap: "12px",
+  },
+  compactIdentityButton: {
+    width: "100%",
+    display: "grid",
+    justifyItems: "center",
+    gap: "5px",
+    padding: "0 2px 10px",
+    border: "none",
+    borderBottom: "1px solid rgba(232,244,255,0.07)",
+    background: "transparent",
+    color: "inherit",
+    textAlign: "center",
+    cursor: "pointer",
+  },
+  compactAvatarWrap: {
+    position: "relative",
+    width: "64px",
+    height: "64px",
+    display: "grid",
+    placeItems: "center",
+    padding: "3px",
+    border: "1px solid rgba(0,200,255,0.18)",
+    borderRadius: "999px",
+    background:
+      "radial-gradient(circle at 50% 15%, rgba(0,200,255,0.20), rgba(2,6,14,0.94) 62%)",
+    boxShadow: "inset 0 0 18px rgba(0,200,255,0.08)",
+  },
+  compactRankIcon: {
+    position: "absolute",
+    right: "-3px",
+    bottom: "-4px",
+    width: "24px",
+    height: "24px",
+    objectFit: "contain",
+  },
+  compactRankLabel: {
+    marginTop: "4px",
+    maxWidth: "86px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontFamily: "var(--font-display)",
+    fontSize: "10px",
+    fontWeight: 950,
+    letterSpacing: "0.9px",
+    textTransform: "uppercase",
+    textShadow: "0 0 12px currentColor",
+  },
+  compactMmrLine: {
+    color: "rgba(232,244,255,0.45)",
+    fontFamily: "var(--font-display)",
+    fontSize: "9px",
+    fontWeight: 900,
+    letterSpacing: "0.45px",
+    whiteSpace: "nowrap",
+  },
+  nextMmrPill: {
+    minWidth: "48px",
+    padding: "2px 7px",
+    border: "1px solid",
+    background: "rgba(255,255,255,0.03)",
+    fontFamily: "var(--font-display)",
+    fontSize: "10px",
+    fontWeight: 950,
+    letterSpacing: "0.8px",
+    textTransform: "uppercase",
+  },
+  compactNameBlock: {
+    width: "100%",
+    display: "grid",
+    justifyItems: "center",
+    gap: "2px",
+    marginTop: "4px",
+  },
+  compactNameRow: {
+    width: "100%",
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "4px",
+    minWidth: 0,
+  },
+  compactName: {
+    minWidth: 0,
+    maxWidth: "62px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "#f8fafc",
+    fontFamily: "var(--font-display)",
+    fontSize: "12px",
+    fontWeight: 950,
+    lineHeight: 1,
+  },
+  compactBattletag: {
+    maxWidth: "82px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    color: "rgba(232,244,255,0.32)",
+    fontSize: "8.5px",
+    fontWeight: 900,
+    letterSpacing: "0.65px",
+    textTransform: "uppercase",
+  },
+  compactRoleStack: {
+    width: "100%",
+    display: "grid",
+    gap: "5px",
+    justifyItems: "center",
+  },
+  spineActionStack: {
+    width: "100%",
+    display: "grid",
+    gap: "10px",
+    marginTop: "auto",
+    paddingBottom: "12px",
+  },
+  spineActionButton: {
+    width: "48px",
+    height: "48px",
+    display: "grid",
+    placeItems: "center",
+    justifySelf: "center",
+    border: "1px solid rgba(232,244,255,0.11)",
+    borderRadius: "10px",
+    background:
+      "linear-gradient(180deg, rgba(255,255,255,0.06), rgba(255,255,255,0.025))",
+    color: "rgba(232,244,255,0.72)",
+    cursor: "pointer",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.05)",
+  },
+  spineActionButtonActive: {
+    borderColor: "rgba(0,200,255,0.72)",
+    color: "#e0f7ff",
+    boxShadow:
+      "0 0 0 1px rgba(0,200,255,0.16), 0 0 22px rgba(0,200,255,0.18)",
+  },
+  compactConnectionDot: {
+    width: "7px",
+    height: "7px",
+    borderRadius: "999px",
+    marginBottom: "4px",
+  },
+  spineFlyout: {
+    position: "fixed",
+    top: "16px",
+    right: "116px",
+    bottom: "16px",
+    zIndex: 35,
+    width: "min(338px, calc(100vw - 148px))",
+    overflow: "auto",
+    padding: "14px",
+    border: "1px solid rgba(0,200,255,0.22)",
+    background:
+      "linear-gradient(180deg, rgba(8,12,20,0.98), rgba(10,16,28,0.96)), radial-gradient(circle at 0% 0%, rgba(0,200,255,0.14), transparent 28%)",
+    boxShadow: "-24px 0 70px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.05)",
+  },
+  flyoutHeader: {
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: "12px",
+    paddingBottom: "12px",
+    borderBottom: "1px solid rgba(232,244,255,0.07)",
+  },
+  flyoutIcon: {
+    width: "32px",
+    height: "32px",
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid rgba(0,200,255,0.28)",
+    color: "var(--nexus-accent)",
+    background: "rgba(0,200,255,0.08)",
+    borderRadius: "9px",
+  },
+  flyoutClose: {
+    width: "30px",
+    height: "30px",
+    display: "grid",
+    placeItems: "center",
+    border: "1px solid rgba(232,244,255,0.12)",
+    background: "rgba(255,255,255,0.025)",
+    color: "rgba(232,244,255,0.72)",
+    fontSize: "20px",
+    lineHeight: 1,
+    cursor: "pointer",
+  },
+  friendStatusStack: {
+    display: "grid",
+    gap: "8px",
+    marginTop: "12px",
+    marginBottom: "12px",
+  },
+  friendStatusRow: {
+    display: "grid",
+    gridTemplateColumns: "auto 1fr",
+    alignItems: "center",
+    gap: "10px",
+    padding: "10px",
+    border: "1px solid rgba(232,244,255,0.07)",
+    background: "rgba(255,255,255,0.025)",
+  },
+  friendStatusDot: {
+    width: "8px",
+    height: "8px",
+    borderRadius: "999px",
   },
   playerSpineCollapsed: {
     padding: "14px 8px",
@@ -1845,6 +1791,14 @@ const styles: Record<string, React.CSSProperties> = {
     fontWeight: 900,
     letterSpacing: "0.9px",
     textTransform: "uppercase",
+  },
+  roleBadgeCompact: {
+    width: "78px",
+    justifyContent: "center",
+    padding: "4px 5px",
+    gap: "4px",
+    fontSize: "8.5px",
+    letterSpacing: "0.55px",
   },
   statsGrid: {
     marginTop: "14px",

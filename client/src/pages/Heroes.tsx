@@ -4,6 +4,7 @@ import { HERO_BY_ID, HERO_ID_BY_NAME, HOTS_HEROES, MAP_ID_BY_NAME, type HotsHero
 import { Activity, BarChart3, Crosshair, MapIcon, Search, Sparkles, Swords, Trophy } from 'lucide-react'
 import { api } from '../lib/api'
 import { useAuthStore } from '../stores/auth.store'
+import { PageHeader } from '../components/PageHeader'
 
 const ROLE_TONES: Record<string, string> = {
   TANK: '#38bdf8',
@@ -129,23 +130,19 @@ export function Heroes() {
 
   return (
     <main style={styles.page}>
-      <section style={styles.heroPanel}>
-        <div style={styles.scanline} />
-        <div style={styles.kicker}><Sparkles size={16} /> Hero Lab personal</div>
-        <div style={styles.headerGrid}>
-          <div>
-            <h1 style={styles.title}>Tu pool competitivo</h1>
-            <p style={styles.subtitle}>
-              No es un catálogo para mirar héroes: es un módulo de lectura personal. Resume qué héroes usaste, en qué mapas, con qué resultados y qué señales dejaron tus replays.
-            </p>
-          </div>
+      <PageHeader
+        eyebrow="Hero Lab personal"
+        title="Tu pool competitivo"
+        description="No es un catálogo para mirar héroes: es una lectura personal de qué usaste, en qué mapas, con qué resultados y qué señales dejaron tus replays."
+        icon={<Sparkles size={18} />}
+        stats={
           <div style={styles.commandStats}>
             <Metric label="Héroes usados" value={String(heroStats.length)} tone="#00c8ff" />
             <Metric label="Partidas" value={String(completed.length)} tone="#f97316" />
             <Metric label="Replay data" value={`${replayCoverage}%`} tone="#a78bfa" />
           </div>
-        </div>
-      </section>
+        }
+      />
 
       {error && <div style={styles.error}>{error}</div>}
 

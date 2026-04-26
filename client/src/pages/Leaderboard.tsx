@@ -1,8 +1,10 @@
 import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { RankBadge } from "../components/RankBadge";
+import { PageHeader } from "../components/PageHeader";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
 import { getCountryFlag } from "../lib/countries";
+import { Trophy as TrophyIcon } from "lucide-react";
 
 type LeaderboardEntry = {
   id: string;
@@ -50,31 +52,23 @@ export function Leaderboard() {
   }, []);
 
   return (
-    <section
-      style={{
-        border: "1px solid var(--nexus-border)",
-        background: "var(--nexus-card)",
-        padding: "1rem",
-        display: "grid",
-        gap: "0.9rem",
-      }}
-    >
-      <div>
-        <div
-          style={{
-            color: "#7dd3fc",
-            textTransform: "uppercase",
-            letterSpacing: "0.18em",
-            fontWeight: 800,
-            fontSize: "0.68rem",
-          }}
-        >
-          Ranking
-        </div>
-        <h2 style={{ margin: "0.35rem 0 0", color: "#e2e8f0" }}>
-          Leaderboard global
-        </h2>
-      </div>
+    <div style={{ display: "grid", gap: "1rem" }}>
+      <PageHeader
+        eyebrow="Ranking"
+        title="Leaderboard global"
+        description="La escalera competitiva del servidor SA: MMR, rango, winrate y nacionalidad en una sola lectura consistente."
+        icon={<TrophyIcon size={18} />}
+      />
+
+      <section
+        style={{
+          border: "1px solid var(--nexus-border)",
+          background: "var(--nexus-card)",
+          padding: "1rem",
+          display: "grid",
+          gap: "0.9rem",
+        }}
+      >
 
       {loading && <div style={{ color: "#94a3b8" }}>Cargando ranking…</div>}
       {error && !loading && (
@@ -173,6 +167,7 @@ export function Leaderboard() {
           ))}
         </div>
       )}
-    </section>
+      </section>
+    </div>
   );
 }

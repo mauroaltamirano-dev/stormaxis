@@ -14,6 +14,7 @@ import {
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
 import { api } from "../lib/api";
 import { useAuthStore } from "../stores/auth.store";
+import { PageHeader } from "../components/PageHeader";
 
 type MatchHistoryEntry = {
   id: string;
@@ -180,33 +181,30 @@ export function Stats() {
 
   return (
     <div style={pageStyle}>
-      <section style={heroStyle}>
-        <div style={{ minWidth: 0 }}>
-          <div style={eyebrowStyle}>Nexus analytics</div>
-          <h1 style={titleStyle}>Estadísticas competitivas</h1>
-          <p style={subtitleStyle}>
-            Primer tablero real: historial, ELO, forma reciente y mapas usando los datos que hoy guarda el MVP.
-            Los módulos de héroes/replays quedan preparados para Battle.net/HeroesProfile.
-          </p>
-        </div>
-
-        <div style={rangeRailStyle}>
-          {[
-            ["all", "Todo"],
-            ["30d", "30 días"],
-            ["7d", "7 días"],
-          ].map(([value, label]) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setRange(value as RangeFilter)}
-              style={range === value ? activeRangeButtonStyle : rangeButtonStyle}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-      </section>
+      <PageHeader
+        eyebrow="Nexus analytics"
+        title="Estadísticas competitivas"
+        description="Historial, ELO, forma reciente y mapas usando los datos reales que guarda el MVP. Hero Lab queda como lectura personal por héroes y replays."
+        icon={<Activity size={18} />}
+        actions={
+          <div style={rangeRailStyle}>
+            {[
+              ["all", "Todo"],
+              ["30d", "30 días"],
+              ["7d", "7 días"],
+            ].map(([value, label]) => (
+              <button
+                key={value}
+                type="button"
+                onClick={() => setRange(value as RangeFilter)}
+                style={range === value ? activeRangeButtonStyle : rangeButtonStyle}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        }
+      />
 
       {error ? (
         <section style={errorStyle}>{error}</section>
@@ -391,19 +389,7 @@ function EmptyState({ text }: { text: string }) {
 }
 
 const pageStyle: CSSProperties = { display: "grid", gap: "1rem" };
-const heroStyle: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "flex-end",
-  gap: "1rem",
-  flexWrap: "wrap",
-  padding: "1rem",
-  border: "1px solid rgba(0,200,255,0.16)",
-  background: "linear-gradient(135deg, rgba(4,10,20,0.94), rgba(7,18,35,0.84) 58%, rgba(0,200,255,0.08))",
-};
 const eyebrowStyle: CSSProperties = { color: "#00c8ff", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase" };
-const titleStyle: CSSProperties = { margin: "0.2rem 0", color: "#f8fafc", fontFamily: "var(--font-display)", fontSize: "clamp(1.6rem, 3vw, 2.2rem)", letterSpacing: "0.05em", textTransform: "uppercase" };
-const subtitleStyle: CSSProperties = { margin: 0, maxWidth: "78ch", color: "rgba(226,232,240,0.68)", lineHeight: 1.55 };
 const rangeRailStyle: CSSProperties = { display: "flex", gap: "0.45rem", flexWrap: "wrap" };
 const rangeButtonStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.16)", background: "rgba(2,6,23,0.58)", color: "rgba(226,232,240,0.72)", padding: "0.6rem 0.75rem", cursor: "pointer", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" };
 const activeRangeButtonStyle: CSSProperties = { ...rangeButtonStyle, border: "1px solid rgba(0,200,255,0.38)", background: "rgba(0,200,255,0.14)", color: "#bae6fd" };
