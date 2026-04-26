@@ -184,3 +184,8 @@ body::after {
   padding-right: clamp(2rem, 6vw, 7rem);
   box-sizing: border-box;
 }
+
+@keyframes heroCardIn {
+  from { opacity: 0; transform: translateY(12px) scale(0.985); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}

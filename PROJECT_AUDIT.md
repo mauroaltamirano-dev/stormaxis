@@ -698,12 +698,14 @@ Esto crea la base visual y de navegación para ordenar todo lo demás.
 3. [x] Habilitar la page estadísticas y empezar mostrando el historial de partidas detallado allí del usuario (simular datos de momento pero pedir que datos mostraremos de los que realmente nos entrega el juego).
    - 2026-04-23: agregada `/stats` con historial detallado real del usuario, filtros Todo/30d/7d, ELO neto, winrate, racha, últimos 10, mapas más jugados y slots explícitos para datos futuros de HeroesProfile/replays.
 4. [ ] Habilitar page de buscador de SCRIM para equipos vs equipos.
-5. [ ] Añadir los heroes del juego en una base de datos e incluir imágenes y descripción de cada uno.
+5. [x] Añadir los heroes del juego en una base de datos e incluir imágenes y descripción de cada uno.
+   - 2026-04-26: agregado catálogo canónico compartido `HOTS_HEROES` en `@nexusgg/shared` con 90 héroes, rol, universo y path de portrait; agregada página `/heroes` con búsqueda/filtro por rol. Las imágenes quedan preparadas vía `/heroes/{id}.webp` para incorporar assets reales después.
 6. [ ] Revisar que tengamos bien separado los mapas con su nombre e imagen en un archivo modularizado para no romper con la modularización en el futuro.
 7. [ ] Habilitar página de noticias, donde las noticias se cargan desde #anuncios de nuestro discord.
 8. [ ] Carga de imágenes profile: hacer que las imágenes del perfil se vean rápido y en buena calidad.
 9. [ ] Logs de errores estileados correctamente en consola con pino o logger.
-10. [ ] Añadir nacionalidad en register, y mostrar también en profile y demás lugares junto al name.
+10. [x] Añadir nacionalidad en register, y mostrar también en profile y demás lugares junto al name.
+   - 2026-04-26: agregada columna nullable `User.countryCode`, migración aplicada en Neon, selector en register/onboarding/profile, y visualización en profile, player spine, leaderboard y matchroom.
 11. [ ] Añadir selector de idioma.
 12. [ ] Reemplazar todo que diga MMR a ELO y NexusGG a Stormaxis en toda la web.
 13. [ ] En leaderboard añadir distintos páneles, como top de ELO, top victorias, top mvps, top personajes jugadores, top partidas jugadas, top winrate, top cantidad de veces que se eligió cada personaje, etc. Además, permitir ordenar las columnas.

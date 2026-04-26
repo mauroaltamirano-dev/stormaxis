@@ -128,6 +128,12 @@ const statsRoute = createRoute({
   component: lazyRouteComponent(() => import("./pages/Stats"), "Stats"),
 });
 
+const heroesRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/heroes",
+  component: lazyRouteComponent(() => import("./pages/Heroes"), "Heroes"),
+});
+
 // ─── Router ────────────────────────────────────────────────
 const routeTree = rootRoute.addChildren([
   landingRoute,
@@ -141,6 +147,7 @@ const routeTree = rootRoute.addChildren([
       adminRoute,
       leaderboardRoute,
       statsRoute,
+      heroesRoute,
       profileRoute,
       publicProfileRoute,
       matchRoomRoute,

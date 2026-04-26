@@ -134,6 +134,7 @@ matchesRouter.get('/:matchId', async (req, res, next) => {
                 mmr: true,
                 wins: true,
                 losses: true,
+                countryCode: true,
                 matchPlayers: {
                   where: { match: { status: 'COMPLETED' } },
                   select: {
@@ -193,6 +194,7 @@ matchesRouter.get('/:matchId', async (req, res, next) => {
               rank: calculateRank(player.mmrBefore),
               wins: 0,
               losses: 0,
+              countryCode: null,
               winrate: 0,
               recentMatches: [],
             },

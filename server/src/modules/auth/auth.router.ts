@@ -33,6 +33,7 @@ import { calculateRank } from '../users/player-progression'
 import { getInitialMmrFromRank, INITIAL_RANK_OPTIONS } from '../users/player-calibration'
 import { authUserSelect, presentUser } from '../users/user.presenter'
 import { cleanupUserMatchmakingSession } from '../matchmaking/matchmaking.service'
+import { isValidCountryCode } from '@nexusgg/shared'
 
 export const authRouter = Router()
 
@@ -178,6 +179,14 @@ const RegisterSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(72),
   initialRank: z.enum(INITIAL_RANK_OPTIONS).optional(),
+  countryCode: z
+    .preprocess(
+      (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+      z.string().trim().toUpperCase().length(2).nullable().optional(),
+    )
+    .refine((value) => value == null || isValidCountryCode(value), {
+      message: 'País inválido',
+    }),
 })
 
 authRouter.post('/register', authLimiter, async (req, res, next) => {
@@ -198,6 +207,7 @@ authRouter.post('/register', authLimiter, async (req, res, next) => {
         password: await hashPassword(body.password),
         mmr: initialMmr,
         rank: calculateRank(initialMmr),
+        countryCode: body.countryCode ?? null,
       },
       select: authUserSelect,
     })

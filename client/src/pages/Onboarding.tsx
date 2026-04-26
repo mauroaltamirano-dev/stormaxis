@@ -13,6 +13,7 @@ import {
   ONBOARDING_ROLE_ORDER,
   type InitialRankValue,
 } from '../lib/onboarding'
+import { COUNTRY_OPTIONS } from '../lib/countries'
 
 const schema = z
   .object({
@@ -27,6 +28,7 @@ const schema = z
     }),
     mainRole: z.enum(['RANGED', 'HEALER', 'OFFLANE', 'FLEX', 'TANK']),
     secondaryRole: z.enum(['RANGED', 'HEALER', 'OFFLANE', 'FLEX', 'TANK']),
+    countryCode: z.string().length(2).optional().or(z.literal('')),
   })
   .refine((value) => value.mainRole !== value.secondaryRole, {
     message: 'Main y secundario no pueden ser el mismo rol',
@@ -58,6 +60,7 @@ export function Onboarding() {
       initialRank: defaultRank,
       mainRole: (user?.mainRole as PlayerRoleKey | null) ?? undefined,
       secondaryRole: (user?.secondaryRole as PlayerRoleKey | null) ?? undefined,
+      countryCode: user?.countryCode ?? '',
     },
   })
 
@@ -195,6 +198,17 @@ export function Onboarding() {
                 register={register}
                 error={errors.secondaryRole?.message}
               />
+
+              <Field label="Nacionalidad" error={errors.countryCode?.message}>
+                <select {...register('countryCode')} style={inputStyle}>
+                  <option value="">Seleccionar país</option>
+                  {COUNTRY_OPTIONS.map((country) => (
+                    <option key={country.code} value={country.code}>
+                      {country.flag} {country.name}
+                    </option>
+                  ))}
+                </select>
+              </Field>
 
               {serverError && <div style={styles.serverError}>{serverError}</div>}
 

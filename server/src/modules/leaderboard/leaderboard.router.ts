@@ -10,7 +10,7 @@ leaderboardRouter.get('/', async (_req, res, next) => {
       where: { isBanned: false },
       select: {
         id: true, username: true, avatar: true,
-        mmr: true, rank: true, wins: true, losses: true,
+        mmr: true, rank: true, wins: true, losses: true, countryCode: true,
       },
       orderBy: { mmr: 'desc' },
       take: 100,

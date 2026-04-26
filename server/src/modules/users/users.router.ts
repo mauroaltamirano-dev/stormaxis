@@ -6,12 +6,21 @@ import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from './player-progression'
 import { getInitialMmrFromRank, INITIAL_RANK_OPTIONS } from './player-calibration'
 import { authUserSelect, presentPublicUser, presentUser, publicUserSelect } from './user.presenter'
+import { isValidCountryCode } from '@nexusgg/shared'
 
 export const usersRouter = Router()
 
 const USERNAME_REGEX = /^[a-zA-Z0-9_-]+$/
 const PLAYER_ROLES = ['RANGED', 'HEALER', 'OFFLANE', 'FLEX', 'TANK'] as const
 const AccountProviderSchema = z.enum(['discord', 'google', 'bnet'])
+const CountryCodeSchema = z
+  .preprocess(
+    (value) => (typeof value === 'string' && value.trim() === '' ? null : value),
+    z.string().trim().toUpperCase().length(2).nullable().optional(),
+  )
+  .refine((value) => value == null || isValidCountryCode(value), {
+    message: 'País inválido',
+  })
 
 const SearchUsersQuerySchema = z.object({
   q: z.preprocess(
@@ -39,13 +48,15 @@ const UpdateProfileSchema = z
     ),
     mainRole: z.enum(PLAYER_ROLES).nullable().optional(),
     secondaryRole: z.enum(PLAYER_ROLES).nullable().optional(),
+    countryCode: CountryCodeSchema,
   })
   .refine(
     (value) =>
       value.username !== undefined ||
       value.avatar !== undefined ||
       value.mainRole !== undefined ||
-      value.secondaryRole !== undefined,
+      value.secondaryRole !== undefined ||
+      value.countryCode !== undefined,
     {
       message: 'Tenés que enviar al menos un campo editable',
     },
@@ -73,6 +84,7 @@ const CompleteOnboardingSchema = z
     initialRank: z.enum(INITIAL_RANK_OPTIONS),
     mainRole: z.enum(PLAYER_ROLES),
     secondaryRole: z.enum(PLAYER_ROLES),
+    countryCode: CountryCodeSchema,
   })
   .refine((value) => value.mainRole !== value.secondaryRole, {
     message: 'Main y secundario no pueden ser el mismo rol',
@@ -123,6 +135,7 @@ usersRouter.post('/me/onboarding', authenticate, async (req, res, next) => {
         rank: calculateRank(nextMmr),
         mainRole: body.mainRole as any,
         secondaryRole: body.secondaryRole as any,
+        countryCode: body.countryCode ?? currentUser.countryCode ?? null,
       },
       select: authUserSelect,
     })
@@ -162,6 +175,7 @@ usersRouter.patch('/me', authenticate, async (req, res, next) => {
         // Cast until local Prisma Client is regenerated after the role enum migration.
         ...(body.mainRole !== undefined ? { mainRole: body.mainRole as any } : {}),
         ...(body.secondaryRole !== undefined ? { secondaryRole: body.secondaryRole as any } : {}),
+        ...(body.countryCode !== undefined ? { countryCode: body.countryCode } : {}),
       },
       select: authUserSelect,
     })

@@ -8,6 +8,7 @@ import { buildApiUrl } from "../lib/backend";
 import { useAuthStore } from "../stores/auth.store";
 import { ChevronRight } from "lucide-react";
 import { requiresCompetitiveOnboarding } from "../lib/onboarding";
+import { COUNTRY_OPTIONS } from "../lib/countries";
 
 const schema = z.object({
   username: z
@@ -17,6 +18,7 @@ const schema = z.object({
     .regex(/^[a-zA-Z0-9_-]+$/, "Solo letras, números, _ y -"),
   email: z.string().email("Email inválido"),
   password: z.string().min(8, "Mínimo 8 caracteres"),
+  countryCode: z.string().length(2).optional().or(z.literal("")),
 });
 type FormData = z.infer<typeof schema>;
 
@@ -465,6 +467,16 @@ export function Register() {
                 placeholder="Mínimo 8 caracteres"
                 style={inputStyle}
               />
+            </Field>
+            <Field label="Nacionalidad" error={errors.countryCode?.message}>
+              <select {...register("countryCode")} style={inputStyle}>
+                <option value="">Seleccionar país</option>
+                {COUNTRY_OPTIONS.map((country) => (
+                  <option key={country.code} value={country.code}>
+                    {country.flag} {country.name}
+                  </option>
+                ))}
+              </select>
             </Field>
 
             {serverError && (

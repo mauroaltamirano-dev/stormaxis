@@ -20,6 +20,7 @@ interface AuthUser {
   losses: number
   mainRole?: 'RANGED' | 'HEALER' | 'OFFLANE' | 'FLEX' | 'TANK' | null
   secondaryRole?: 'RANGED' | 'HEALER' | 'OFFLANE' | 'FLEX' | 'TANK' | null
+  countryCode?: string | null
   discordId: string | null
   discordUsername: string | null
   bnetId: string | null

@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { HOTS_MAPS, MAP_ID_BY_NAME, MAP_NAME_BY_ID } from "@nexusgg/shared";
 import { RankBadge } from "../RankBadge";
 import { getMatchLifecycleMeta } from "../../lib/competitiveStatus";
+import { getCountryFlag } from "../../lib/countries";
 
 type MatchStatus =
   | "ACCEPTING"
@@ -30,6 +31,7 @@ type Player = {
     wins?: number;
     losses?: number;
     winrate?: number;
+    countryCode?: string | null;
     recentMatches?: Array<{ won: boolean; map: string | null; date: string }>;
   };
 };
@@ -2129,6 +2131,7 @@ function TeamColumn({
             />
             <div style={{ minWidth: 0, flex: 1 }}>
               <div style={playerNameRowStyle}>
+                <span title="Nacionalidad">{getCountryFlag(player.countryCode)}</span>
                 <span style={playerNameStyle}>{player.name}</span>
                 {player.isCaptain && (
                   <span style={captainMiniTagStyle(colors.accent)}>
@@ -2651,6 +2654,7 @@ function toDisplayTeam(
       winrate: player.user.winrate ?? 0,
       wins: player.user.wins ?? 0,
       losses: player.user.losses ?? 0,
+      countryCode: player.user.countryCode ?? null,
       recentMatches: player.user.recentMatches ?? [],
       mmrDelta: player.mmrDelta ?? null,
       isWinner: winner != null && player.team === winner,
@@ -2669,6 +2673,7 @@ function toDisplayTeam(
       winrate: 0,
       wins: 0,
       losses: 0,
+      countryCode: null,
       recentMatches: [],
       mmrDelta: null,
       isWinner: false,

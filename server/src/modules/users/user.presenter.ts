@@ -13,6 +13,7 @@ export const authUserSelect = Prisma.validator<Prisma.UserSelect>()({
   losses: true,
   mainRole: true,
   secondaryRole: true,
+  countryCode: true,
   discordId: true,
   discordUsername: true,
   bnetId: true,
@@ -35,6 +36,7 @@ export const publicUserSelect = Prisma.validator<Prisma.UserSelect>()({
   losses: true,
   mainRole: true,
   secondaryRole: true,
+  countryCode: true,
   createdAt: true,
 })
 
@@ -56,6 +58,7 @@ export function presentUser(record: AuthUserRecord) {
     losses: record.losses,
     mainRole: record.mainRole,
     secondaryRole: record.secondaryRole,
+    countryCode: record.countryCode,
     discordId: record.discordId,
     discordUsername: record.discordUsername,
     bnetId: record.bnetId,
@@ -107,6 +110,7 @@ export function presentPublicUser(record: PublicUserRecord) {
     losses: record.losses,
     mainRole: record.mainRole,
     secondaryRole: record.secondaryRole,
+    countryCode: record.countryCode,
     createdAt: record.createdAt,
     level: levelInfo.level,
     levelProgressPct: levelInfo.progressPct,

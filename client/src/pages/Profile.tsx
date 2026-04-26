@@ -20,6 +20,7 @@ import { getRankMeta } from "../lib/ranks";
 import { RankProgressBar } from "../components/RankProgressBar";
 import { RolePicker } from "../components/RolePicker";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
+import { COUNTRY_OPTIONS, getCountryFlag, getCountryLabel } from "../lib/countries";
 
 type PlayerRole = "RANGED" | "HEALER" | "OFFLANE" | "FLEX" | "TANK";
 type LinkedAccountProvider = "discord" | "google" | "bnet";
@@ -41,6 +42,7 @@ type ProfileUser = {
   losses: number;
   mainRole?: PlayerRole | null;
   secondaryRole?: PlayerRole | null;
+  countryCode?: string | null;
   discordId?: string | null;
   discordUsername?: string | null;
   bnetId?: string | null;
@@ -78,6 +80,7 @@ type SearchResult = {
   losses: number;
   mainRole?: PlayerRole | null;
   secondaryRole?: PlayerRole | null;
+  countryCode?: string | null;
   displayLevel?: string;
   winrate?: number;
 };
@@ -172,6 +175,7 @@ function initialFromUser(user: ProfileUser | null) {
     avatar: user?.avatar ?? "",
     mainRole: user?.mainRole ?? null,
     secondaryRole: user?.secondaryRole ?? null,
+    countryCode: user?.countryCode ?? "",
   };
 }
 
@@ -261,6 +265,7 @@ export function Profile() {
             losses: user.losses,
             mainRole: user.mainRole,
             secondaryRole: user.secondaryRole,
+            countryCode: user.countryCode,
             discordId: user.discordId,
             discordUsername: user.discordUsername,
             bnetId: user.bnetId,
@@ -364,6 +369,7 @@ export function Profile() {
         avatar: form.avatar.trim(),
         mainRole: form.mainRole,
         secondaryRole: form.secondaryRole,
+        countryCode: form.countryCode || null,
       };
 
       const { data } = await api.patch<ProfileUser>("/users/me", payload);
@@ -378,6 +384,7 @@ export function Profile() {
         losses: data.losses,
         mainRole: data.mainRole,
         secondaryRole: data.secondaryRole,
+        countryCode: data.countryCode,
         displayLevel: data.displayLevel,
         level: data.level,
         levelProgressPct: data.levelProgressPct,
@@ -564,6 +571,25 @@ export function Profile() {
                     >
                       {profile.username}
                     </h1>
+                    <div
+                      style={{
+                        width: "fit-content",
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "8px",
+                        border: "1px solid rgba(255,255,255,0.08)",
+                        background: "rgba(255,255,255,0.04)",
+                        color: "rgba(226,232,240,0.78)",
+                        padding: "6px 10px",
+                        fontSize: "12px",
+                        fontWeight: 850,
+                        letterSpacing: "0.08em",
+                        textTransform: "uppercase",
+                      }}
+                    >
+                      <span>{getCountryFlag(profile.countryCode)}</span>
+                      <span>{getCountryLabel(profile.countryCode)}</span>
+                    </div>
                     {profile.bnetBattletag ? (
                       <BattleNetIdentityPill battletag={profile.bnetBattletag} />
                     ) : isOwnProfile ? (
@@ -875,6 +901,43 @@ export function Profile() {
                         }))
                       }
                     />
+                    <div style={{ display: "grid", gap: "7px" }}>
+                      <label
+                        style={{
+                          color: "var(--nexus-faint)",
+                          fontSize: "11px",
+                          fontWeight: 900,
+                          letterSpacing: "1.4px",
+                          textTransform: "uppercase",
+                        }}
+                      >
+                        Nacionalidad
+                      </label>
+                      <select
+                        value={form.countryCode}
+                        onChange={(event) =>
+                          setForm((current) => ({
+                            ...current,
+                            countryCode: event.target.value,
+                          }))
+                        }
+                        style={{
+                          border: "1px solid rgba(255,255,255,0.1)",
+                          background: "rgba(2,6,14,0.75)",
+                          color: "var(--nexus-text)",
+                          padding: "12px",
+                          minHeight: "44px",
+                          outline: "none",
+                        }}
+                      >
+                        <option value="">Sin país</option>
+                        {COUNTRY_OPTIONS.map((country) => (
+                          <option key={country.code} value={country.code}>
+                            {country.flag} {country.name}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   {saveMessage ? <MessageBanner text={saveMessage} /> : null}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api } from "../lib/api";
 import { RankBadge } from "../components/RankBadge";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
+import { getCountryFlag } from "../lib/countries";
 
 type LeaderboardEntry = {
   id: string;
@@ -11,6 +12,7 @@ type LeaderboardEntry = {
   rank: string;
   wins: number;
   losses: number;
+  countryCode?: string | null;
   level?: number;
 };
 
@@ -131,6 +133,9 @@ export function Leaderboard() {
                   />
                   <div style={{ minWidth: 0 }}>
                     <div style={{ color: "#e2e8f0", fontWeight: 700 }}>
+                      <span style={{ marginRight: "0.35rem" }}>
+                        {getCountryFlag(entry.countryCode)}
+                      </span>
                       {entry.username}
                     </div>
                     <div

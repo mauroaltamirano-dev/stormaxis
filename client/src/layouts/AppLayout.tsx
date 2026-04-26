@@ -23,6 +23,7 @@ import {
   User,
   Users,
   Zap,
+  Sparkles,
 } from "lucide-react";
 import { useAuthStore } from "../stores/auth.store";
 import { api } from "../lib/api";
@@ -38,6 +39,7 @@ import {
   type MatchLifecycleStatus,
 } from "../lib/competitiveStatus";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
+import { getCountryFlag, getCountryName } from "../lib/countries";
 
 type SearchResult = {
   id: string;
@@ -48,6 +50,7 @@ type SearchResult = {
   losses: number;
   mainRole?: PlayerRole | null;
   secondaryRole?: PlayerRole | null;
+  countryCode?: string | null;
   level?: number;
   displayLevel?: string;
 };
@@ -80,6 +83,7 @@ const primaryNav: NavItem[] = [
   { label: "Jugar", icon: Swords, to: "/dashboard" },
   { label: "Leaderboard", icon: Trophy, to: "/leaderboard" },
   { label: "Estadísticas", icon: BarChart3, to: "/stats", badge: "beta" },
+  { label: "Héroes", icon: Sparkles, to: "/heroes", badge: "nuevo" },
   { label: "Noticias", icon: Newspaper, disabled: true, badge: "discord" },
 ];
 
@@ -858,6 +862,11 @@ export function AppLayout() {
           </div>
 
           <div style={styles.statsGrid}>
+            <SpineStat
+              label="País"
+              value={`${getCountryFlag(user.countryCode)} ${getCountryName(user.countryCode)}`}
+              tone="#facc15"
+            />
             <SpineStat label="Wins" value={user.wins} tone="#4ade80" />
             <SpineStat label="Losses" value={user.losses} tone="#fb7185" />
             <SpineStat

@@ -65,6 +65,7 @@ model User {
   losses Int   @default(0)
   mainRole      PlayerRole?
   secondaryRole PlayerRole?
+  countryCode   String? @db.VarChar(2)
 
   // OAuth IDs
   discordId String? @unique
@@ -101,6 +102,7 @@ model User {
   @@index([rank])
   @@index([mainRole])
   @@index([secondaryRole])
+  @@index([countryCode])
 }
 
 model RefreshToken {
