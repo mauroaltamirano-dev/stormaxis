@@ -20,7 +20,7 @@ import { getRankMeta } from "../lib/ranks";
 import { RankProgressBar } from "../components/RankProgressBar";
 import { RolePicker } from "../components/RolePicker";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
-import { COUNTRY_OPTIONS, getCountryFlag, getCountryLabel } from "../lib/countries";
+import { COUNTRY_OPTIONS, getCountryLabel } from "../lib/countries";
 
 type PlayerRole = "RANGED" | "HEALER" | "OFFLANE" | "FLEX" | "TANK";
 type LinkedAccountProvider = "discord" | "google" | "bnet";
@@ -587,7 +587,6 @@ export function Profile() {
                         textTransform: "uppercase",
                       }}
                     >
-                      <span>{getCountryFlag(profile.countryCode)}</span>
                       <span>{getCountryLabel(profile.countryCode)}</span>
                     </div>
                     {profile.bnetBattletag ? (

@@ -83,7 +83,7 @@ const primaryNav: NavItem[] = [
   { label: "Jugar", icon: Swords, to: "/dashboard" },
   { label: "Leaderboard", icon: Trophy, to: "/leaderboard" },
   { label: "Estadísticas", icon: BarChart3, to: "/stats", badge: "beta" },
-  { label: "Héroes", icon: Sparkles, to: "/heroes", badge: "nuevo" },
+  { label: "Hero Lab", icon: Sparkles, to: "/heroes", badge: "beta" },
   { label: "Noticias", icon: Newspaper, disabled: true, badge: "discord" },
 ];
 

@@ -291,6 +291,19 @@ usersRouter.get('/:username/matches', async (req, res, next) => {
           select: {
             id: true, status: true, selectedMap: true, winner: true,
             createdAt: true, endedAt: true,
+            replayUploads: {
+              where: { status: 'PARSED' },
+              select: {
+                id: true,
+                status: true,
+                parsedSummary: true,
+                parsedMap: true,
+                parsedWinnerTeam: true,
+                createdAt: true,
+              },
+              orderBy: { createdAt: 'desc' },
+              take: 1,
+            },
           },
         },
       },
