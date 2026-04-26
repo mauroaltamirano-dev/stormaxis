@@ -549,7 +549,7 @@ export async function getQueueSnapshot() {
         ? null
         : await db.user.findUnique({
             where: { id: userId },
-            select: { username: true, avatar: true },
+            select: { username: true, avatar: true, countryCode: true },
           })
 
       const username = isBot ? (meta.botName ?? 'TestBot') : (user?.username ?? 'Unknown')
@@ -558,6 +558,7 @@ export async function getQueueSnapshot() {
         userId,
         username,
         avatar: isBot ? null : (user?.avatar ?? null),
+        countryCode: isBot ? null : (user?.countryCode ?? null),
         mmr,
         joinedAt: meta.joinedAt ?? null,
         mode: meta.mode ?? 'COMPETITIVE',

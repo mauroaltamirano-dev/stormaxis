@@ -11,6 +11,7 @@ import { ChevronDown, Plus, Search } from "lucide-react";
 import { getRoleIconSources, getRoleMeta } from "../lib/roles";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
 import { getQueueLifecycleMeta } from "../lib/competitiveStatus";
+import { getCountryFlag } from "../lib/countries";
 
 function formatCompactRating(value: number) {
   return value.toLocaleString("es-AR");
@@ -162,6 +163,7 @@ export function Dashboard() {
       userId: string;
       username: string;
       avatar: string | null;
+      countryCode?: string | null;
       mmr: number;
       joinedAt: number | null;
       roles?: string[];
@@ -370,6 +372,7 @@ export function Dashboard() {
             userId: string;
             username: string;
             avatar: string | null;
+            countryCode?: string | null;
             mmr: number;
             joinedAt: number | null;
             roles?: string[];
@@ -1018,18 +1021,41 @@ export function Dashboard() {
                       </div>
                     </div>
 
-                    {/* Username */}
+                    {/* Username + nationality */}
                     <div
                       style={{
-                        color: "#fff",
-                        fontFamily: "var(--font-display)",
-                        fontSize: "1rem",
-                        fontWeight: 900,
-                        letterSpacing: "0.06em",
-                        lineHeight: 1,
+                        display: "inline-flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: "0.42rem",
+                        minWidth: 0,
                       }}
                     >
-                      {user.username}
+                      <span
+                        title="Nacionalidad"
+                        style={{
+                          fontSize: "1rem",
+                          lineHeight: 1,
+                          filter: "drop-shadow(0 0 7px rgba(255,255,255,0.18))",
+                        }}
+                      >
+                        {getCountryFlag(user.countryCode)}
+                      </span>
+                      <span
+                        style={{
+                          color: "#fff",
+                          fontFamily: "var(--font-display)",
+                          fontSize: "1rem",
+                          fontWeight: 900,
+                          letterSpacing: "0.06em",
+                          lineHeight: 1,
+                          overflow: "hidden",
+                          textOverflow: "ellipsis",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {user.username}
+                      </span>
                     </div>
 
                     {/* Roles */}
@@ -1431,8 +1457,20 @@ export function Dashboard() {
                           textOverflow: "ellipsis",
                         }}
                       >
-                        {entry.username}{" "}
-                        {entry.userId === user.id ? "(vos)" : ""}
+                        <span
+                          title="Nacionalidad"
+                          style={{
+                            marginRight: "0.36rem",
+                            filter:
+                              "drop-shadow(0 0 6px rgba(255,255,255,0.16))",
+                          }}
+                        >
+                          {getCountryFlag(entry.countryCode)}
+                        </span>
+                        <span>{entry.username}</span>{" "}
+                        {entry.userId === user.id ? (
+                          <span style={{ color: "#7dd3fc" }}>(vos)</span>
+                        ) : null}
                       </div>
                       <div
                         style={{
