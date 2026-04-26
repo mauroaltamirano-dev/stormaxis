@@ -39,7 +39,7 @@ import {
   type MatchLifecycleStatus,
 } from "../lib/competitiveStatus";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
-import { getCountryFlag, getCountryName } from "../lib/countries";
+import { getCountryFlag } from "../lib/countries";
 
 type SearchResult = {
   id: string;
@@ -769,17 +769,11 @@ export function AppLayout() {
 
             {/* Username + server tag */}
             <div style={{ textAlign: "center", display: "grid", gap: "3px" }}>
-              <div
-                style={{
-                  fontFamily: "var(--font-display)",
-                  fontSize: "18px",
-                  fontWeight: 900,
-                  letterSpacing: "0.8px",
-                  color: "var(--nexus-text)",
-                  lineHeight: 1,
-                }}
-              >
-                {user.username}
+              <div style={styles.spineNameRow}>
+                <span style={styles.spineNameFlag} title="Nacionalidad">
+                  {getCountryFlag(user.countryCode)}
+                </span>
+                <span style={styles.spineName}>{user.username}</span>
               </div>
               {user.bnetBattletag ? (
                 <BattleNetMiniTag battletag={user.bnetBattletag} />
@@ -862,11 +856,6 @@ export function AppLayout() {
           </div>
 
           <div style={styles.statsGrid}>
-            <SpineStat
-              label="País"
-              value={`${getCountryFlag(user.countryCode)} ${getCountryName(user.countryCode)}`}
-              tone="#facc15"
-            />
             <SpineStat label="Wins" value={user.wins} tone="#4ade80" />
             <SpineStat label="Losses" value={user.losses} tone="#fb7185" />
             <SpineStat
@@ -1736,6 +1725,33 @@ const styles: Record<string, React.CSSProperties> = {
     display: "grid",
     justifyItems: "center",
     textAlign: "center",
+  },
+  spineNameRow: {
+    display: "inline-flex",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: "6px",
+    minWidth: 0,
+    maxWidth: "100%",
+    margin: "0 auto",
+  },
+  spineNameFlag: {
+    fontSize: "13px",
+    lineHeight: 1,
+    filter: "drop-shadow(0 0 8px rgba(255,255,255,0.12))",
+  },
+  spineName: {
+    minWidth: 0,
+    maxWidth: "190px",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+    fontFamily: "var(--font-display)",
+    fontSize: "18px",
+    fontWeight: 900,
+    letterSpacing: "0.8px",
+    color: "var(--nexus-text)",
+    lineHeight: 1,
   },
   identityRankBlock: {
     display: "flex",
