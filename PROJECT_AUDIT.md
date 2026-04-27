@@ -218,14 +218,14 @@ Hecho:
 - [x] Chat por match con canal global/equipo.
 - [x] Discord voice privado por equipo.
 - [x] CTA hacia `/profile?tab=accounts` cuando falta Discord vinculado.
-- [x] UI activa refinada: replay sólo en `COMPLETED`, Discord sólo en `PLAYING`, cards de veto más altas, flujo compacto.
-- [x] Panel de estadísticas/replay post-match estilo telemetry.
+- [x] UI activa refinada: replay sólo en `COMPLETED`, Discord sólo en `PLAYING`, cards de veto más altas, flujo compacto, roster tipo duelo con paneles individuales, side derecho espejado y barra táctica compacta.
+- [x] Panel de estadísticas/replay post-match estilo telemetry, incluyendo archivo final con vetos, votos de ganador y votos MVP visibles.
 - [x] Retratos de héroes en filas de estadísticas StormReplay, con fallback por iniciales.
 
 Pendiente:
 
 - [ ] QA end-to-end con 10 usuarios reales: accept → veto → playing → replay/vote → MVP → completed.
-- [ ] Mejor feedback cuando un jugador cae/reconecta durante veto/playing.
+- [x] Mejor feedback cuando un jugador cae/reconecta durante veto/playing: presencia Socket.IO por match, panel online/offline y badges por jugador.
 - [x] Moderación/sanitización formal del chat: política server-side para whitespace/control chars/zero-width/longitud/spam repetitivo.
 
 ### 4.5 Replay import / StormReplay

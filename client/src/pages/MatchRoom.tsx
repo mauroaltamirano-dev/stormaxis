@@ -245,6 +245,15 @@ export function MatchRoom() {
         discordVoice: payload.discordVoice ?? prev.discordVoice ?? null,
       }))
     }
+    const onPresence = (payload: any) => {
+      syncMatch((prev) => ({
+        ...prev,
+        runtime: {
+          ...(prev.runtime ?? {}),
+          presence: payload,
+        },
+      }))
+    }
 
     socket.on('match:state', onMatchState)
     socket.on('veto:start', onVetoStart)
@@ -263,6 +272,7 @@ export function MatchRoom() {
     socket.on('match:cancelled', onCancelled)
     socket.on('matchmaking:cancelled', onCancelled)
     socket.on('match:discord_voice', onDiscordVoice)
+    socket.on('match:presence', onPresence)
 
     api
       .get(`/matches/${matchId}`)
@@ -294,6 +304,7 @@ export function MatchRoom() {
       socket.off('match:cancelled', onCancelled)
       socket.off('matchmaking:cancelled', onCancelled)
       socket.off('match:discord_voice', onDiscordVoice)
+      socket.off('match:presence', onPresence)
       socket.off('connect', joinMatchRoom)
     }
   }, [matchId, navigate, user])

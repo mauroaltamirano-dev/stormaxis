@@ -16,7 +16,7 @@ Este archivo es una base viva para personalizar el trabajo entre chats. No debe 
 - Le gusta avanzar auditando `PROJECT_AUDIT.md`, marcando qué está hecho y dejando próximos pasos claros.
 - Prefiere que se ejecuten implementaciones razonables sin frenar por preguntas innecesarias.
 - Cuando pide commit/push, quiere que se publique lo pendiente de forma directa y se confirme el estado final.
-- Valora UI con buena jerarquía, poca repetición de información y sensación competitiva/profesional.
+- Valora UI con buena jerarquía, poca repetición de información y sensación competitiva/profesional. Para MatchRoom le gustan paneles de usuario detallistas, enfrentados/espejados, estilo e-sports con personalidad individual, neon/storm/colorido.
 - Quiere construir una base de personalización para que cada nuevo chat no arranque desde cero.
 
 ## Contexto del proyecto HOTS / StormAxis
@@ -37,3 +37,4 @@ Este archivo es una base viva para personalizar el trabajo entre chats. No debe 
 
 - 2026-04-27: pidió reducir repetición en Profile y mejorar la UI del perfil competitivo.
 - 2026-04-27: pidió crear esta base de contexto para personalización progresiva entre chats.
+- 2026-04-27: pidió remodelar MatchRoom Active tomando como referencia una sala tipo FACEIT/Leetify: recuadros individuales ricos, lado derecho espejado y fases menos invasivas.

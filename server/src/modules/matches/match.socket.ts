@@ -8,6 +8,26 @@ import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
 import { sanitizeMatchChatMessage } from './chat-policy'
 import { listMatchReplayUploads } from './replay-processor.service'
 
+async function getMatchPresencePayload(io: Server, matchId: string) {
+  const sockets = await io.in(`match:${matchId}`).fetchSockets()
+  const onlineUserIds = [
+    ...new Set(
+      sockets
+        .map((entry) => entry.data.userId as string | undefined)
+        .filter((entry): entry is string => Boolean(entry)),
+    ),
+  ]
+
+  return {
+    onlineUserIds,
+    updatedAt: Date.now(),
+  }
+}
+
+async function emitMatchPresence(io: Server, matchId: string) {
+  io.to(`match:${matchId}`).emit('match:presence', await getMatchPresencePayload(io, matchId))
+}
+
 export function registerMatchHandlers(io: Server, socket: Socket) {
   const userId = socket.data.userId as string
 
@@ -36,6 +56,8 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
       socket.join(`match:${matchId}:team:${viewerTeam}`)
     }
 
+    void emitMatchPresence(io, matchId)
+
     // Send full match state to the joining player
     const match = await db.match.findUnique({
       where: { id: matchId },
@@ -48,7 +70,12 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
 
       },
     })
-    const runtime = match ? await getRealtimeMatchMeta(matchId) : null
+    const runtime = match
+      ? {
+          ...await getRealtimeMatchMeta(matchId),
+          presence: await getMatchPresencePayload(io, matchId),
+        }
+      : null
     const visibleMessages = match
       ? await db.$queryRaw<
           Array<{
@@ -233,5 +260,18 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
     } catch (err) {
       socket.emit('error', { code: 'MVP_VOTE_FAILED', message: (err as Error).message })
     }
+  })
+
+  socket.on('disconnecting', () => {
+    const matchIds = [...socket.rooms]
+      .map((room) => room.match(/^match:([^:]+)$/)?.[1])
+      .filter((matchId): matchId is string => Boolean(matchId))
+
+    if (!matchIds.length) return
+    setTimeout(() => {
+      for (const matchId of matchIds) {
+        void emitMatchPresence(io, matchId)
+      }
+    }, 0).unref?.()
   })
 }
