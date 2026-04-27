@@ -255,11 +255,13 @@ Hecho:
 - [x] Leaderboard básico por MMR/rank.
 - [x] Estadísticas base: wins, losses, winrate.
 - [x] Flags/país en presentación.
+- [x] Filtros frontend de leaderboard por país, rol y banda de rango; backend expone roles (2026-04-27).
 - [x] Ruta `/stats` beta.
+- [x] Stats UI muestra tendencia MMR aproximada, forma reciente, map pool y conteo de replays parseados (2026-04-27).
 
 Pendiente:
 
-- [ ] Filtros por región/país/rol/rango.
+- [~] Filtros por región/país/rol/rango: país/rol/rango implementado; región queda pendiente si se agrega región real al modelo.
 - [ ] Temporadas.
 - [ ] Rankings por héroe/mapa/rol.
 - [ ] Export/compartir perfil/ranking.
@@ -446,8 +448,8 @@ Pendiente:
 
 1. [ ] QA con jugadores reales y anotar fricciones.
 2. [ ] Pulir Admin para moderación diaria: filtros, confirmaciones, reportes, disputas.
-3. [ ] Mejorar Profile/Stats: winrate por rol/mapa/héroe, trend de MMR, replay history.
-4. [ ] Mejorar Leaderboard con filtros país/rol/rango/temporada.
+3. [~] Mejorar Profile/Stats: iniciado en `/stats` con trend MMR, forma reciente, map pool y replay evidence; faltan rol/héroe y persistencia estadística más profunda.
+4. [~] Mejorar Leaderboard con filtros país/rol/rango/temporada — país/rol/rango implementado; temporada pendiente.
 5. [ ] Revisar MatchRoom visual en mobile/tablet.
 
 ### P3 — Features futuras

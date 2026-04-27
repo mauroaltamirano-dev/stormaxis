@@ -27,6 +27,13 @@ type MatchHistoryEntry = {
     winner: number | null;
     createdAt: string;
     endedAt: string | null;
+    replayUploads?: Array<{
+      id: string;
+      status: string;
+      parsedMap: string | null;
+      parsedWinnerTeam: number | null;
+      createdAt: string;
+    }>;
   };
 };
 
@@ -127,6 +134,32 @@ function buildMapStats(matches: MatchHistoryEntry[]): MapStat[] {
     .slice(0, 5);
 }
 
+function buildMmrTrend(matches: MatchHistoryEntry[], currentMmr: number) {
+  const completedWithDelta = matches
+    .filter(isCompleted)
+    .filter((entry) => typeof entry.mmrDelta === "number")
+    .slice(0, 12)
+    .reverse();
+
+  const totalDelta = completedWithDelta.reduce((sum, entry) => sum + (entry.mmrDelta ?? 0), 0);
+  let running = currentMmr - totalDelta;
+  const points = [{ label: "Inicio", value: running }];
+
+  for (const entry of completedWithDelta) {
+    running += entry.mmrDelta ?? 0;
+    points.push({
+      label: entry.match.selectedMap ?? "Match",
+      value: running,
+    });
+  }
+
+  return points;
+}
+
+function hasParsedReplay(entry: MatchHistoryEntry) {
+  return Boolean(entry.match.replayUploads?.some((upload) => upload.status === "PARSED"));
+}
+
 export function Stats() {
   const { user } = useAuthStore();
   const [matches, setMatches] = useState<MatchHistoryEntry[]>([]);
@@ -176,6 +209,8 @@ export function Stats() {
   const streak = currentStreak(visibleMatches);
   const mapStats = buildMapStats(visibleMatches);
   const recentForm = completed.slice(0, 10);
+  const mmrTrend = buildMmrTrend(visibleMatches, user?.mmr ?? 0);
+  const parsedReplayCount = completed.filter(hasParsedReplay).length;
 
   if (!user) return null;
 
@@ -184,7 +219,7 @@ export function Stats() {
       <PageHeader
         eyebrow="Nexus analytics"
         title="Estadísticas competitivas"
-        description="Historial, ELO, forma reciente y mapas usando los datos reales que guarda el MVP. Hero Lab queda como lectura personal por héroes y replays."
+        description="Historial, tendencia de MMR, forma reciente, mapas y evidencia por replay usando los datos reales que guarda el MVP."
         icon={<Activity size={18} />}
         actions={
           <div style={rangeRailStyle}>
@@ -214,7 +249,7 @@ export function Stats() {
         <MetricCard icon={Trophy} label="Winrate" value={`${wr}%`} detail={`${wins}W · ${losses}L`} tone={wr >= 50 ? "#4ade80" : "#f87171"} />
         <MetricCard icon={TrendingUp} label="ELO neto" value={`${netElo >= 0 ? "+" : ""}${netElo}`} detail={`Promedio ${avgDelta >= 0 ? "+" : ""}${avgDelta} por match`} tone={netElo >= 0 ? "#38bdf8" : "#f87171"} />
         <MetricCard icon={Activity} label="Racha actual" value={streak.label} detail="Según matches completados" tone={streak.tone} />
-        <MetricCard icon={Swords} label="Matches" value={completed.length} detail={`${visibleMatches.length} registros en rango`} tone="#c084fc" />
+        <MetricCard icon={Swords} label="Matches" value={completed.length} detail={`${parsedReplayCount} con replay parseado`} tone="#c084fc" />
       </section>
 
       <section style={mainGridStyle}>
@@ -236,6 +271,7 @@ export function Stats() {
                   const resultTone = !completedMatch ? "#94a3b8" : won ? "#4ade80" : "#f87171";
                   const delta = entry.mmrDelta ?? 0;
                   const mapImage = getMatchMapImage(entry.match.selectedMap);
+                  const replayReady = hasParsedReplay(entry);
 
                   return (
                     <Link
@@ -255,6 +291,7 @@ export function Stats() {
                           <span style={{ color: resultTone }}>{completedMatch ? (won ? "Victoria" : "Derrota") : entry.match.status}</span>
                           <span>Team {entry.team}</span>
                           <span>{formatRelative(entry.match.createdAt)}</span>
+                          {replayReady ? <span style={replayPillStyle}>Replay</span> : null}
                         </div>
                       </div>
 
@@ -273,6 +310,18 @@ export function Stats() {
         </div>
 
         <aside style={{ display: "grid", gap: "1rem", minWidth: 0 }}>
+          <Panel
+            eyebrow="Tendencia MMR"
+            title="Momentum competitivo"
+            subtitle="Reconstrucción aproximada desde el MMR actual y los deltas de las últimas partidas."
+          >
+            {mmrTrend.length < 2 ? (
+              <EmptyState text="Faltan partidas con delta ELO para dibujar tendencia." />
+            ) : (
+              <MmrTrendCard points={mmrTrend} netElo={netElo} />
+            )}
+          </Panel>
+
           <Panel
             eyebrow="Forma reciente"
             title="Últimos 10"
@@ -384,6 +433,35 @@ function DataSlot({ icon: Icon, label, value }: { icon: typeof Crosshair; label:
   );
 }
 
+function MmrTrendCard({ points, netElo }: { points: Array<{ label: string; value: number }>; netElo: number }) {
+  const values = points.map((point) => point.value);
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  const span = Math.max(1, max - min);
+  const width = 260;
+  const height = 92;
+  const coordinates = points.map((point, index) => {
+    const x = points.length === 1 ? width : (index / (points.length - 1)) * width;
+    const y = height - ((point.value - min) / span) * height;
+    return `${x.toFixed(1)},${y.toFixed(1)}`;
+  });
+  const last = points.at(-1);
+
+  return (
+    <div style={trendCardStyle}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label="Tendencia de MMR" style={trendSvgStyle}>
+        <polyline points={coordinates.join(" ")} fill="none" stroke={netElo >= 0 ? "#4ade80" : "#f87171"} strokeWidth="4" strokeLinecap="round" strokeLinejoin="round" />
+        <polygon points={`0,${height} ${coordinates.join(" ")} ${width},${height}`} fill={netElo >= 0 ? "rgba(74,222,128,0.10)" : "rgba(248,113,113,0.10)"} stroke="none" />
+      </svg>
+      <div style={trendFooterStyle}>
+        <span>Floor {min}</span>
+        <strong>{last?.value ?? 0} MMR</strong>
+        <span>Peak {max}</span>
+      </div>
+    </div>
+  );
+}
+
 function EmptyState({ text }: { text: string }) {
   return <div style={emptyStyle}>{text}</div>;
 }
@@ -408,7 +486,8 @@ const mapThumbStyle: CSSProperties = { position: "relative", width: "72px", heig
 const mapThumbImageStyle: CSSProperties = { width: "100%", height: "100%", objectFit: "cover", display: "block", filter: "brightness(0.72)" };
 const mapThumbOverlayStyle: CSSProperties = { position: "absolute", inset: 0, background: "linear-gradient(135deg, rgba(255,255,255,0.08), transparent 42%, rgba(0,0,0,0.38))" };
 const historyTitleStyle: CSSProperties = { color: "#f8fafc", fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
-const historyMetaStyle: CSSProperties = { marginTop: "0.2rem", display: "flex", gap: "0.6rem", flexWrap: "wrap", color: "rgba(148,163,184,0.78)", fontSize: "0.76rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" };
+const historyMetaStyle: CSSProperties = { marginTop: "0.2rem", display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", color: "rgba(148,163,184,0.78)", fontSize: "0.76rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" };
+const replayPillStyle: CSSProperties = { border: "1px solid rgba(125,211,252,0.28)", background: "rgba(14,116,144,0.16)", color: "#7dd3fc", padding: "0.1rem 0.35rem", fontSize: "0.62rem" };
 const historySideStyle: CSSProperties = { display: "grid", justifyItems: "end", gap: "0.2rem", whiteSpace: "nowrap" };
 const dateStyle: CSSProperties = { color: "rgba(148,163,184,0.62)", fontSize: "0.72rem" };
 function deltaBadgeStyle(delta: number, completed: boolean): CSSProperties { const tone = !completed ? "#94a3b8" : delta >= 0 ? "#4ade80" : "#f87171"; return { minWidth: "78px", textAlign: "center", border: `1px solid ${tone}44`, background: `${tone}14`, color: tone, padding: "0.25rem 0.45rem", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.08em" }; }
@@ -418,8 +497,12 @@ const mapStatRowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "
 const mapNameStyle: CSSProperties = { color: "#e2e8f0", fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const tinyMetaStyle: CSSProperties = { marginTop: "0.15rem", color: "rgba(148,163,184,0.72)", fontSize: "0.75rem" };
 const dataSlotsStyle: CSSProperties = { display: "grid", gap: "0.55rem" };
+const trendCardStyle: CSSProperties = { display: "grid", gap: "0.55rem", border: "1px solid rgba(148,163,184,0.12)", background: "radial-gradient(circle at 20% 0%, rgba(56,189,248,0.16), transparent 34%), rgba(2,6,23,0.35)", padding: "0.75rem" };
+const trendSvgStyle: CSSProperties = { width: "100%", height: "112px", overflow: "visible", filter: "drop-shadow(0 0 14px rgba(56,189,248,0.18))" };
+const trendFooterStyle: CSSProperties = { display: "flex", justifyContent: "space-between", gap: "0.75rem", color: "rgba(148,163,184,0.78)", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em" };
 const dataSlotStyle: CSSProperties = { display: "grid", gridTemplateColumns: "auto 0.7fr 1.3fr", alignItems: "center", gap: "0.5rem", color: "rgba(226,232,240,0.72)", fontSize: "0.8rem", border: "1px solid rgba(125,211,252,0.10)", background: "rgba(14,116,144,0.08)", padding: "0.55rem" };
 const emptyStyle: CSSProperties = { border: "1px dashed rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.35)", color: "rgba(148,163,184,0.78)", padding: "1rem", textAlign: "center", fontWeight: 800 };
 const eloBandStyle: CSSProperties = { display: "grid", gap: "0.6rem", border: "1px solid rgba(125,211,252,0.14)", background: "rgba(8,20,34,0.38)", padding: "0.9rem" };
 const eloTrackStyle: CSSProperties = { height: "8px", overflow: "hidden", border: "1px solid rgba(148,163,184,0.14)", background: "linear-gradient(90deg, rgba(248,113,113,0.18), rgba(148,163,184,0.12) 50%, rgba(74,222,128,0.18))" };
 const eloTrackFillStyle: CSSProperties = { display: "block", height: "100%", background: "linear-gradient(90deg, #38bdf8, #4ade80)", boxShadow: "0 0 18px rgba(56,189,248,0.35)" };
+

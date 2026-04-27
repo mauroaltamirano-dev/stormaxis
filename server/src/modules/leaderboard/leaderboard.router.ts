@@ -11,6 +11,7 @@ leaderboardRouter.get('/', async (_req, res, next) => {
       select: {
         id: true, username: true, avatar: true,
         mmr: true, rank: true, wins: true, losses: true, countryCode: true,
+        mainRole: true, secondaryRole: true,
       },
       orderBy: { mmr: 'desc' },
       take: 100,

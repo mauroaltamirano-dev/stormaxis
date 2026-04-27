@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { api } from "../lib/api";
 import { RankBadge } from "../components/RankBadge";
 import { PageHeader } from "../components/PageHeader";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
-import { getCountryFlag } from "../lib/countries";
-import { Trophy as TrophyIcon } from "lucide-react";
+import { getCountryFlag, getCountryName } from "../lib/countries";
+import { getRoleMeta, ROLE_META, type PlayerRoleKey } from "../lib/roles";
+import { Filter, Trophy as TrophyIcon } from "lucide-react";
 
 type LeaderboardEntry = {
   id: string;
@@ -15,8 +16,19 @@ type LeaderboardEntry = {
   wins: number;
   losses: number;
   countryCode?: string | null;
+  mainRole?: PlayerRoleKey | null;
+  secondaryRole?: PlayerRoleKey | null;
   level?: number;
 };
+
+type RankFilter = "all" | "1-3" | "4-6" | "7-10";
+
+const rankFilters: Array<{ value: RankFilter; label: string; detail: string }> = [
+  { value: "all", label: "Todos", detail: "Top 100" },
+  { value: "7-10", label: "Elite", detail: "LVL 7-10" },
+  { value: "4-6", label: "Core", detail: "LVL 4-6" },
+  { value: "1-3", label: "Rising", detail: "LVL 1-3" },
+];
 
 function getWinrate(wins: number, losses: number) {
   const total = wins + losses;
@@ -24,10 +36,29 @@ function getWinrate(wins: number, losses: number) {
   return `${Math.round((wins / total) * 100)}%`;
 }
 
+function getLevel(entry: LeaderboardEntry) {
+  return entry.level ?? parseRankLevel(entry.rank);
+}
+
+function matchesRank(level: number, filter: RankFilter) {
+  if (filter === "all") return true;
+  if (filter === "1-3") return level >= 1 && level <= 3;
+  if (filter === "4-6") return level >= 4 && level <= 6;
+  return level >= 7 && level <= 10;
+}
+
+function matchesRole(entry: LeaderboardEntry, role: PlayerRoleKey | "all") {
+  if (role === "all") return true;
+  return entry.mainRole === role || entry.secondaryRole === role;
+}
+
 export function Leaderboard() {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [countryFilter, setCountryFilter] = useState("all");
+  const [roleFilter, setRoleFilter] = useState<PlayerRoleKey | "all">("all");
+  const [rankFilter, setRankFilter] = useState<RankFilter>("all");
 
   useEffect(() => {
     let cancelled = false;
@@ -51,123 +82,188 @@ export function Leaderboard() {
     };
   }, []);
 
+  const enrichedEntries = useMemo(
+    () => entries.map((entry, index) => ({ ...entry, position: index + 1, level: getLevel(entry) })),
+    [entries],
+  );
+
+  const countryOptions = useMemo(() => {
+    const codes = [...new Set(entries.map((entry) => entry.countryCode).filter((code): code is string => Boolean(code)))];
+    return codes.sort((a, b) => getCountryName(a).localeCompare(getCountryName(b), "es"));
+  }, [entries]);
+
+  const filteredEntries = useMemo(
+    () =>
+      enrichedEntries.filter((entry) => {
+        const countryMatches = countryFilter === "all" || entry.countryCode === countryFilter;
+        return countryMatches && matchesRole(entry, roleFilter) && matchesRank(entry.level, rankFilter);
+      }),
+    [countryFilter, enrichedEntries, rankFilter, roleFilter],
+  );
+
+  const topFiltered = filteredEntries[0];
+  const averageMmr = filteredEntries.length
+    ? Math.round(filteredEntries.reduce((sum, entry) => sum + entry.mmr, 0) / filteredEntries.length)
+    : 0;
+
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
       <PageHeader
         eyebrow="Ranking"
         title="Leaderboard global"
-        description="La escalera competitiva del servidor SA: MMR, rango, winrate y nacionalidad en una sola lectura consistente."
+        description="La escalera competitiva del servidor SA con filtros de scouting por país, rol y rango competitivo."
         icon={<TrophyIcon size={18} />}
       />
 
-      <section
-        style={{
-          border: "1px solid var(--nexus-border)",
-          background: "var(--nexus-card)",
-          padding: "1rem",
-          display: "grid",
-          gap: "0.9rem",
-        }}
-      >
+      <section style={boardStyle}>
+        <div style={toolbarStyle}>
+          <div>
+            <div style={eyebrowStyle}>Scouting filters</div>
+            <strong style={toolbarTitleStyle}>{filteredEntries.length} jugadores visibles</strong>
+            <div style={toolbarMetaStyle}>
+              {topFiltered ? `Líder del filtro: #${topFiltered.position} ${topFiltered.username}` : "Sin resultados para esta combinación"}
+              {averageMmr ? ` · Promedio ${averageMmr.toLocaleString()} MMR` : ""}
+            </div>
+          </div>
 
-      {loading && <div style={{ color: "#94a3b8" }}>Cargando ranking…</div>}
-      {error && !loading && (
-        <div
-          style={{
-            border: "1px solid rgba(248,113,113,0.25)",
-            background: "rgba(127,29,29,0.12)",
-            color: "#fecaca",
-            padding: "0.7rem 0.8rem",
-          }}
-        >
-          {error}
+          <button
+            type="button"
+            onClick={() => {
+              setCountryFilter("all");
+              setRoleFilter("all");
+              setRankFilter("all");
+            }}
+            style={resetButtonStyle}
+          >
+            Reset
+          </button>
         </div>
-      )}
 
-      {!loading && !error && (
-        <div style={{ display: "grid", gap: "0.45rem" }}>
-          {entries.map((entry, index) => (
-            (() => {
-              const level = entry.level ?? parseRankLevel(entry.rank);
-              const meta = getRankMeta(level);
-              const topGlow = index < 3;
+        <div style={filtersGridStyle}>
+          <label style={filterLabelStyle}>
+            <span>País</span>
+            <select value={countryFilter} onChange={(event) => setCountryFilter(event.target.value)} style={selectStyle}>
+              <option value="all">Todos los países</option>
+              {countryOptions.map((code) => (
+                <option key={code} value={code}>
+                  {getCountryFlag(code)} {getCountryName(code)}
+                </option>
+              ))}
+            </select>
+          </label>
 
-              return (
-                <div
-                  key={entry.id}
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "54px 72px minmax(0, 1fr) auto auto auto",
-                    gap: "0.8rem",
-                    alignItems: "center",
-                    border: `1px solid ${topGlow ? `${meta.color}33` : "rgba(255,255,255,0.07)"}`,
-                    background: topGlow
-                      ? `linear-gradient(90deg, ${meta.color}12, rgba(15,23,42,0.76) 36%, rgba(15,23,42,0.92))`
-                      : "rgba(15,23,42,0.64)",
-                    boxShadow: topGlow ? `0 0 28px ${meta.color}14` : "none",
-                    padding: "0.65rem 0.8rem",
-                  }}
-                >
+          <label style={filterLabelStyle}>
+            <span>Rol</span>
+            <select value={roleFilter} onChange={(event) => setRoleFilter(event.target.value as PlayerRoleKey | "all")} style={selectStyle}>
+              <option value="all">Todos los roles</option>
+              {(Object.keys(ROLE_META) as PlayerRoleKey[]).map((role) => (
+                <option key={role} value={role}>
+                  {ROLE_META[role].label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <div style={rankRailStyle}>
+            {rankFilters.map((filter) => (
+              <button
+                key={filter.value}
+                type="button"
+                onClick={() => setRankFilter(filter.value)}
+                style={rankFilter === filter.value ? activeRankButtonStyle : rankButtonStyle}
+              >
+                <span>{filter.label}</span>
+                <small>{filter.detail}</small>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {loading && <div style={{ color: "#94a3b8" }}>Cargando ranking…</div>}
+        {error && !loading && <div style={errorStyle}>{error}</div>}
+
+        {!loading && !error && (
+          <div style={{ display: "grid", gap: "0.45rem" }}>
+            {filteredEntries.length === 0 ? (
+              <div style={emptyStyle}>
+                <Filter size={18} /> No hay jugadores para esta combinación. Probá limpiar filtros o ampliar el rango.
+              </div>
+            ) : (
+              filteredEntries.map((entry) => {
+                const meta = getRankMeta(entry.level);
+                const topGlow = entry.position <= 3;
+                const mainRole = getRoleMeta(entry.mainRole);
+                const secondaryRole = getRoleMeta(entry.secondaryRole);
+
+                return (
                   <div
+                    key={entry.id}
                     style={{
-                      color: topGlow ? meta.color : "#7dd3fc",
-                      fontWeight: 800,
-                      fontFamily: "var(--font-display)",
-                      letterSpacing: "0.08em",
+                      ...rowStyle,
+                      borderColor: topGlow ? `${meta.color}33` : "rgba(255,255,255,0.07)",
+                      background: topGlow
+                        ? `linear-gradient(90deg, ${meta.color}12, rgba(15,23,42,0.76) 36%, rgba(15,23,42,0.92))`
+                        : "rgba(15,23,42,0.64)",
+                      boxShadow: topGlow ? `0 0 28px ${meta.color}14` : "none",
                     }}
                   >
-                    #{index + 1}
-                  </div>
-                  <RankBadge
-                    level={level}
-                    size="sm"
-                    showLabel={false}
-                    showMmr={false}
-                    glow={topGlow ? "strong" : "medium"}
-                  />
-                  <div style={{ minWidth: 0 }}>
-                    <div style={{ color: "#e2e8f0", fontWeight: 700 }}>
-                      <span style={{ marginRight: "0.35rem" }}>
-                        {getCountryFlag(entry.countryCode)}
-                      </span>
-                      {entry.username}
+                    <div style={{ color: topGlow ? meta.color : "#7dd3fc", fontWeight: 900, fontFamily: "var(--font-display)", letterSpacing: "0.08em" }}>
+                      #{entry.position}
                     </div>
-                    <div
-                      style={{
-                        marginTop: "0.16rem",
-                        color: meta.color,
-                        fontSize: "0.78rem",
-                        fontWeight: 800,
-                        letterSpacing: "0.08em",
-                        textTransform: "uppercase",
-                      }}
-                    >
-                      {meta.label}
+                    <RankBadge level={entry.level} size="sm" showLabel={false} showMmr={false} glow={topGlow ? "strong" : "medium"} />
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ color: "#e2e8f0", fontWeight: 800 }}>
+                        <span style={{ marginRight: "0.35rem" }}>{getCountryFlag(entry.countryCode)}</span>
+                        {entry.username}
+                      </div>
+                      <div style={{ ...rankLineStyle, color: meta.color }}>{meta.label}</div>
+                    </div>
+                    <div style={roleStackStyle}>
+                      {mainRole ? <RolePill label={mainRole.label} accent={mainRole.accent} /> : <span style={mutedStyle}>Sin rol</span>}
+                      {secondaryRole ? <RolePill label={secondaryRole.label} accent={secondaryRole.accent} ghost /> : null}
+                    </div>
+                    <div style={{ color: "#cbd5e1", fontWeight: 800 }}>{entry.mmr.toLocaleString()} MMR</div>
+                    <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
+                      {entry.wins}W/{entry.losses}L · {getWinrate(entry.wins, entry.losses)}
+                    </div>
+                    <div style={{ color: topGlow ? meta.color : "#cbd5e1", fontWeight: 800, fontFamily: "var(--font-display)", letterSpacing: "0.06em" }}>
+                      LVL {entry.level}
                     </div>
                   </div>
-                  <div style={{ color: "#cbd5e1", fontWeight: 700 }}>
-                    {entry.mmr.toLocaleString()} MMR
-                  </div>
-                  <div style={{ color: "#94a3b8", fontSize: "0.85rem" }}>
-                    {entry.wins}W/{entry.losses}L · {getWinrate(entry.wins, entry.losses)}
-                  </div>
-                  <div
-                    style={{
-                      color: topGlow ? meta.color : "#cbd5e1",
-                      fontWeight: 700,
-                      fontFamily: "var(--font-display)",
-                      letterSpacing: "0.06em",
-                    }}
-                  >
-                    LVL {level}
-                  </div>
-                </div>
-              );
-            })()
-          ))}
-        </div>
-      )}
+                );
+              })
+            )}
+          </div>
+        )}
       </section>
     </div>
   );
 }
+
+function RolePill({ label, accent, ghost = false }: { label: string; accent: string; ghost?: boolean }) {
+  return (
+    <span style={{ ...rolePillStyle, borderColor: `${accent}${ghost ? "33" : "66"}`, background: ghost ? "rgba(15,23,42,0.38)" : `${accent}16`, color: ghost ? "rgba(226,232,240,0.72)" : accent }}>
+      {label}
+    </span>
+  );
+}
+
+const boardStyle: CSSProperties = { border: "1px solid var(--nexus-border)", background: "var(--nexus-card)", padding: "1rem", display: "grid", gap: "0.9rem" };
+const toolbarStyle: CSSProperties = { display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "start", border: "1px solid rgba(125,211,252,0.10)", background: "linear-gradient(135deg, rgba(14,116,144,0.12), rgba(15,23,42,0.42))", padding: "0.85rem" };
+const eyebrowStyle: CSSProperties = { color: "#00c8ff", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase" };
+const toolbarTitleStyle: CSSProperties = { display: "block", marginTop: "0.15rem", color: "#f8fafc", fontFamily: "var(--font-display)", letterSpacing: "0.06em", textTransform: "uppercase" };
+const toolbarMetaStyle: CSSProperties = { marginTop: "0.25rem", color: "rgba(148,163,184,0.82)", fontSize: "0.82rem" };
+const resetButtonStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.45)", color: "#cbd5e1", padding: "0.55rem 0.7rem", cursor: "pointer", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" };
+const filtersGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(180px, 0.8fr) minmax(180px, 0.8fr) minmax(260px, 1.4fr)", gap: "0.7rem", alignItems: "end" };
+const filterLabelStyle: CSSProperties = { display: "grid", gap: "0.35rem", color: "rgba(226,232,240,0.72)", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase" };
+const selectStyle: CSSProperties = { width: "100%", border: "1px solid rgba(148,163,184,0.16)", background: "rgba(2,6,23,0.78)", color: "#e2e8f0", padding: "0.68rem 0.75rem", fontWeight: 800 };
+const rankRailStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(4, minmax(0, 1fr))", gap: "0.45rem" };
+const rankButtonStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.48)", color: "rgba(226,232,240,0.72)", padding: "0.55rem", cursor: "pointer", display: "grid", gap: "0.12rem", fontWeight: 900, textTransform: "uppercase" };
+const activeRankButtonStyle: CSSProperties = { ...rankButtonStyle, border: "1px solid rgba(0,200,255,0.38)", background: "rgba(0,200,255,0.14)", color: "#bae6fd" };
+const errorStyle: CSSProperties = { border: "1px solid rgba(248,113,113,0.25)", background: "rgba(127,29,29,0.12)", color: "#fecaca", padding: "0.7rem 0.8rem" };
+const emptyStyle: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", border: "1px dashed rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.35)", color: "rgba(148,163,184,0.82)", padding: "1rem", fontWeight: 800 };
+const rowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "54px 72px minmax(0, 1fr) minmax(130px, 0.6fr) auto auto auto", gap: "0.8rem", alignItems: "center", border: "1px solid", padding: "0.65rem 0.8rem" };
+const rankLineStyle: CSSProperties = { marginTop: "0.16rem", fontSize: "0.78rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" };
+const roleStackStyle: CSSProperties = { display: "flex", gap: "0.35rem", flexWrap: "wrap", minWidth: 0 };
+const rolePillStyle: CSSProperties = { border: "1px solid", padding: "0.22rem 0.42rem", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" };
+const mutedStyle: CSSProperties = { color: "rgba(148,163,184,0.62)", fontSize: "0.78rem", fontWeight: 800 };
