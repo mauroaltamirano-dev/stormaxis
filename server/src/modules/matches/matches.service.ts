@@ -520,7 +520,7 @@ async function openVoting(matchId: string, totalPlayers: number) {
 }
 
 function scheduleVotingTimeout(matchId: string, scheduledAt: number) {
-  setTimeout(async () => {
+  const timeout = setTimeout(async () => {
     const votingRaw = await redis.get(REDIS_KEYS.matchVotingState(matchId))
     if (!votingRaw) return
 
@@ -538,6 +538,7 @@ function scheduleVotingTimeout(matchId: string, scheduledAt: number) {
     const humanPlayers = match.players.filter((entry) => !entry.isBot && entry.userId)
     await openMvpVoting(matchId, winnerTeam, humanPlayers.length, 'timeout')
   }, VOTING_TIMEOUT_MS + 500)
+  timeout.unref?.()
 }
 
 async function openMvpVoting(
@@ -592,7 +593,7 @@ async function openMvpVoting(
 }
 
 function scheduleMvpVotingTimeout(matchId: string, scheduledAt: number) {
-  setTimeout(async () => {
+  const timeout = setTimeout(async () => {
     const mvpVotingRaw = await redis.get(REDIS_KEYS.matchMvpVotingState(matchId))
     if (!mvpVotingRaw) return
 
@@ -608,6 +609,7 @@ function scheduleMvpVotingTimeout(matchId: string, scheduledAt: number) {
     const mvpUserId = await resolveMvpOnTimeout(matchId, match.players, match.winner as 1 | 2)
     await finalizeMatchWithMvp(matchId, mvpUserId, 'timeout')
   }, MVP_VOTING_TIMEOUT_MS + 500)
+  timeout.unref?.()
 }
 
 async function resolveMvpOnTimeout(

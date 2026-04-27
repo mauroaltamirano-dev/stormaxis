@@ -226,7 +226,7 @@ Pendiente:
 
 - [ ] QA end-to-end con 10 usuarios reales: accept → veto → playing → replay/vote → MVP → completed.
 - [ ] Mejor feedback cuando un jugador cae/reconecta durante veto/playing.
-- [ ] Moderación/sanitización formal del chat.
+- [x] Moderación/sanitización formal del chat: política server-side para whitespace/control chars/zero-width/longitud/spam repetitivo.
 
 ### 4.5 Replay import / StormReplay
 
@@ -332,7 +332,7 @@ Pendiente:
 - [ ] Completar env validation para `BNET_*`, replay storage y flags de producción.
 - [x] CSRF strategy explícita para cookies de auth: `refresh`/`logout` requieren origin/referer permitido en producción.
 - [ ] Rate limits finos por dominio: chat, veto, vote, queue, profile.
-- [ ] Sanitización/política de contenido para chat.
+- [x] Sanitización/política de contenido para chat: `sanitizeMatchChatMessage` + tests.
 - [ ] Device/IP/session fingerprint anti-smurf con privacidad documentada.
 - [~] Tests de seguridad iniciados: cobertura unitaria del guard CSRF/origin en auth `refresh`/`logout`; faltan más endpoints críticos.
 - [ ] Confirmar que `server/.env` nunca se suba a git.
@@ -443,7 +443,7 @@ Pendiente:
 2. [ ] Agregar checklist/endpoint admin para discrepancias de replay.
 3. [ ] Endurecer rate limits por dominio: queue, vote, veto, chat, profile.
 4. [x] Definir CSRF strategy para endpoints con cookie — origin/referer guard en auth `refresh`/`logout`, 2026-04-27.
-5. [~] Crear tests mínimos de rutas críticas — iniciado con `auth.router.test.ts` para CSRF/origin guard y `matches.service.test.ts` para replay decision; faltan matchmaking, match completion completo y admin guard.
+5. [x] Crear tests mínimos de rutas críticas — cobertura inicial en `auth.router.test.ts` (CSRF/origin), `matches.service.test.ts` (replay decision + match completion), `authenticate.test.ts` (admin guard) y `matchmaking.service.test.ts` (joinQueue).
 
 ### P2 — Producto / UX
 

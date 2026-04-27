@@ -5,6 +5,7 @@ import { performVeto } from '../matchmaking/matchmaking.service'
 import { castMvpVote, castVote, finishMatch, getRealtimeMatchMeta, markPlayerReady, requestMatchCancellation } from './matches.service'
 import { calculateRank } from '../users/player-progression'
 import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
+import { sanitizeMatchChatMessage } from './chat-policy'
 import { listMatchReplayUploads } from './replay-processor.service'
 
 export function registerMatchHandlers(io: Server, socket: Socket) {
@@ -159,7 +160,13 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
 
   // Chat message
   socket.on('chat:send', async ({ matchId, content, channel }: { matchId: string; content: string; channel?: 'GLOBAL' | 'TEAM' }) => {
-    if (!content?.trim() || content.length > 500) return
+    let sanitizedContent: string
+    try {
+      sanitizedContent = sanitizeMatchChatMessage(content)
+    } catch (err) {
+      socket.emit('error', { code: 'CHAT_REJECTED', message: (err as Error).message })
+      return
+    }
 
     const requestedChannel = channel === 'TEAM' ? 'TEAM' : 'GLOBAL'
 
@@ -188,7 +195,7 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
     const messageId = randomUUID()
     const [message] = await db.$queryRaw<Array<{ id: string; content: string; channel: string; team: number | null; createdAt: Date }>>`
       INSERT INTO "ChatMessage" ("id", "matchId", "userId", "content", "channel", "team")
-      VALUES (${messageId}, ${matchId}, ${userId}, ${content.trim()}, ${requestedChannel}, ${team})
+      VALUES (${messageId}, ${matchId}, ${userId}, ${sanitizedContent}, ${requestedChannel}, ${team})
       RETURNING "id", "content", "channel", "team", "createdAt"
     `
 
