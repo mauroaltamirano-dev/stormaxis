@@ -2,14 +2,13 @@ import type { CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
+  CheckCircle2,
   Clock3,
   Crosshair,
   Save,
   Search,
   ShieldCheck,
-  Swords,
   Trophy,
-  Users,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { buildApiUrl } from "../lib/backend";
@@ -232,6 +231,11 @@ export function Profile() {
   const totalMatches = useMemo(
     () => (profile ? profile.wins + profile.losses : 0),
     [profile],
+  );
+  const latestMatch = useMemo(() => matches[0] ?? null, [matches]);
+  const rolesConfiguredCount = useMemo(
+    () => [profile?.mainRole, profile?.secondaryRole].filter(Boolean).length,
+    [profile?.mainRole, profile?.secondaryRole],
   );
 
   const filteredMatches = useMemo(() => {
@@ -712,8 +716,12 @@ export function Profile() {
                 icon={<Trophy size={16} />}
               />
               <MetricCard
-                label="Partidas"
-                value={String(totalMatches)}
+                label="Última partida"
+                value={
+                  latestMatch
+                    ? formatMatchRelativeTime(latestMatch.match.createdAt)
+                    : "Sin historial"
+                }
                 accent="#f97316"
                 icon={<Clock3 size={16} />}
               />
@@ -742,7 +750,7 @@ export function Profile() {
                 color: "var(--nexus-faint)",
               }}
             >
-              Identidad competitiva
+              Rol y progreso
             </div>
 
             <RoleBadge label="Main" role={profile.mainRole} />
@@ -1013,12 +1021,12 @@ export function Profile() {
                       color: "var(--nexus-text)",
                     }}
                   >
-                    Lectura rápida del perfil
+                    Preparación competitiva
                   </div>
                   <div
                     style={{ color: "var(--nexus-muted)", fontSize: "13px" }}
                   >
-                    Un resumen útil de verdad, no una bio vacía.
+                    Estado útil para jugar y scoutear sin repetir la identidad de arriba.
                   </div>
                 </div>
 
@@ -1029,21 +1037,37 @@ export function Profile() {
                     gap: "12px",
                   }}
                 >
-                  <ScoutCard
-                    label="Main"
-                    value={getRoleLabel(profile.mainRole)}
-                    icon={<Swords size={16} />}
-                    role={profile.mainRole}
+                  <ReadinessCard
+                    label="Roles listos"
+                    value={`${rolesConfiguredCount}/2`}
+                    detail={
+                      rolesConfiguredCount === 2
+                        ? "Main y secundario definidos"
+                        : "Falta definir tu identidad competitiva"
+                    }
+                    accent={rolesConfiguredCount === 2 ? "#00e676" : "#facc15"}
+                    icon={<CheckCircle2 size={16} />}
                   />
-                  <ScoutCard
-                    label="Secundario"
-                    value={getRoleLabel(profile.secondaryRole)}
-                    icon={<Users size={16} />}
-                    role={profile.secondaryRole}
+                  <ReadinessCard
+                    label="Cuenta de juego"
+                    value={profile.bnetBattletag ? "Battle.net" : "Pendiente"}
+                    detail={
+                      profile.bnetBattletag
+                        ? "Lista para validación de replays"
+                        : "Vinculala para mejorar confianza"
+                    }
+                    accent={profile.bnetBattletag ? "#00aeff" : "#f97316"}
+                    icon={<ShieldCheck size={16} />}
                   />
-                  <ScoutCard
-                    label="Total partidas"
-                    value={String(totalMatches)}
+                  <ReadinessCard
+                    label="Historial"
+                    value={totalMatches > 0 ? "Con evidencia" : "Sin datos"}
+                    detail={
+                      totalMatches > 0
+                        ? `${totalMatches} match${totalMatches === 1 ? "" : "es"} registrado${totalMatches === 1 ? "" : "s"}`
+                        : "Jugá partidas para construir scouting"
+                    }
+                    accent={totalMatches > 0 ? "#8b5cf6" : "#64748b"}
                     icon={<Clock3 size={16} />}
                   />
                 </div>
@@ -1727,6 +1751,71 @@ function FilterChip({
     >
       {label}
     </button>
+  );
+}
+
+function ReadinessCard({
+  label,
+  value,
+  detail,
+  accent,
+  icon,
+}: {
+  label: string;
+  value: string;
+  detail: string;
+  accent: string;
+  icon: ReactNode;
+}) {
+  return (
+    <div
+      style={{
+        border: `1px solid ${accent}55`,
+        background: `linear-gradient(145deg, ${accent}14, rgba(7,12,22,0.78) 58%, rgba(3,7,14,0.92))`,
+        padding: "14px",
+        display: "grid",
+        gap: "10px",
+        minHeight: "112px",
+        boxShadow: `inset 0 0 0 1px ${accent}14`,
+      }}
+    >
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          gap: "10px",
+          color: accent,
+        }}
+      >
+        <span
+          style={{
+            color: "var(--nexus-faint)",
+            fontSize: "11px",
+            fontWeight: 900,
+            letterSpacing: "1.4px",
+            textTransform: "uppercase",
+          }}
+        >
+          {label}
+        </span>
+        {icon}
+      </div>
+      <div
+        style={{
+          color: "var(--nexus-text)",
+          fontFamily: "var(--font-display)",
+          fontSize: "20px",
+          fontWeight: 900,
+          letterSpacing: "0.6px",
+        }}
+      >
+        {value}
+      </div>
+      <div style={{ color: "var(--nexus-muted)", fontSize: "12px", lineHeight: 1.45 }}>
+        {detail}
+      </div>
+    </div>
   );
 }
 

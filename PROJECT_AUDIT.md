@@ -220,6 +220,7 @@ Hecho:
 - [x] CTA hacia `/profile?tab=accounts` cuando falta Discord vinculado.
 - [x] UI activa refinada: replay sólo en `COMPLETED`, Discord sólo en `PLAYING`, cards de veto más altas, flujo compacto.
 - [x] Panel de estadísticas/replay post-match estilo telemetry.
+- [x] Retratos de héroes en filas de estadísticas StormReplay, con fallback por iniciales.
 
 Pendiente:
 
@@ -378,7 +379,7 @@ Pendiente:
 - [x] MVP voting.
 - [x] Replay upload/snapshot.
 - [x] Replay auto-winner con reglas de confianza.
-- [~] Validación con más gente real pendiente.
+- [~] Validación con más gente real pendiente; sanity check de match simulado en front reportado OK el 2026-04-27.
 
 ### Fase 3.5 — Discord competitivo por match
 
@@ -442,13 +443,13 @@ Pendiente:
 2. [ ] Agregar checklist/endpoint admin para discrepancias de replay.
 3. [ ] Endurecer rate limits por dominio: queue, vote, veto, chat, profile.
 4. [x] Definir CSRF strategy para endpoints con cookie — origin/referer guard en auth `refresh`/`logout`, 2026-04-27.
-5. [~] Crear tests mínimos de rutas críticas — iniciado con `auth.router.test.ts` para CSRF/origin guard; faltan matchmaking, match completion, replay decision y admin guard.
+5. [~] Crear tests mínimos de rutas críticas — iniciado con `auth.router.test.ts` para CSRF/origin guard y `matches.service.test.ts` para replay decision; faltan matchmaking, match completion completo y admin guard.
 
 ### P2 — Producto / UX
 
 1. [ ] QA con jugadores reales y anotar fricciones.
 2. [ ] Pulir Admin para moderación diaria: filtros, confirmaciones, reportes, disputas.
-3. [~] Mejorar Profile/Stats: iniciado en `/stats` con trend MMR, forma reciente, map pool y replay evidence; faltan rol/héroe y persistencia estadística más profunda.
+3. [~] Mejorar Profile/Stats: `/profile` ya redujo repetición y agrega preparación competitiva; `/stats` tiene trend MMR, forma reciente, map pool y replay evidence; faltan rol/héroe y persistencia estadística más profunda.
 4. [~] Mejorar Leaderboard con filtros país/rol/rango/temporada — país/rol/rango implementado; temporada pendiente.
 5. [ ] Revisar MatchRoom visual en mobile/tablet.
 

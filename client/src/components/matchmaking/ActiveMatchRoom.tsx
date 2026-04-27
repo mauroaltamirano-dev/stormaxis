@@ -1,6 +1,14 @@
 import type { ChangeEvent, CSSProperties, ReactNode } from "react";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { HOTS_MAPS, MAP_ID_BY_NAME, MAP_NAME_BY_ID } from "@nexusgg/shared";
+import {
+  HERO_BY_ID,
+  HERO_ID_BY_NAME,
+  HOTS_HEROES,
+  HOTS_MAPS,
+  MAP_ID_BY_NAME,
+  MAP_NAME_BY_ID,
+  type HotsHero,
+} from "@nexusgg/shared";
 import { RankBadge } from "../RankBadge";
 import { getMatchLifecycleMeta } from "../../lib/competitiveStatus";
 import { getCountryFlag } from "../../lib/countries";
@@ -1913,13 +1921,12 @@ function ReplayPlayerStatRow({
       ? player.battleTag
       : player.name;
   const kda = `${formatReplayNumber(player.kills)}/${formatReplayNumber(player.deaths)}/${formatReplayNumber(player.assists)}`;
+  const hero = findReplayHeroByName(player.hero);
 
   return (
     <div style={replayPlayerRowStyle(tone, player.won, isCurrentUser)}>
       <div style={replayPlayerIdentityCellStyle}>
-        <div style={heroEmblemStyle(tone, player.won)}>
-          {(player.hero ?? "??").slice(0, 2).toUpperCase()}
-        </div>
+        <ReplayHeroPortrait hero={hero} fallbackName={player.hero} tone={tone} won={player.won} />
         <div style={{ minWidth: 0 }}>
           <div style={playerDossierNameRowStyle}>
             <strong>{displayName}</strong>
@@ -1958,6 +1965,47 @@ function ReplayPlayerStatRow({
         max={maxValues.experience}
         tone="#f59e0b"
       />
+    </div>
+  );
+}
+
+function ReplayHeroPortrait({
+  hero,
+  fallbackName,
+  tone,
+  won,
+}: {
+  hero: HotsHero | null;
+  fallbackName: string | null | undefined;
+  tone: string;
+  won: boolean;
+}) {
+  const [srcIndex, setSrcIndex] = useState(0);
+  const [loaded, setLoaded] = useState(false);
+  const sources = hero ? getHeroImageSources(hero) : [];
+  const src = sources[srcIndex];
+  const fallback = (hero?.name ?? fallbackName ?? "??").slice(0, 2).toUpperCase();
+
+  return (
+    <div style={heroEmblemStyle(tone, won, Boolean(src))}>
+      {src ? (
+        <img
+          src={src}
+          alt={hero?.name ?? fallbackName ?? "Héroe"}
+          loading="lazy"
+          decoding="async"
+          style={{
+            ...replayHeroPortraitImageStyle,
+            opacity: loaded ? 0.92 : 0,
+          }}
+          onLoad={() => setLoaded(true)}
+          onError={() => {
+            setLoaded(false);
+            setSrcIndex((current) => current + 1);
+          }}
+        />
+      ) : null}
+      {!loaded && <span style={replayHeroFallbackStyle}>{fallback}</span>}
     </div>
   );
 }
@@ -2972,6 +3020,27 @@ function normalizeReplayIdentity(value: string | null | undefined) {
     .replace(/[^a-z0-9]+/g, "");
 }
 
+function findReplayHeroByName(name: string | null | undefined) {
+  if (!name) return null;
+  const direct = HERO_ID_BY_NAME[name];
+  if (direct) return HERO_BY_ID[direct] ?? null;
+
+  const normalized = normalizeReplayIdentity(name);
+  return (
+    HOTS_HEROES.find(
+      (hero) =>
+        normalizeReplayIdentity(hero.name) === normalized ||
+        normalizeReplayIdentity(hero.id) === normalized,
+    ) ?? null
+  );
+}
+
+function getHeroImageSources(hero: HotsHero) {
+  const base = hero.portrait.replace(/\.(webp|avif)$/i, "");
+  const ext = hero.portrait.match(/\.(webp|avif)$/i)?.[1]?.toLowerCase();
+  return [hero.portrait, `${base}.${ext === "avif" ? "webp" : "avif"}`];
+}
+
 function findMatchPlayerForReplay(
   matchPlayers: Player[],
   replayPlayer: ReplayPlayerSummary,
@@ -3834,10 +3903,16 @@ function telemetryMiniStatStyle(tone: string): CSSProperties {
   };
 }
 
-function heroEmblemStyle(tone: string, won: boolean): CSSProperties {
+function heroEmblemStyle(
+  tone: string,
+  won: boolean,
+  hasImage = false,
+): CSSProperties {
   return {
     width: "48px",
     height: "48px",
+    position: "relative",
+    overflow: "hidden",
     display: "grid",
     placeItems: "center",
     border: `1px solid ${tone}5a`,
@@ -3848,8 +3923,32 @@ function heroEmblemStyle(tone: string, won: boolean): CSSProperties {
     fontWeight: 950,
     letterSpacing: "0.08em",
     boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 0 20px ${tone}12`,
+    isolation: "isolate",
+    flexShrink: 0,
+    ...(hasImage
+      ? {
+          background: `linear-gradient(180deg, rgba(2,6,23,0.06), rgba(2,6,23,0.42)), ${won ? `${tone}18` : "rgba(15,23,42,0.72)"}`,
+        }
+      : {}),
   };
 }
+
+const replayHeroPortraitImageStyle: CSSProperties = {
+  position: "absolute",
+  inset: 0,
+  width: "100%",
+  height: "100%",
+  objectFit: "cover",
+  filter: "saturate(1.08) contrast(1.04)",
+  transition: "opacity 160ms ease",
+  zIndex: 0,
+};
+
+const replayHeroFallbackStyle: CSSProperties = {
+  position: "relative",
+  zIndex: 1,
+  textShadow: "0 1px 10px rgba(0,0,0,0.62)",
+};
 
 const playerDossierNameRowStyle: CSSProperties = {
   display: "flex",
