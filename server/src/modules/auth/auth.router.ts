@@ -1,4 +1,4 @@
-import { Router } from 'express'
+import { NextFunction, Request, Response, Router } from 'express'
 import { randomUUID } from 'crypto'
 import { rateLimit } from 'express-rate-limit'
 import { z } from 'zod'
@@ -95,6 +95,31 @@ function getRequestClientOrigin(req: any): string | undefined {
   } catch {
     return undefined
   }
+}
+
+export function requireTrustedCookieRequest(req: Request, _res: Response, next: NextFunction) {
+  const origin = req.get('origin')
+  if (origin) {
+    if (isAllowedClientOrigin(origin)) return next()
+    return next(Errors.FORBIDDEN())
+  }
+
+  const referer = req.get('referer')
+  if (referer) {
+    try {
+      const refererOrigin = new URL(referer).origin
+      if (isAllowedClientOrigin(refererOrigin)) return next()
+    } catch {
+      // Fall through to forbidden below.
+    }
+    return next(Errors.FORBIDDEN())
+  }
+
+  // Non-browser clients and local tooling often omit Origin/Referer. In production,
+  // cookie-backed mutations must prove they came from an allowed frontend origin.
+  if (process.env.NODE_ENV !== 'production') return next()
+
+  return next(Errors.FORBIDDEN())
 }
 
 function getDiscordRedirectUriForRequest(req: any) {
@@ -269,7 +294,7 @@ authRouter.post('/login', authLimiter, async (req, res, next) => {
 
 // ─── Refresh ──────────────────────────────────────────────
 
-authRouter.post('/refresh', async (req, res, next) => {
+authRouter.post('/refresh', requireTrustedCookieRequest, async (req, res, next) => {
   try {
     const token = req.cookies?.refreshToken as string | undefined
     if (!token) throw Errors.UNAUTHORIZED()
@@ -288,7 +313,7 @@ authRouter.post('/refresh', async (req, res, next) => {
 
 // ─── Logout ───────────────────────────────────────────────
 
-authRouter.post('/logout', authenticate, async (req, res, next) => {
+authRouter.post('/logout', requireTrustedCookieRequest, authenticate, async (req, res, next) => {
   try {
     await cleanupUserMatchmakingSession(
       (req as AuthRequest).userId,

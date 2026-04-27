@@ -22,7 +22,8 @@
     "redis:up": "docker compose up -d redis",
     "redis:down": "docker compose down",
     "redis:logs": "docker compose logs -f redis",
-    "tunnel": "./bin/cloudflared tunnel --url http://localhost:5173"
+    "tunnel": "./bin/cloudflared tunnel --url http://localhost:5173",
+    "test": "npm run test --workspace=server"
   },
   "devDependencies": {
     "concurrently": "^9.1.0",

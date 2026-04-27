@@ -11,7 +11,8 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:recalculate-stats": "tsx prisma/recalculate-user-stats.ts",
     "db:generate": "prisma generate",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test src/modules/auth/auth.router.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1036.0",
