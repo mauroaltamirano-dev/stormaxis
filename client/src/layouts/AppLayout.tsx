@@ -34,6 +34,7 @@ import {
 } from "../lib/competitiveStatus";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
 import { getCountryFlag } from "../lib/countries";
+import { MatchFoundModal } from "../components/matchmaking/MatchFoundModal";
 
 type SearchResult = {
   id: string;
@@ -75,6 +76,8 @@ type NavItem = {
 
 const primaryNav: NavItem[] = [
   { label: "Jugar", icon: Swords, to: "/dashboard" },
+  { label: "Equipos", icon: Users, to: "/teams", badge: "beta" },
+  { label: "Scrims", icon: Swords, to: "/scrims", badge: "beta" },
   { label: "Leaderboard", icon: Trophy, to: "/leaderboard" },
   { label: "Estadísticas", icon: BarChart3, to: "/stats", badge: "beta" },
   { label: "Hero Lab", icon: Sparkles, to: "/heroes", badge: "beta" },
@@ -129,6 +132,8 @@ export function AppLayout() {
     pendingMatch,
     queuePosition,
     queueEtaSeconds,
+    setMatchFound,
+    clearPendingMatch,
     resetMatchmaking,
   } = useMatchmakingStore();
   const navigate = useNavigate();
@@ -215,6 +220,30 @@ export function AppLayout() {
   }, [resetMatchmaking]);
 
   useEffect(() => {
+    const socket = getSocket();
+
+    const onMatchFound = (payload: any) => {
+      setMatchFound(payload);
+    };
+
+    const onVetoStart = (payload?: { matchId?: string }) => {
+      const targetMatchId = payload?.matchId ?? pendingMatch?.matchId;
+      clearPendingMatch();
+      if (targetMatchId) {
+        navigate({ to: "/match/$matchId", params: { matchId: targetMatchId } });
+      }
+    };
+
+    socket.on("matchmaking:found", onMatchFound);
+    socket.on("veto:start", onVetoStart);
+
+    return () => {
+      socket.off("matchmaking:found", onMatchFound);
+      socket.off("veto:start", onVetoStart);
+    };
+  }, [clearPendingMatch, navigate, pendingMatch?.matchId, setMatchFound]);
+
+  useEffect(() => {
     if (!user) return;
 
     let cancelled = false;
@@ -229,6 +258,7 @@ export function AppLayout() {
         const match = data.match;
         if (!match) {
           setActiveMatchSnapshot(null);
+          clearPendingMatch();
           return;
         }
 
@@ -244,8 +274,17 @@ export function AppLayout() {
           readyCount,
           totalPlayers,
         });
+
+        if (match.status === "ACCEPTING" && match.pending) {
+          setMatchFound(match.pending);
+        } else {
+          clearPendingMatch();
+        }
       } catch {
-        if (!cancelled) setActiveMatchSnapshot(null);
+        if (!cancelled) {
+          setActiveMatchSnapshot(null);
+          clearPendingMatch();
+        }
       }
     }
 
@@ -255,7 +294,7 @@ export function AppLayout() {
       cancelled = true;
       window.clearInterval(interval);
     };
-  }, [pathname, user]);
+  }, [clearPendingMatch, pathname, setMatchFound, user]);
 
   useEffect(() => {
     if (!user) return;
@@ -539,6 +578,8 @@ export function AppLayout() {
       <main style={styles.mainStage}>
         <Outlet />
       </main>
+
+      {pendingMatch && <MatchFoundModal match={pendingMatch} />}
 
       {activeSpinePanel === "history" && (
         <SpineFlyout

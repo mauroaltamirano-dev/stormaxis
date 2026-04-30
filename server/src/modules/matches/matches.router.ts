@@ -11,6 +11,7 @@ import { calculateRank } from '../users/player-progression'
 import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
 import { ingestMatchReplay, listMatchReplayUploads, persistReplayUploadSummary } from './replay-processor.service'
 import { getReplayUploadTempDir } from './replay-storage.service'
+import { attachScrimDetailsToMatch, attachScrimDetailsToMatches, listScrimAccessForMatch } from '../scrims/scrims.service'
 
 export const matchesRouter = Router()
 
@@ -45,7 +46,7 @@ const replayUpload = multer({
 matchesRouter.get('/live', async (req, res, next) => {
   try {
     const authReq = req as unknown as AuthRequest
-    const matches = await db.match.findMany({
+    const matches = await (db.match as any).findMany({
       where: { status: { in: ['VETOING', 'PLAYING', 'VOTING'] } },
       include: {
         players: {
@@ -65,13 +66,14 @@ matchesRouter.get('/live', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: 12,
     })
+    const matchesWithScrimDetails = await attachScrimDetailsToMatches(matches)
 
     const enriched = await Promise.all(
-      matches.map(async (match) => {
+      matchesWithScrimDetails.map(async (match: any) => {
         const runtime = await getRealtimeMatchMeta(match.id)
-        const humanPlayers = match.players.filter((player) => !player.isBot)
+        const humanPlayers = match.players.filter((player: any) => !player.isBot)
         const readyCount = runtime.ready?.readyBy.length ?? 0
-        const viewerPlayer = match.players.find((player) => player.userId === authReq.userId)
+        const viewerPlayer = match.players.find((player: any) => player.userId === authReq.userId)
 
         return {
           id: match.id,
@@ -79,6 +81,7 @@ matchesRouter.get('/live', async (req, res, next) => {
           mode: match.mode,
           region: match.region,
           selectedMap: match.selectedMap,
+          scrimDetails: match.scrimDetails ?? null,
           createdAt: match.createdAt,
           startedAt: match.startedAt,
           viewerTeam: viewerPlayer?.team ?? null,
@@ -87,8 +90,8 @@ matchesRouter.get('/live', async (req, res, next) => {
           voteCounts: runtime.voteCounts,
           teams: {
             1: match.players
-              .filter((player) => player.team === 1)
-              .map((player) => ({
+              .filter((player: any) => player.team === 1)
+              .map((player: any) => ({
                 userId: player.userId,
                 username: player.user?.username ?? player.botName ?? 'TestBot',
                 avatar: player.user?.avatar ?? null,
@@ -97,8 +100,8 @@ matchesRouter.get('/live', async (req, res, next) => {
                 isBot: player.isBot,
               })),
             2: match.players
-              .filter((player) => player.team === 2)
-              .map((player) => ({
+              .filter((player: any) => player.team === 2)
+              .map((player: any) => ({
                 userId: player.userId,
                 username: player.user?.username ?? player.botName ?? 'TestBot',
                 avatar: player.user?.avatar ?? null,
@@ -120,7 +123,7 @@ matchesRouter.get('/live', async (req, res, next) => {
 matchesRouter.get('/:matchId', async (req, res, next) => {
   try {
     const authReq = req as unknown as AuthRequest
-    const match = await db.match.findUnique({
+    const match = await (db.match as any).findUnique({
       where: { id: req.params.matchId },
       include: {
         players: {
@@ -153,7 +156,8 @@ matchesRouter.get('/:matchId', async (req, res, next) => {
       },
     })
     if (!match) throw Errors.NOT_FOUND('Match')
-    const [runtime, mvpVotes, mvpRecord, discordVoice] = await Promise.all([
+    const matchWithScrimDetails = await attachScrimDetailsToMatch(match)
+    const [runtime, mvpVotes, mvpRecord, discordVoice, scrimAccess] = await Promise.all([
       getRealtimeMatchMeta(req.params.matchId),
       db.$queryRaw<Array<{ userId: string; nomineeUserId: string }>>`
         SELECT "userId", "nomineeUserId" FROM "MvpVote" WHERE "matchId" = ${req.params.matchId}
@@ -162,15 +166,17 @@ matchesRouter.get('/:matchId', async (req, res, next) => {
         SELECT "mvpUserId" FROM "Match" WHERE "id" = ${req.params.matchId}
       `,
       getDiscordVoiceAccessForUser(req.params.matchId, authReq.userId),
+      listScrimAccessForMatch(req.params.matchId),
     ])
     res.json({
-      ...match,
+      ...matchWithScrimDetails,
       mvpUserId: mvpRecord[0]?.mvpUserId ?? null,
       mvpVotes,
       discordVoice,
+      scrimAccess,
       runtime,
       replayUploads: await listMatchReplayUploads(req.params.matchId, 3),
-      players: match.players.map((player) => ({
+      players: matchWithScrimDetails.players.map((player: any) => ({
         ...player,
         user: player.user
           ? {
@@ -179,7 +185,7 @@ matchesRouter.get('/:matchId', async (req, res, next) => {
               winrate: player.user.wins + player.user.losses > 0
                 ? Math.round((player.user.wins / (player.user.wins + player.user.losses)) * 100)
                 : 0,
-              recentMatches: (player.user.matchPlayers ?? []).map((mp) => ({
+              recentMatches: (player.user.matchPlayers ?? []).map((mp: any) => ({
                 won: mp.match.winner === mp.team,
                 map: mp.match.selectedMap ?? null,
                 date: mp.match.createdAt,
@@ -239,7 +245,7 @@ matchesRouter.post('/:matchId/replays', replayUpload.single('replay'), async (re
     })
     if (!match) throw Errors.NOT_FOUND('Match')
 
-    const viewerPlayer = match.players.find((player) => player.userId === authReq.userId)
+    const viewerPlayer = match.players.find((player: any) => player.userId === authReq.userId)
     const canUpload = authReq.userRole === 'ADMIN' || Boolean(viewerPlayer?.isCaptain)
     if (!canUpload) throw Errors.FORBIDDEN()
 

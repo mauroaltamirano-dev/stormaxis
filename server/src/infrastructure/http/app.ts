@@ -10,6 +10,8 @@ import { matchmakingRouter } from '../../modules/matchmaking/matchmaking.router'
 import { matchesRouter } from '../../modules/matches/matches.router'
 import { leaderboardRouter } from '../../modules/leaderboard/leaderboard.router'
 import { adminRouter } from '../../modules/admin/admin.router'
+import { teamsRouter } from '../../modules/teams/teams.router'
+import { scrimsRouter } from '../../modules/scrims/scrims.router'
 import { redis, REDIS_KEYS } from '../redis/client'
 import { logger } from '../logging/logger'
 
@@ -147,6 +149,8 @@ export function createApp() {
   app.use('/api/matchmaking', matchmakingRouter)
   app.use('/api/matches', matchesRouter)
   app.use('/api/leaderboard', leaderboardRouter)
+  app.use('/api/teams', teamsRouter)
+  app.use('/api/scrims', scrimsRouter)
   app.use('/api/admin', adminRouter)
 
   // Error handler (must be last)

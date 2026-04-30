@@ -291,6 +291,15 @@ usersRouter.get('/:username/matches', async (req, res, next) => {
           select: {
             id: true, status: true, selectedMap: true, winner: true,
             createdAt: true, endedAt: true,
+            scrimDetails: {
+              select: {
+                team1Name: true,
+                team2Name: true,
+                team1Id: true,
+                team2Id: true,
+                challengeId: true,
+              },
+            },
             replayUploads: {
               where: { status: 'PARSED' },
               select: {

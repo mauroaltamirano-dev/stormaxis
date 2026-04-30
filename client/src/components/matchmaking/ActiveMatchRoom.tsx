@@ -47,10 +47,19 @@ type Player = {
 type MatchState = {
   id: string;
   status: MatchStatus;
+  origin?: "QUEUE" | "SCRIM_SELF_SERVE" | "SCRIM_ADMIN" | string;
   selectedMap?: string | null;
   winner?: 1 | 2 | null;
   mvpUserId?: string | null;
   duration?: number | null;
+  mode?: string;
+  scrimDetails?: { team1Name: string; team2Name: string; notes?: string | null; scheduledAt?: string | null } | null;
+  scrimAccess?: Array<{
+    userId: string;
+    team: 1 | 2;
+    role: "COACH" | "OBSERVER";
+    user?: { id: string; username: string; avatar: string | null; mmr?: number };
+  }>;
   players: Player[];
   vetoes: Array<{
     mapId: string;
@@ -316,6 +325,7 @@ export function ActiveMatchRoom({
       match.mvpUserId ?? null,
       presenceKnown ? onlineUserIds : null,
       mvpVoteCounts,
+      match.scrimDetails?.team1Name,
     );
     const right = toDisplayTeam(
       match.players.filter((player) => player.team === 2),
@@ -325,9 +335,15 @@ export function ActiveMatchRoom({
       match.mvpUserId ?? null,
       presenceKnown ? onlineUserIds : null,
       mvpVoteCounts,
+      match.scrimDetails?.team2Name,
     );
     return { left, right };
-  }, [match.players, match.status, match.winner, match.mvpUserId, onlineUserIds, presenceKnown, mvpVoteCounts]);
+  }, [match.players, match.status, match.winner, match.mvpUserId, match.scrimDetails?.team1Name, match.scrimDetails?.team2Name, onlineUserIds, presenceKnown, mvpVoteCounts]);
+
+  const scrimCoaches = useMemo(
+    () => (match.scrimAccess ?? []).filter((entry) => entry.role === "COACH"),
+    [match.scrimAccess],
+  );
 
   const currentPlayer = match.players.find(
     (player) => player.userId === currentUserId,
@@ -476,6 +492,23 @@ export function ActiveMatchRoom({
         />
       )}
 
+      {scrimCoaches.length > 0 && (
+        <StageCard
+          title="Staff de scrim"
+          subtitle="Coach visible en web; observers/suplentes mantienen acceso privado sin afectar stats"
+          tone="#22d3ee"
+        >
+          <div style={{ display: "grid", gap: 8 }}>
+            {scrimCoaches.map((coach) => (
+              <div key={coach.userId} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: 10, border: "1px solid rgba(34,211,238,.25)", borderRadius: 12, background: "rgba(8,145,178,.12)" }}>
+                <strong>{coach.user?.username ?? "Coach"}</strong>
+                <span style={{ color: "#67e8f9" }}>Coach · {coach.team === 1 ? teams.left.name : teams.right.name}</span>
+              </div>
+            ))}
+          </div>
+        </StageCard>
+      )}
+
       {showDiscordVoicePanel && (
         <StageCard
           title="Discord por equipo"
@@ -499,7 +532,7 @@ export function ActiveMatchRoom({
                 ? "El link se mantiene visible para que nadie se quede afuera si todavía no abrió Discord."
                 : match.discordVoice?.status === "missing_link"
                   ? "Podés seguir en la sala sin voice, pero no vas a recibir enlace privado hasta vincular tu cuenta."
-                  : "El sistema solo expone enlaces privados al jugador participante de ese equipo."
+                  : "El sistema expone enlaces privados a titulares y staff asignado de ese equipo."
             }
             rightSlot={
               match.discordVoice?.status === "ready" &&
@@ -994,9 +1027,9 @@ export function ActiveMatchRoom({
           cancelRequestedByMe={cancelRequestedByMe}
           onCancelMatch={onCancelMatch}
           onBack={onBack}
+          compact={isMobile}
         />
 
-        <MatchTimeline status={match.status} allConnected={allConnected} />
 
         {isSpectator && (
           <div style={infoBannerStyle}>
@@ -1088,6 +1121,7 @@ function RoomCommandHeader({
   cancelRequestedByMe,
   onCancelMatch,
   onBack,
+  compact,
 }: {
   match: MatchState;
   selectedMap: string;
@@ -1101,6 +1135,7 @@ function RoomCommandHeader({
   cancelRequestedByMe: boolean;
   onCancelMatch: () => void;
   onBack: () => void;
+  compact: boolean;
 }) {
   const winnerTeam =
     match.winner === 1 || match.winner === 2 ? match.winner : null;
@@ -1109,30 +1144,48 @@ function RoomCommandHeader({
   const mapImageUrl = getMapImageUrl(mapName);
   const leftWon = winnerTeam === 1;
   const rightWon = winnerTeam === 2;
+  const isScrimMatch =
+    Boolean(match.scrimDetails) ||
+    match.origin === "SCRIM_SELF_SERVE" ||
+    match.origin === "SCRIM_ADMIN" ||
+    match.mode === "TEAM";
   const humanPlayersCount = match.players.filter(
     (player) => !player.isBot,
   ).length;
 
   return (
-    <header style={commandHeaderStyle(mapImageUrl, accent)}>
+    <header style={commandHeaderStyle(mapImageUrl, accent, compact)}>
       <div style={commandHeaderOverlayStyle} />
       <div style={commandHeaderToplineStyle}>
         <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
           <div style={{ ...eyebrowStyle, color: accent }}>
             Nexus command room
           </div>
-          <h1 style={commandTitleStyle}>MatchRoom Active</h1>
+          <h1 style={commandTitleStyle(compact)}>MatchRoom Active</h1>
           <div style={commandSublineStyle}>
             <span style={{ color: accent, fontWeight: 950 }}>
               {statusMeta.phase}
+            </span>
+            <span
+              style={{
+                padding: "0.1rem 0.35rem",
+                border: `1px solid ${isScrimMatch ? "rgba(125,211,252,0.45)" : "rgba(148,163,184,0.28)"}`,
+                color: isScrimMatch ? "#7dd3fc" : "#cbd5e1",
+                fontWeight: 800,
+                fontSize: "0.7rem",
+                letterSpacing: "0.04em",
+              }}
+            >
+              {isScrimMatch ? "SCRIM" : "QUEUE"}
             </span>
             <span>{statusMeta.stage ?? statusMeta.detail}</span>
             <span>·</span>
             <span>{mapName}</span>
           </div>
+          <MatchTimeline status={match.status} allConnected={allConnected} />
         </div>
 
-        <div style={commandActionsStyle}>
+        <div style={commandActionsStyle(compact)}>
           {canRequestCancel && (
             <button
               onClick={onCancelMatch}
@@ -1152,12 +1205,13 @@ function RoomCommandHeader({
         </div>
       </div>
 
-      <div style={commandVersusGridStyle}>
+      <div style={commandVersusGridStyle(compact)}>
         <CommandTeamPlate
           team={teams.left}
           teamNumber={1}
           won={leftWon}
           completed={match.status === "COMPLETED"}
+          compact={compact}
         />
         <div style={commandCenterBladeStyle(accent)}>
           <span>
@@ -1183,6 +1237,7 @@ function RoomCommandHeader({
           teamNumber={2}
           won={rightWon}
           completed={match.status === "COMPLETED"}
+          compact={compact}
         />
       </div>
     </header>
@@ -1194,16 +1249,18 @@ function CommandTeamPlate({
   teamNumber,
   won,
   completed,
+  compact,
 }: {
   team: ReturnType<typeof toDisplayTeam>;
   teamNumber: 1 | 2;
   won: boolean;
   completed: boolean;
+  compact: boolean;
 }) {
   const tone = TEAM_COLORS[teamNumber].accent;
 
   return (
-    <div style={commandTeamPlateStyle(tone, won)}>
+    <div style={commandTeamPlateStyle(tone, won, compact)}>
       <div style={{ display: "grid", gap: "0.18rem", minWidth: 0 }}>
         <span style={{ ...eyebrowStyle, color: tone }}>
           {teamNumber === 1 ? "Blue side" : "Red side"}
@@ -1245,27 +1302,6 @@ function MatchClosureArchive({
 
   return (
     <div style={closureArchiveStyle}>
-      <div style={closureArchiveColumnStyle}>
-        <span style={{ ...eyebrowStyle, color: "#7dd3fc" }}>Vetos</span>
-        <div style={closureChipWrapStyle}>
-          {match.vetoes.length > 0 ? (
-            [...match.vetoes]
-              .sort((a, b) => a.order - b.order)
-              .map((veto) => (
-                <span
-                  key={`${veto.order}-${veto.mapId}`}
-                  style={closureChipStyle(TEAM_COLORS[veto.team].accent)}
-                >
-                  #{veto.order + 1} {veto.team === 1 ? teams.left.name : teams.right.name} · {veto.mapName}
-                  {veto.auto ? " · auto" : ""}
-                </span>
-              ))
-          ) : (
-            <span style={closureMutedStyle}>Sin vetos registrados.</span>
-          )}
-        </div>
-      </div>
-
       <div style={closureArchiveColumnStyle}>
         <span style={{ ...eyebrowStyle, color: "#c084fc" }}>Votos de ganador</span>
         <div style={closureVoteGridStyle}>
@@ -1322,6 +1358,20 @@ type ReplayMetricKey =
   | "gameScore"
   | "highestKillStreak";
 type MatchPostTab = "overview" | "stats";
+
+const STAT_ICON = {
+  combat: "/brand/comp.webp",
+  takedowns: "/brand/winStreak.webp",
+  heroDamage: "/roles/ranged.png",
+  siegeDamage: "/roles/offlane.svg",
+  healing: "/roles/healer.png",
+  experience: "/brand/matches.webp",
+  mercs: "/roles/flex.png",
+  tank: "/roles/tank.svg",
+  mvp: "/ranked/champion.webp",
+  trust: "/brand/logo.webp",
+} as const;
+
 
 function MatchTelemetryPanel({
   match,
@@ -1380,17 +1430,6 @@ function MatchTelemetryPanel({
   const topTank = getTopReplayPlayer(parsedPlayers, "damageTaken");
   const topCc = getTopReplayPlayer(parsedPlayers, "ccTime");
   const topMercs = getTopReplayPlayer(parsedPlayers, "mercCampCaptures");
-  const matchMvpPlayer = getReplayPlayerForMatchUser(
-    parsedPlayers,
-    match.players,
-    match.mvpUserId ?? null,
-  );
-  const totalHeroDamage = sumReplayMetric(parsedPlayers, "heroDamage");
-  const totalSiegeDamage = sumReplayMetric(parsedPlayers, "siegeDamage");
-  const totalHealing = sumReplayMetric(parsedPlayers, "healing");
-  const totalExperience = sumReplayMetric(parsedPlayers, "experience");
-  const totalTakedowns = sumReplayMetric(parsedPlayers, "takedowns");
-  const totalMercs = sumReplayMetric(parsedPlayers, "mercCampCaptures");
   const teamOneTotals = getTeamReplayTotals(parsedPlayers, 1);
   const teamTwoTotals = getTeamReplayTotals(parsedPlayers, 2);
   const maxValues = {
@@ -1521,13 +1560,16 @@ function MatchTelemetryPanel({
                 label="Parser"
                 value={latest?.parserStatus ?? latest?.status ?? "Sin replay"}
                 tone={statusTone}
+                iconSrc={STAT_ICON.combat}
               />
               <TelemetryKpi
                 label="Modo"
                 value={latest?.parsedGameMode ?? replayMatch?.gameMode ?? "—"}
                 tone="#7dd3fc"
+                iconSrc={STAT_ICON.experience}
               />
               <TelemetryKpi
+                iconSrc={STAT_ICON.mvp}
                 label="Jugadores"
                 value={
                   typeof validation?.matchedPlayers === "number"
@@ -1544,16 +1586,19 @@ function MatchTelemetryPanel({
                 }
               />
               <TelemetryKpi
+                iconSrc={STAT_ICON.trust}
                 label="Confianza"
                 value={formatReplayTrust(identityConfidence, trustScore)}
                 tone={getReplayTrustTone(identityConfidence, trustScore)}
               />
               <TelemetryKpi
+                iconSrc={STAT_ICON.combat}
                 label="Resolución"
                 value={getReplayResolutionLabel(resolution?.status)}
                 tone={resolutionTone}
               />
               <TelemetryKpi
+                iconSrc={STAT_ICON.experience}
                 label="Build"
                 value={formatNullableNumber(
                   latest?.parsedBuild ?? replayMatch?.build,
@@ -1561,6 +1606,7 @@ function MatchTelemetryPanel({
                 tone="#c084fc"
               />
               <TelemetryKpi
+                iconSrc={STAT_ICON.mercs}
                 label="Fecha"
                 value={formatReplayDate(
                   latest?.parsedGameDate ?? replayMatch?.gameDate,
@@ -1598,8 +1644,13 @@ function MatchTelemetryPanel({
         </>
       ) : (
         <>
+          <StatsSectionHeader
+            kicker="Combat dossier"
+            title="Lectura rápida de la partida"
+            description="Los picos de impacto salen del replay: quién abrió el mapa, quién sostuvo peleas y qué rol cargó la macro."
+            iconSrc={STAT_ICON.combat}
+          />
           <ReplayReportHighlights
-            mvp={matchMvpPlayer}
             topDamage={topDamage}
             topSiege={topSiege}
             topHealing={topHealing}
@@ -1609,60 +1660,14 @@ function MatchTelemetryPanel({
             topMercs={topMercs}
           />
 
-          <div style={combatKpiGridStyle(narrow)}>
-            <TelemetryKpi
-              label="Derribos"
-              value={formatReplayNumber(totalTakedowns)}
-              tone="#facc15"
-              large
-            />
-            <TelemetryKpi
-              label="Hero damage"
-              value={formatReplayNumber(totalHeroDamage)}
-              tone="#38bdf8"
-              large
-            />
-            <TelemetryKpi
-              label="Siege damage"
-              value={formatReplayNumber(totalSiegeDamage)}
-              tone="#fb7185"
-              large
-            />
-            <TelemetryKpi
-              label="Healing"
-              value={formatReplayNumber(totalHealing)}
-              tone="#4ade80"
-              large
-            />
-            <TelemetryKpi
-              label="XP total"
-              value={formatReplayNumber(totalExperience)}
-              tone="#f59e0b"
-              large
-            />
-            <TelemetryKpi
-              label="Top daño"
-              value={topDamage ? getReplayPlayerShortName(topDamage) : "—"}
-              tone="#38bdf8"
-            />
-            <TelemetryKpi
-              label="Merc camps"
-              value={formatReplayNumber(totalMercs)}
-              tone="#a78bfa"
-            />
-            <TelemetryKpi
-              label="Top heal/soak"
-              value={
-                topHealing
-                  ? getReplayPlayerShortName(topHealing)
-                  : topXp
-                    ? getReplayPlayerShortName(topXp)
-                    : "—"
-              }
-              tone="#4ade80"
-            />
-          </div>
 
+
+          <StatsSectionHeader
+            kicker="Team telemetry"
+            title="Comparativa por equipo"
+            description="Totales arriba, dossiers de jugador abajo. Las barras muestran peso relativo dentro de la partida."
+            iconSrc={STAT_ICON.mvp}
+          />
           <ReplayTeamStatsBoard
             matchPlayers={match.players}
             replayPlayers={parsedPlayers}
@@ -1717,23 +1722,54 @@ function TelemetryKpi({
   label,
   value,
   tone,
+  iconSrc,
   large = false,
 }: {
   label: string;
   value: string;
   tone: string;
+  iconSrc?: string;
   large?: boolean;
 }) {
   return (
     <div style={telemetryKpiStyle(tone, large)}>
-      <span>{label}</span>
-      <strong>{value}</strong>
+      {iconSrc && (
+        <span style={telemetryKpiIconStyle(tone)} aria-hidden="true">
+          <img src={iconSrc} alt="" style={telemetryKpiIconImageStyle} />
+        </span>
+      )}
+      <span style={telemetryKpiLabelStyle}>{label}</span>
+      <strong style={telemetryKpiValueStyle(large)}>{value}</strong>
+    </div>
+  );
+}
+
+function StatsSectionHeader({
+  kicker,
+  title,
+  description,
+  iconSrc,
+}: {
+  kicker: string;
+  title: string;
+  description: string;
+  iconSrc: string;
+}) {
+  return (
+    <div style={statsSectionHeaderStyle}>
+      <div style={statsSectionIconStyle}>
+        <img src={iconSrc} alt="" style={statsSectionIconImageStyle} />
+      </div>
+      <div style={{ minWidth: 0 }}>
+        <span style={statsSectionKickerStyle}>{kicker}</span>
+        <strong style={statsSectionTitleStyle}>{title}</strong>
+        <p style={statsSectionDescriptionStyle}>{description}</p>
+      </div>
     </div>
   );
 }
 
 function ReplayReportHighlights({
-  mvp,
   topDamage,
   topSiege,
   topHealing,
@@ -1742,7 +1778,6 @@ function ReplayReportHighlights({
   topCc,
   topMercs,
 }: {
-  mvp: ReplayPlayerSummary | null;
   topDamage: ReplayPlayerSummary | null;
   topSiege: ReplayPlayerSummary | null;
   topHealing: ReplayPlayerSummary | null;
@@ -1753,19 +1788,12 @@ function ReplayReportHighlights({
 }) {
   const cards = [
     {
-      label: "MVP votado",
-      player: mvp,
-      value: mvp?.hero ?? "Sin MVP",
-      tone: "#facc15",
-      metric: null,
-      fallback: "Se completa al cerrar la votación",
-    },
-    {
       label: "Artillero",
       player: topDamage,
       value: formatReplayNumber(topDamage?.heroDamage),
       tone: "#38bdf8",
       metric: "Hero damage",
+      iconSrc: STAT_ICON.heroDamage,
       fallback: "—",
     },
     {
@@ -1774,6 +1802,7 @@ function ReplayReportHighlights({
       value: formatReplayNumber(topSiege?.siegeDamage),
       tone: "#fb7185",
       metric: "Siege damage",
+      iconSrc: STAT_ICON.siegeDamage,
       fallback: "—",
     },
     {
@@ -1784,6 +1813,7 @@ function ReplayReportHighlights({
         : formatReplayNumber(topXp?.experience),
       tone: "#4ade80",
       metric: topHealing ? "Healing" : "XP",
+      iconSrc: topHealing ? STAT_ICON.healing : STAT_ICON.experience,
       fallback: "—",
     },
     {
@@ -1792,6 +1822,7 @@ function ReplayReportHighlights({
       value: formatReplayNumber(topTank?.damageTaken),
       tone: "#c084fc",
       metric: "Daño recibido",
+      iconSrc: STAT_ICON.tank,
       fallback: "—",
     },
     {
@@ -1800,6 +1831,7 @@ function ReplayReportHighlights({
       value: formatDuration(topCc?.ccTime ?? 0),
       tone: "#22d3ee",
       metric: "CC time",
+      iconSrc: STAT_ICON.combat,
       fallback: "—",
     },
     {
@@ -1808,6 +1840,7 @@ function ReplayReportHighlights({
       value: formatReplayNumber(topMercs?.mercCampCaptures),
       tone: "#a78bfa",
       metric: "Merc camps",
+      iconSrc: STAT_ICON.mercs,
       fallback: "—",
     },
   ];
@@ -1816,6 +1849,9 @@ function ReplayReportHighlights({
     <div style={replayHighlightsGridStyle}>
       {cards.map((card) => (
         <article key={card.label} style={replayHighlightCardStyle(card.tone)}>
+          <span style={replayHighlightOrbStyle(card.tone)} aria-hidden="true">
+            <img src={card.iconSrc} alt="" style={replayHighlightIconImageStyle} />
+          </span>
           <div style={{ ...eyebrowStyle, color: card.tone }}>{card.label}</div>
           <strong>{card.player ? getReplayPlayerShortName(card.player) : card.fallback}</strong>
           <span>
@@ -1909,15 +1945,16 @@ function ReplayTeamStatsLane({
 }) {
   const tone = TEAM_COLORS[teamNumber].accent;
   const won = winnerTeam === teamNumber;
+  const [expandedRows, setExpandedRows] = useState<Record<string, boolean>>({});
 
   return (
-    <section style={replayTeamLaneStyle(tone, won)}>
+    <section style={replayTeamLaneStyle(tone, won, TEAM_BACKDROPS[teamNumber])}>
       <div style={replayTeamLaneHeaderStyle}>
         <div>
-          <div style={{ ...eyebrowStyle, color: tone }}>
+          <div style={teamTelemetryEyebrowStyle(tone)}>
             {teamNumber === 1 ? "Blue telemetry" : "Red telemetry"}
           </div>
-          <strong>{team.name}</strong>
+          <strong style={teamTelemetryTitleStyle}>{team.name}</strong>
         </div>
         <span style={teamTelemetryResultStyle(won)}>
           {won ? "Victoria" : winnerTeam ? "Derrota" : "Pendiente"}
@@ -1925,83 +1962,93 @@ function ReplayTeamStatsLane({
       </div>
       <div style={teamTelemetryStatsStyle}>
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.takedowns}
           label="Derribos"
           value={formatReplayNumber(totals.takedowns)}
           tone="#facc15"
         />
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.combat}
           label="K/D/A"
           value={`${formatReplayNumber(totals.kills)}/${formatReplayNumber(totals.deaths)}/${formatReplayNumber(totals.assists)}`}
           tone="#e2e8f0"
         />
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.heroDamage}
           label="Hero dmg"
           value={formatReplayNumber(totals.heroDamage)}
           tone="#38bdf8"
         />
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.siegeDamage}
           label="Siege"
           value={formatReplayNumber(totals.siegeDamage)}
           tone="#fb7185"
         />
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.healing}
           label="Healing"
           value={formatReplayNumber(totals.healing)}
           tone="#4ade80"
         />
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.experience}
           label="XP"
           value={formatReplayNumber(totals.experience)}
           tone="#f59e0b"
         />
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.mercs}
           label="Mercs"
           value={formatReplayNumber(totals.mercCampCaptures)}
           tone="#a78bfa"
         />
         <TelemetryMiniStat
+          iconSrc={STAT_ICON.tank}
           label="Daño recibido"
           value={formatReplayNumber(totals.damageTaken)}
           tone="#c084fc"
-        />
-        <TelemetryMiniStat
-          label="Tiempo muerto"
-          value={formatDuration(totals.timeSpentDead)}
-          tone="#f87171"
-        />
-        <TelemetryMiniStat
-          label="CC"
-          value={formatDuration(totals.ccTime)}
-          tone="#22d3ee"
         />
       </div>
 
       <div style={replayPlayerTableScrollStyle}>
         <div style={replayPlayerTableStyle}>
           <div style={replayPlayerHeaderRowStyle}>
-            <span>Jugador</span>
-            <span>Héroe</span>
-            <span>K/D/A</span>
-            <span>Derribos</span>
-            <span>Hero dmg</span>
-            <span>Siege</span>
-            <span>Healing</span>
-            <span>XP</span>
+            <ReplayStatHeaderLabel icon="◇" label="Jugador" />
+            <ReplayStatHeaderLabel icon="✦" label="Héroe" />
+            <ReplayStatHeaderLabel icon="☠" label="K/D/A" />
+            <ReplayStatHeaderLabel icon="⚔" label="Derribos" />
+            <ReplayStatHeaderLabel icon="◆" label="Hero dmg" />
+            <ReplayStatHeaderLabel icon="▰" label="Siege" />
+            <ReplayStatHeaderLabel icon="✚" label="Healing" />
+            <ReplayStatHeaderLabel icon="⬢" label="XP" />
           </div>
 
           {players.map((player, index) => {
             const matchPlayer = findMatchPlayerForReplay(matchPlayers, player);
+            const rowKey = `${teamNumber}-${player.name}-${player.hero ?? "hero"}-${index}`;
+            const expanded = Boolean(expandedRows[rowKey]);
+
             return (
-              <ReplayPlayerStatRow
-                key={`${teamNumber}-${player.name}-${player.hero ?? "hero"}-${index}`}
-                player={player}
-                matchPlayer={matchPlayer}
-                isCurrentUser={Boolean(
-                  matchPlayer?.userId && matchPlayer.userId === currentUserId,
-                )}
-                tone={tone}
-                maxValues={maxValues}
-              />
+              <div key={rowKey} style={replayPlayerStackStyle}>
+                <ReplayPlayerStatRow
+                  player={player}
+                  matchPlayer={matchPlayer}
+                  isCurrentUser={Boolean(
+                    matchPlayer?.userId && matchPlayer.userId === currentUserId,
+                  )}
+                  tone={tone}
+                  maxValues={maxValues}
+                  expanded={expanded}
+                  onToggle={() =>
+                    setExpandedRows((prev) => ({
+                      ...prev,
+                      [rowKey]: !prev[rowKey],
+                    }))
+                  }
+                />
+                {expanded && <ReplayPlayerTalentsCollapse player={player} tone={tone} />}
+              </div>
             );
           })}
         </div>
@@ -2014,16 +2061,32 @@ function TelemetryMiniStat({
   label,
   value,
   tone,
+  iconSrc,
 }: {
   label: string;
   value: string;
   tone: string;
+  iconSrc?: string;
 }) {
   return (
     <div style={telemetryMiniStatStyle(tone)}>
-      <span>{label}</span>
-      <strong>{value}</strong>
+      {iconSrc && (
+        <span style={telemetryMiniIconStyle(tone)} aria-hidden="true">
+          <img src={iconSrc} alt="" style={telemetryMiniIconImageStyle} />
+        </span>
+      )}
+      <span style={telemetryMiniLabelStyle}>{label}</span>
+      <strong style={telemetryMiniValueStyle}>{value}</strong>
     </div>
+  );
+}
+
+function ReplayStatHeaderLabel({ icon, label }: { icon: string; label: string }) {
+  return (
+    <span style={replayStatHeaderLabelStyle}>
+      <span aria-hidden="true">{icon}</span>
+      {label}
+    </span>
   );
 }
 
@@ -2033,6 +2096,8 @@ function ReplayPlayerStatRow({
   isCurrentUser,
   tone,
   maxValues,
+  expanded,
+  onToggle,
 }: {
   player: ReplayPlayerSummary;
   matchPlayer: Player | null;
@@ -2044,6 +2109,8 @@ function ReplayPlayerStatRow({
     healing: number;
     experience: number;
   };
+  expanded: boolean;
+  onToggle: () => void;
 }) {
   const displayName =
     matchPlayer?.user.username ?? player.battleTag ?? player.name;
@@ -2068,9 +2135,10 @@ function ReplayPlayerStatRow({
       </div>
       <div style={replayPlayerHeroCellStyle}>
         <span>{player.hero ?? "—"}</span>
-        <small>
-          {formatReplayPlayerLoadout(player)}
-        </small>
+        <small>{formatReplayPlayerLoadout(player)}</small>
+        <button type="button" onClick={onToggle} style={replayTalentsToggleStyle(expanded)}>
+          {expanded ? "Ocultar build" : "Ver build"}
+        </button>
       </div>
       <div style={replayPlayerMetricValueStyle}>{kda}</div>
       <div style={replayPlayerMetricValueStyle}>
@@ -2096,6 +2164,48 @@ function ReplayPlayerStatRow({
         max={maxValues.experience}
         tone="#f59e0b"
       />
+    </div>
+  );
+}
+
+function ReplayPlayerTalentsCollapse({
+  player,
+  tone,
+}: {
+  player: ReplayPlayerSummary;
+  tone: string;
+}) {
+  const talents = [...(player.talents ?? [])].sort((a, b) => {
+    const tierA = Number.parseInt(a.tier, 10);
+    const tierB = Number.parseInt(b.tier, 10);
+    if (Number.isNaN(tierA) || Number.isNaN(tierB)) {
+      return a.tier.localeCompare(b.tier, "es", { numeric: true });
+    }
+    return tierA - tierB;
+  });
+
+  return (
+    <div style={replayTalentsPanelStyle(tone)}>
+      <div style={replayTalentsHeaderStyle}>
+        <span style={replayTalentsTitleStyle}>Talentos por nivel</span>
+        <span style={replayTalentsMetaStyle}>
+          {talents.length > 0 ? `${talents.length} picks` : "Sin talentos parseados"}
+        </span>
+      </div>
+      {talents.length > 0 ? (
+        <div style={replayTalentsGridStyle}>
+          {talents.map((talent, index) => (
+            <div key={`${talent.tier}-${talent.name}-${index}`} style={replayTalentChipStyle(tone)}>
+              <span style={replayTalentTierStyle}>Nivel {talent.tier}</span>
+              <strong style={replayTalentNameStyle}>{talent.name}</strong>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div style={replayTalentsEmptyStyle}>
+          Habilidades por tecla no disponibles en este replay, sólo talentos.
+        </div>
+      )}
     </div>
   );
 }
@@ -2260,10 +2370,10 @@ function MatchTimeline({
   const steps: Array<{ key: string; label: string }> = [
     { key: "ACCEPTING", label: "Accept" },
     { key: "VETOING", label: "Veto" },
-    { key: "PLAYING_CONNECT", label: "Conectar" },
-    { key: "PLAYING_FINISH", label: "Finalizar" },
-    { key: "VOTING", label: "Votar" },
-    { key: "COMPLETED", label: "Resultado" },
+    { key: "PLAYING_CONNECT", label: "Lobby" },
+    { key: "PLAYING_FINISH", label: "Cierre" },
+    { key: "VOTING", label: "Voto" },
+    { key: "COMPLETED", label: "Final" },
   ];
 
   const order: Record<string, number> = {
@@ -2277,10 +2387,10 @@ function MatchTimeline({
     CANCELLED: 6,
   };
 
-  // Map real status to virtual step key
   function resolveCurrentKey(): string {
-    if (status === "PLAYING")
+    if (status === "PLAYING") {
       return allConnected ? "PLAYING_FINISH" : "PLAYING_CONNECT";
+    }
     return status;
   }
 
@@ -2288,13 +2398,8 @@ function MatchTimeline({
   const currentLevel = order[currentKey] ?? 0;
 
   return (
-    <div
-      style={{
-        ...timelineWrapStyle,
-        gridTemplateColumns: `repeat(${steps.length}, 1fr)`,
-      }}
-    >
-      {steps.map((step, index) => {
+    <div style={timelineWrapStyle} aria-label="Fases del matchroom">
+      {steps.map((step) => {
         const stepLevel = order[step.key] ?? 0;
         const isDone = currentLevel > stepLevel;
         const isCurrent =
@@ -2303,17 +2408,15 @@ function MatchTimeline({
         const isCancelled = status === "CANCELLED" && step.key === "COMPLETED";
 
         return (
-          <div key={step.key} style={timelineStepStyle}>
-            <div style={timelineNodeRowStyle}>
-              <div style={timelineNodeStyle(isDone, isCurrent, isCancelled)}>
-                {isCancelled ? "×" : isDone ? "✓" : index + 1}
-              </div>
-              {index < steps.length - 1 && (
-                <div style={timelineLineStyle(isDone)} />
-              )}
-            </div>
-            <div style={timelineLabelStyle(isCurrent)}>{step.label}</div>
-          </div>
+          <span
+            key={step.key}
+            style={timelinePillStyle(isDone, isCurrent, isCancelled)}
+          >
+            <span style={timelineGlyphStyle(isDone, isCurrent, isCancelled)}>
+              {isCancelled ? "×" : isDone ? "✓" : isCurrent ? "●" : "·"}
+            </span>
+            {step.label}
+          </span>
         );
       })}
     </div>
@@ -2391,7 +2494,6 @@ function TeamColumn({
             compact={compact}
             mirrored={mirrored}
             completed={completed}
-            teamStatus={team.status}
           />
         ))}
       </div>
@@ -2406,7 +2508,6 @@ function TeamPlayerCard({
   compact,
   mirrored,
   completed,
-  teamStatus,
 }: {
   player: ReturnType<typeof toDisplayTeam>["players"][number];
   index: number;
@@ -2414,13 +2515,14 @@ function TeamPlayerCard({
   compact: boolean;
   mirrored: boolean;
   completed: boolean;
-  teamStatus: MatchStatus;
 }) {
-  const hasMvpVotes = (player.mvpVotes ?? 0) > 0;
-  const formWins = player.recentMatches.filter((match) => match.won).length;
-  const formTotal = player.recentMatches.length;
-  const formLabel = formTotal > 0 ? `${formWins}/${formTotal}` : "sin data";
-  const mmrLabel = player.mmrBefore > 0 ? `${player.mmrBefore} MMR` : "MMR —";
+  void mirrored;
+
+  const mmrLabel = player.mmrBefore > 0 ? String(player.mmrBefore) : "—";
+  const totalMatches = player.wins + player.losses;
+  const completedMmrDelta =
+    completed && typeof player.mmrDelta === "number" ? player.mmrDelta : null;
+  const winrateTone = player.winrate >= 50 ? "#4ade80" : "#f87171";
 
   return (
     <article
@@ -2428,133 +2530,77 @@ function TeamPlayerCard({
         placeholder: player.placeholder,
         captain: player.isCaptain,
         mvp: player.isMvp,
-        mirrored,
         accent,
         slot: index,
+        compact,
       })}
     >
-      <div style={playerIdentityBlockStyle(mirrored)}>
+      <div style={playerAvatarColumnStyle}>
         <div style={playerAvatarFrameStyle(accent, player.isMvp)}>
           <AvatarCell
             username={player.name}
             avatar={player.avatar}
             size={compact ? 42 : 52}
           />
-          {!player.placeholder && (
-            <>
-              <span style={playerSlotBadgeStyle(mirrored, accent)}>{index + 1}</span>
-              <div style={playerRankBadgeDockStyle}>
-                <LevelBadge level={player.level} />
-              </div>
-            </>
-          )}
         </div>
+        <span style={playerMatchCountLabelStyle(accent)}>
+          {player.placeholder ? "BOT" : `${totalMatches} partidas`}
+        </span>
+      </div>
 
-        <div style={playerNameStackStyle(mirrored)}>
-          <div style={playerNameRowStyle(mirrored)}>
+      <div style={playerHeaderIdentityStyle}>
+        <div style={playerNameRowStyle()}>
+          <span style={playerNameIdentityGroupStyle}>
             <span title="Nacionalidad">{getCountryFlag(player.countryCode)}</span>
             <span style={playerNameStyle}>{player.name}</span>
-          </div>
-          <div style={playerRoleTagRowStyle(mirrored)}>
-            {player.isCaptain && (
-              <span style={captainMiniTagStyle(accent)}>CAPITÁN</span>
-            )}
-            {player.isMvp && <span style={mvpMiniTagStyle}>MVP</span>}
-            {player.isOnline != null && (
-              <span style={presenceMiniTagStyle(player.isOnline)}>
-                {player.isOnline ? "ONLINE" : "OFFLINE"}
-              </span>
-            )}
-            {player.placeholder && <span style={botTagStyle}>BOT</span>}
-          </div>
+          </span>
+          <span style={playerInlineEloStyle(accent)}>
+            <span>ELO</span>
+            <strong>{player.placeholder ? "—" : mmrLabel}</strong>
+          </span>
         </div>
       </div>
 
-      <div style={playerDuelBodyStyle(mirrored)}>
+      <div style={playerRankRailStyle(accent, player.placeholder)}>
         {player.placeholder ? (
-          <div style={playerSublineStyle(mirrored)}>Bot de testing</div>
+          <span style={playerRankPlaceholderStyle}>—</span>
+        ) : (
+          <LevelBadge level={player.level} />
+        )}
+        {completedMmrDelta != null && (
+          <span style={mmrDeltaBadgeStyle(completedMmrDelta)}>
+            {completedMmrDelta >= 0 ? "+" : ""}
+            {completedMmrDelta} ELO
+          </span>
+        )}
+      </div>
+
+      <div style={playerWireDividerStyle(accent)} />
+
+      <div style={playerBottomStatsStyle}>
+        {player.placeholder ? (
+          <span style={playerSublineStyle(false)}>Bot de testing</span>
         ) : (
           <>
-            <div style={playerStatSentenceStyle(mirrored)}>
-              <span>{mmrLabel}</span>
-              <span>·</span>
-              <strong style={{ color: player.winrate >= 50 ? "#4ade80" : "#f87171" }}>
-                {player.winrate}% WR
-              </strong>
-              <span>·</span>
-              <span>{player.wins}W / {player.losses}L</span>
-            </div>
-
-            <div style={playerDuelFooterStyle(mirrored)}>
-              <span style={recentFormLabelStyle}>Forma {formLabel}</span>
-              <RecentForm matches={player.recentMatches} />
-              {hasMvpVotes && (
-                <span style={mvpVoteSlimTagStyle}>
-                  MVP · {player.mvpVotes} voto{player.mvpVotes === 1 ? "" : "s"}
-                </span>
-              )}
-              {completed && typeof player.mmrDelta === "number" ? (
-                <span style={mmrDeltaBadgeStyle(player.mmrDelta)}>
-                  {player.mmrDelta >= 0 ? "+" : ""}
-                  {player.mmrDelta} ELO
-                </span>
-              ) : teamStatus === "COMPLETED" && player.isWinner ? (
-                <span style={winnerMiniTagStyle}>VICTORIA</span>
-              ) : null}
-            </div>
+            <span style={playerStatBadgeStyle(winrateTone)}>{player.winrate}% WR</span>
+            <span style={playerRecordStripStyle}>{player.wins}W / {player.losses}L</span>
           </>
         )}
       </div>
-    </article>
-  );
-}
 
-function RecentForm({
-  matches,
-}: {
-  matches: Array<{ won: boolean; map: string | null; date: string }>;
-}) {
-  const form = matches.slice(0, 5);
-  const padded = [...form];
-  while (padded.length < 5) {
-    padded.push({ won: false, map: null, date: "" });
-  }
-
-  return (
-    <span style={recentFormStyle}>
-      {padded.map((match, index) => {
-        const hasResult = index < form.length;
-        const color = !hasResult
-          ? "rgba(148,163,184,0.22)"
-          : match.won
-            ? "#4ade80"
-            : "#f87171";
-        return (
-          <span
-            key={`${match.date || "empty"}-${index}`}
-            title={
-              hasResult
-                ? `${match.won ? "Victoria" : "Derrota"}${match.map ? ` · ${match.map}` : ""}`
-                : "Sin partida"
-            }
-            style={{
-              width: "13px",
-              height: "13px",
-              display: "grid",
-              placeItems: "center",
-              border: `1px solid ${color}88`,
-              background: hasResult ? `${color}22` : "rgba(15,23,42,0.7)",
-              color,
-              fontSize: "0.48rem",
-              fontWeight: 900,
-              lineHeight: 1,
-            }}
-          >
-            {hasResult ? (match.won ? "W" : "L") : "·"}
+      <div style={playerBottomAwardsStyle}>
+        {player.isCaptain && (
+          <span style={captainMiniTagStyle(accent)}>CAPITÁN</span>
+        )}
+        {player.isMvp && <span style={mvpMiniTagStyle}>MVP</span>}
+        {player.isOnline != null && (
+          <span style={presenceMiniTagStyle(player.isOnline)}>
+            {player.isOnline ? "ONLINE" : "OFFLINE"}
           </span>
-        );
-      })}
-    </span>
+        )}
+        {player.placeholder && <span style={botTagStyle}>BOT</span>}
+      </div>
+    </article>
   );
 }
 
@@ -2563,7 +2609,7 @@ function LevelBadge({ level }: { level: number }) {
     <div title={`Rango ${level}`} style={{ flexShrink: 0 }}>
       <RankBadge
         level={level}
-        size="sm"
+        size="md"
         showLabel={false}
         showMmr={false}
         glow="soft"
@@ -2624,7 +2670,7 @@ function AvatarCell({
       style={{
         width: `${size}px`,
         height: `${size}px`,
-        borderRadius: "0",
+        borderRadius: "999px",
         overflow: "hidden",
         border: "1px solid rgba(148,163,184,0.35)",
         background: "linear-gradient(135deg, #1a3a5c, #0d2040)",
@@ -2961,6 +3007,7 @@ function toDisplayTeam(
   mvpUserId: string | null,
   onlineUserIds: Set<string> | null = null,
   mvpVoteCounts: Array<{ nomineeUserId: string; votes: number }> = [],
+  teamNameOverride?: string,
 ) {
   const realPlayers = [...players].sort(
     (a, b) => Number(b.isCaptain) - Number(a.isCaptain),
@@ -3019,7 +3066,7 @@ function toDisplayTeam(
   }
 
   return {
-    name: `Team ${leader}`,
+    name: teamNameOverride?.trim() || `Team ${leader}`,
     captainName: captain,
     realPlayersCount: realPlayers.filter((player) => !player.isBot).length,
     avgWinrate: realPlayers.length
@@ -3358,21 +3405,6 @@ function findMatchPlayerForReplay(
   );
 }
 
-function getReplayPlayerForMatchUser(
-  replayPlayers: ReplayPlayerSummary[],
-  matchPlayers: Player[],
-  userId: string | null,
-) {
-  if (!userId) return null;
-  const matchPlayer = matchPlayers.find((player) => player.userId === userId);
-  if (!matchPlayer) return null;
-  return (
-    replayPlayers.find((replayPlayer) => {
-      const resolved = findMatchPlayerForReplay(matchPlayers, replayPlayer);
-      return resolved?.userId === matchPlayer.userId;
-    }) ?? null
-  );
-}
 
 const pageShellStyle: CSSProperties = {
   minHeight: "calc(100vh - 48px)",
@@ -3454,7 +3486,7 @@ const teamTitleStyle: CSSProperties = {
 
 const teamRosterStyle: CSSProperties = {
   display: "grid",
-  gap: "0.42rem",
+  gap: "0.58rem",
 };
 
 function presenceMiniTagStyle(online: boolean): CSSProperties {
@@ -3471,22 +3503,13 @@ function presenceMiniTagStyle(online: boolean): CSSProperties {
   };
 }
 
-function playerNameRowStyle(mirrored: boolean): CSSProperties {
-  return {
-    display: "flex",
-    flexDirection: mirrored ? "row-reverse" : "row",
-    alignItems: "center",
-    justifyContent: mirrored ? "flex-end" : "flex-start",
-    gap: "0.35rem",
-    minWidth: 0,
-  };
-}
-
 const playerNameStyle: CSSProperties = {
   minWidth: 0,
+  maxWidth: "100%",
   color: "#f8fafc",
-  fontWeight: 850,
-  fontSize: "0.86rem",
+  fontSize: "0.9rem",
+  fontWeight: 950,
+  letterSpacing: "0.015em",
   whiteSpace: "nowrap",
   overflow: "hidden",
   textOverflow: "ellipsis",
@@ -3503,12 +3526,6 @@ function playerSublineStyle(mirrored: boolean): CSSProperties {
     textAlign: mirrored ? "right" : "left",
   };
 }
-
-const recentFormStyle: CSSProperties = {
-  display: "inline-flex",
-  alignItems: "center",
-  gap: "0.2rem",
-};
 
 function captainMiniTagStyle(accent: string): CSSProperties {
   return {
@@ -3570,90 +3587,107 @@ function playerDuelCardStyle({
   placeholder,
   captain,
   mvp,
-  mirrored,
   accent,
   slot,
+  compact,
 }: {
   placeholder: boolean;
   captain: boolean;
   mvp: boolean;
-  mirrored: boolean;
   accent: string;
   slot: number;
+  compact: boolean;
 }): CSSProperties {
   const borderTone = mvp
-    ? "rgba(250,204,21,0.64)"
+    ? "rgba(250,204,21,0.62)"
     : captain
       ? `${accent}66`
       : placeholder
         ? "rgba(100,116,139,0.22)"
-        : "rgba(148,163,184,0.16)";
+        : "rgba(148,163,184,0.18)";
+
   return {
     position: "relative",
     minWidth: 0,
-    minHeight: "112px",
-    display: "flex",
-    flexDirection: mirrored ? "row-reverse" : "row",
+    minHeight: compact ? "118px" : "132px",
+    display: "grid",
+    gridTemplateColumns: compact
+      ? "54px minmax(0, 1fr) minmax(42px, 0.48fr) 78px"
+      : "68px minmax(0, 1fr) minmax(54px, 0.56fr) 88px",
+    gridTemplateRows: "minmax(40px, auto) 2px minmax(34px, auto)",
     alignItems: "center",
-    gap: "0.76rem",
-    padding: mirrored ? "0.72rem 0.64rem 0.72rem 0.82rem" : "0.72rem 0.82rem 0.72rem 0.64rem",
+    columnGap: compact ? "0.44rem" : "0.62rem",
+    rowGap: compact ? "0.42rem" : "0.5rem",
+    padding: compact ? "0.62rem 0.56rem" : "0.72rem 0.68rem",
     border: `1px solid ${borderTone}`,
     background: placeholder
       ? "linear-gradient(135deg, rgba(30,41,59,0.34), rgba(2,6,23,0.48))"
-      : `linear-gradient(${mirrored ? 245 : 115}deg, ${accent}16 0%, rgba(8,16,30,0.78) 38%, rgba(2,6,23,0.62) 100%)`,
+      : `linear-gradient(115deg, ${accent}14 0%, rgba(8,16,30,0.82) 34%, rgba(2,6,23,0.66) 100%)`,
     boxShadow: mvp
-      ? `${mirrored ? "inset -3px" : "inset 3px"} 0 0 #facc15, 0 0 28px rgba(250,204,21,0.11)`
+      ? `inset 3px 0 0 #facc15, 0 0 28px rgba(250,204,21,0.11)`
       : captain
-        ? `${mirrored ? "inset -3px" : "inset 3px"} 0 0 ${accent}, 0 0 22px ${accent}10`
+        ? `inset 3px 0 0 ${accent}, 0 0 22px ${accent}10`
         : `inset 0 1px 0 rgba(255,255,255,0.035), 0 ${Math.max(0, 7 - slot)}px 18px rgba(0,0,0,0.12)`,
     overflow: "hidden",
   };
 }
 
-function playerIdentityBlockStyle(mirrored: boolean): CSSProperties {
+const playerAvatarColumnStyle: CSSProperties = {
+  gridColumn: "1",
+  gridRow: "1 / 4",
+  minWidth: 0,
+  height: "100%",
+  display: "grid",
+  alignContent: "center",
+  justifyItems: "center",
+  gap: "0.44rem",
+};
+
+const playerHeaderIdentityStyle: CSSProperties = {
+  gridColumn: "2 / 4",
+  gridRow: "1",
+  minWidth: 0,
+  alignSelf: "center",
+};
+
+const playerBottomStatsStyle: CSSProperties = {
+  gridColumn: "2",
+  gridRow: "3",
+  minWidth: 0,
+  display: "flex",
+  alignItems: "center",
+  gap: "0.34rem",
+  flexWrap: "wrap",
+};
+
+const playerBottomAwardsStyle: CSSProperties = {
+  gridColumn: "3",
+  gridRow: "3",
+  minWidth: 0,
+  display: "flex",
+  justifyContent: "center",
+  alignItems: "center",
+  gap: "0.3rem",
+  flexWrap: "wrap",
+};
+
+function playerNameRowStyle(): CSSProperties {
   return {
-    minWidth: 0,
     display: "flex",
-    flexDirection: mirrored ? "row-reverse" : "row",
     alignItems: "center",
-    gap: "0.72rem",
-  };
-}
-
-function playerNameStackStyle(mirrored: boolean): CSSProperties {
-  return {
+    justifyContent: "space-between",
+    gap: "0.5rem",
     minWidth: 0,
-    display: "grid",
-    gap: "0.28rem",
-    justifyItems: mirrored ? "end" : "start",
-    textAlign: mirrored ? "right" : "left",
+    maxWidth: "100%",
   };
 }
 
-function playerRoleTagRowStyle(mirrored: boolean): CSSProperties {
-  return {
-    display: "flex",
-    flexDirection: mirrored ? "row-reverse" : "row",
-    gap: "0.28rem",
-    flexWrap: "wrap",
-    justifyContent: mirrored ? "flex-end" : "flex-start",
-  };
-}
-
-function playerStatSentenceStyle(mirrored: boolean): CSSProperties {
-  return {
-    color: "rgba(203,213,225,0.78)",
-    fontSize: "0.72rem",
-    fontWeight: 800,
-    letterSpacing: "0.035em",
-    display: "flex",
-    flexDirection: mirrored ? "row-reverse" : "row",
-    justifyContent: mirrored ? "flex-end" : "flex-start",
-    alignItems: "center",
-    gap: "0.34rem",
-    flexWrap: "wrap",
-  };
-}
+const playerNameIdentityGroupStyle: CSSProperties = {
+  minWidth: 0,
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.36rem",
+};
 
 function playerAvatarFrameStyle(
   accent: string,
@@ -3666,90 +3700,94 @@ function playerAvatarFrameStyle(
     placeItems: "center",
     padding: "0.16rem",
     border: `1px solid ${isMvp ? "rgba(250,204,21,0.72)" : `${accent}55`}`,
+    borderRadius: "999px",
     background: `radial-gradient(circle, ${isMvp ? "rgba(250,204,21,0.20)" : `${accent}22`} 0%, rgba(2,6,23,0.18) 68%)`,
     boxShadow: `0 0 22px ${isMvp ? "rgba(250,204,21,0.18)" : `${accent}1a`}`,
   };
 }
 
-function playerSlotBadgeStyle(mirrored: boolean, accent: string): CSSProperties {
+function playerMatchCountLabelStyle(accent: string): CSSProperties {
   return {
-    position: "absolute",
-    top: "-7px",
-    ...(mirrored ? { left: "-7px" } : { right: "-7px" }),
-    minWidth: "20px",
-    height: "20px",
-    display: "grid",
-    placeItems: "center",
-    border: `1px solid ${accent}88`,
-    background: "rgba(2,6,23,0.94)",
     color: accent,
-    fontFamily: "var(--font-display)",
-    fontSize: "0.62rem",
+    fontSize: "0.56rem",
     fontWeight: 950,
-    boxShadow: `0 0 16px ${accent}26`,
+    letterSpacing: "0.08em",
+    lineHeight: 1.05,
+    textAlign: "center",
+    textTransform: "uppercase",
   };
 }
 
-const playerRankBadgeDockStyle: CSSProperties = {
-  position: "absolute",
-  bottom: "-10px",
-  left: "50%",
-  transform: "translateX(-50%) scale(0.74)",
-  transformOrigin: "center",
-  pointerEvents: "none",
-};
-
-function playerDuelBodyStyle(mirrored: boolean): CSSProperties {
+function playerInlineEloStyle(accent: string): CSSProperties {
   return {
-    minWidth: 0,
-    flex: 1,
+    flexShrink: 0,
+    display: "inline-flex",
+    alignItems: "baseline",
+    gap: "0.28rem",
+    color: "#f8fafc",
+    fontFamily: "var(--font-display)",
+    fontSize: "0.72rem",
+    fontWeight: 950,
+    letterSpacing: "0.08em",
+    textTransform: "uppercase",
+    textShadow: `0 0 16px ${accent}22`,
+  };
+}
+
+function playerRankRailStyle(
+  accent: string,
+  placeholder: boolean,
+): CSSProperties {
+  return {
+    gridColumn: "4",
+    gridRow: "1 / 4",
+    justifySelf: "center",
+    alignSelf: "center",
     display: "grid",
-    gap: "0.42rem",
-    justifyItems: mirrored ? "end" : "start",
-    textAlign: mirrored ? "right" : "left",
+    justifyItems: "center",
+    gap: "0.38rem",
+    color: placeholder ? "rgba(148,163,184,0.64)" : accent,
   };
 }
 
-function playerDuelFooterStyle(mirrored: boolean): CSSProperties {
+const playerRankPlaceholderStyle: CSSProperties = {
+  display: "grid",
+  placeItems: "center",
+  width: "2rem",
+  height: "2rem",
+  color: "rgba(148,163,184,0.54)",
+  fontWeight: 950,
+};
+
+function playerWireDividerStyle(accent: string): CSSProperties {
   return {
+    gridColumn: "2 / 4",
+    gridRow: "2",
     width: "100%",
-    display: "flex",
-    flexDirection: mirrored ? "row-reverse" : "row",
-    justifyContent: mirrored ? "flex-end" : "flex-start",
-    alignItems: "center",
-    gap: "0.34rem",
-    flexWrap: "wrap",
+    height: "2px",
+    background: `linear-gradient(90deg, ${accent}, ${accent}55 72%, transparent)`,
+    boxShadow: `0 0 16px ${accent}18`,
   };
 }
 
-const recentFormLabelStyle: CSSProperties = {
-  color: "rgba(148,163,184,0.76)",
-  fontSize: "0.58rem",
-  fontWeight: 950,
-  letterSpacing: "0.11em",
-  textTransform: "uppercase",
+const playerRecordStripStyle: CSSProperties = {
+  color: "rgba(203,213,225,0.74)",
+  fontSize: "0.68rem",
+  fontWeight: 900,
+  letterSpacing: "0.05em",
 };
 
-const mvpVoteSlimTagStyle: CSSProperties = {
-  border: "1px solid rgba(250,204,21,0.38)",
-  background: "rgba(250,204,21,0.10)",
-  color: "#facc15",
-  padding: "0.2rem 0.42rem",
-  fontSize: "0.58rem",
-  fontWeight: 950,
-  letterSpacing: "0.1em",
-  textTransform: "uppercase",
-};
-
-const winnerMiniTagStyle: CSSProperties = {
-  border: "1px solid rgba(74,222,128,0.46)",
-  background: "rgba(74,222,128,0.12)",
-  color: "#4ade80",
-  padding: "0.2rem 0.42rem",
-  fontSize: "0.58rem",
-  fontWeight: 950,
-  letterSpacing: "0.1em",
-};
+function playerStatBadgeStyle(color: string): CSSProperties {
+  return {
+    padding: "0.15rem 0.34rem",
+    border: `1px solid ${color}66`,
+    background: `${color}16`,
+    color,
+    fontSize: "0.66rem",
+    fontWeight: 950,
+    letterSpacing: "0.07em",
+  };
+}
 
 function mmrDeltaBadgeStyle(delta: number): CSSProperties {
   const positive = delta >= 0;
@@ -3883,11 +3921,12 @@ const stageCardStyle: CSSProperties = {
 function commandHeaderStyle(
   mapImageUrl: string,
   accent: string,
+  compact: boolean,
 ): CSSProperties {
   return {
     position: "relative",
     overflow: "hidden",
-    minHeight: "238px",
+    minHeight: compact ? "auto" : "238px",
     border: `1px solid ${accent}30`,
     backgroundColor: "#050b15",
     backgroundImage: mapImageUrl
@@ -3895,10 +3934,10 @@ function commandHeaderStyle(
       : `linear-gradient(115deg, rgba(2,6,23,0.96), rgba(4,13,26,0.86)), radial-gradient(circle at 18% 12%, ${accent}28, transparent 30%)`,
     backgroundSize: "cover",
     backgroundPosition: "center",
-    padding: "clamp(1rem, 2vw, 1.35rem)",
+    padding: compact ? "0.95rem" : "clamp(1rem, 2vw, 1.35rem)",
     display: "grid",
     alignContent: "space-between",
-    gap: "1.25rem",
+    gap: compact ? "0.9rem" : "1.25rem",
     boxShadow:
       "inset 0 1px 0 rgba(255,255,255,0.05), 0 22px 54px rgba(0,0,0,0.28)",
   };
@@ -3924,17 +3963,20 @@ const commandHeaderToplineStyle: CSSProperties = {
   flexWrap: "wrap",
 };
 
-const commandTitleStyle: CSSProperties = {
-  margin: 0,
-  color: "#f8fafc",
-  fontFamily: "var(--font-display)",
-  fontSize: "clamp(2rem, 5vw, 4.6rem)",
-  lineHeight: 0.86,
-  fontWeight: 950,
-  letterSpacing: "0.075em",
-  textTransform: "uppercase",
-  textShadow: "0 3px 28px rgba(0,0,0,0.75)",
-};
+function commandTitleStyle(compact: boolean): CSSProperties {
+  return {
+    margin: 0,
+    color: "#f8fafc",
+    fontFamily: "var(--font-display)",
+    fontSize: compact ? "clamp(1.72rem, 11vw, 2.85rem)" : "clamp(2rem, 5vw, 4.6rem)",
+    lineHeight: compact ? 0.92 : 0.86,
+    fontWeight: 950,
+    letterSpacing: compact ? "0.045em" : "0.075em",
+    textTransform: "uppercase",
+    overflowWrap: "anywhere",
+    textShadow: "0 3px 28px rgba(0,0,0,0.75)",
+  };
+}
 
 const commandSublineStyle: CSSProperties = {
   display: "flex",
@@ -3947,32 +3989,37 @@ const commandSublineStyle: CSSProperties = {
   textTransform: "uppercase",
 };
 
-const commandActionsStyle: CSSProperties = {
-  display: "flex",
-  gap: "0.75rem",
-  alignItems: "center",
-  flexWrap: "wrap",
-  justifyContent: "flex-end",
-};
+function commandActionsStyle(compact: boolean): CSSProperties {
+  return {
+    display: "flex",
+    gap: "0.75rem",
+    alignItems: "center",
+    flexWrap: "wrap",
+    justifyContent: compact ? "flex-start" : "flex-end",
+    width: compact ? "100%" : undefined,
+  };
+}
 
-const commandVersusGridStyle: CSSProperties = {
-  position: "relative",
-  zIndex: 1,
-  display: "grid",
-  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-  gap: "0.75rem",
-  alignItems: "stretch",
-};
+function commandVersusGridStyle(compact: boolean): CSSProperties {
+  return {
+    position: "relative",
+    zIndex: 1,
+    display: "grid",
+    gridTemplateColumns: compact ? "1fr" : "repeat(auto-fit, minmax(180px, 1fr))",
+    gap: compact ? "0.55rem" : "0.75rem",
+    alignItems: "stretch",
+  };
+}
 
-function commandTeamPlateStyle(tone: string, won: boolean): CSSProperties {
+function commandTeamPlateStyle(tone: string, won: boolean, compact: boolean): CSSProperties {
   return {
     minWidth: 0,
     border: `1px solid ${won ? tone : `${tone}44`}`,
     background: `linear-gradient(145deg, ${tone}${won ? "24" : "12"}, rgba(2,6,23,0.62) 48%, rgba(2,6,23,0.42))`,
-    padding: "0.82rem 0.9rem",
+    padding: compact ? "0.68rem 0.72rem" : "0.82rem 0.9rem",
     display: "flex",
     justifyContent: "space-between",
-    gap: "0.8rem",
+    gap: compact ? "0.55rem" : "0.8rem",
     alignItems: "center",
     boxShadow: won
       ? `0 0 0 1px ${tone}22, 0 0 34px ${tone}18, inset 0 1px 0 rgba(255,255,255,0.05)`
@@ -4282,15 +4329,115 @@ function telemetryKpiGridStyle(narrow: boolean): CSSProperties {
 
 function telemetryKpiStyle(tone: string, large: boolean): CSSProperties {
   return {
+    position: "relative",
     minWidth: 0,
-    border: `1px solid ${tone}28`,
-    background: `linear-gradient(180deg, ${tone}12, rgba(2,6,23,0.62))`,
-    padding: large ? "0.82rem 0.9rem" : "0.68rem 0.72rem",
+    overflow: "hidden",
+    border: `1px solid ${tone}34`,
+    background: `linear-gradient(135deg, ${tone}18 0%, rgba(8,16,30,0.78) 48%, rgba(2,6,23,0.64) 100%)`,
+    padding: large ? "0.92rem 0.92rem 0.86rem" : "0.72rem 0.74rem 0.68rem",
     display: "grid",
-    gap: "0.18rem",
-    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035)",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    gridTemplateRows: "auto auto",
+    columnGap: "0.58rem",
+    rowGap: "0.08rem",
+    alignItems: "center",
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.045), 0 0 28px ${tone}0f`,
   };
 }
+
+function telemetryKpiIconStyle(_tone: string): CSSProperties {
+  return {
+    gridRow: "1 / 3",
+    width: "2.15rem",
+    height: "2.15rem",
+    display: "grid",
+    placeItems: "center",
+    overflow: "hidden",
+  };
+}
+
+const telemetryKpiIconImageStyle: CSSProperties = {
+  width: "78%",
+  height: "78%",
+  objectFit: "contain",
+  filter: "drop-shadow(0 0 8px rgba(0,0,0,0.35))",
+};
+
+const telemetryKpiLabelStyle: CSSProperties = {
+  minWidth: 0,
+  color: "rgba(186,230,253,0.76)",
+  fontSize: "0.62rem",
+  fontWeight: 950,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+};
+
+function telemetryKpiValueStyle(large: boolean): CSSProperties {
+  return {
+    minWidth: 0,
+    color: "#f8fafc",
+    fontFamily: "var(--font-display)",
+    fontSize: large ? "clamp(1rem, 2vw, 1.35rem)" : "0.88rem",
+    fontWeight: 950,
+    letterSpacing: "0.045em",
+    overflow: "hidden",
+    textOverflow: "ellipsis",
+    whiteSpace: "nowrap",
+  };
+}
+
+const statsSectionHeaderStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "auto minmax(0, 1fr)",
+  gap: "0.82rem",
+  alignItems: "center",
+  border: "1px solid rgba(125,211,252,0.18)",
+  background:
+    "linear-gradient(90deg, rgba(125,211,252,0.10), rgba(2,6,23,0.48) 58%, rgba(255,107,0,0.07))",
+  padding: "0.82rem 0.92rem",
+  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.045)",
+};
+
+const statsSectionIconStyle: CSSProperties = {
+  width: "3.35rem",
+  height: "3.35rem",
+  display: "grid",
+  placeItems: "center",
+  overflow: "hidden",
+};
+
+const statsSectionIconImageStyle: CSSProperties = {
+  width: "78%",
+  height: "78%",
+  objectFit: "contain",
+};
+
+const statsSectionKickerStyle: CSSProperties = {
+  display: "block",
+  color: "#7dd3fc",
+  fontSize: "0.62rem",
+  fontWeight: 950,
+  letterSpacing: "0.18em",
+  textTransform: "uppercase",
+};
+
+const statsSectionTitleStyle: CSSProperties = {
+  display: "block",
+  marginTop: "0.16rem",
+  color: "#f8fafc",
+  fontFamily: "var(--font-display)",
+  fontSize: "clamp(1.05rem, 2.2vw, 1.55rem)",
+  fontWeight: 950,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const statsSectionDescriptionStyle: CSSProperties = {
+  margin: "0.22rem 0 0",
+  color: "rgba(226,232,240,0.64)",
+  fontSize: "0.82rem",
+  lineHeight: 1.45,
+};
 
 const telemetryUploadMetaStyle: CSSProperties = {
   display: "flex",
@@ -4301,15 +4448,6 @@ const telemetryUploadMetaStyle: CSSProperties = {
   letterSpacing: "0.04em",
 };
 
-function combatKpiGridStyle(narrow: boolean): CSSProperties {
-  return {
-    display: "grid",
-    gridTemplateColumns: narrow
-      ? "repeat(2, minmax(0, 1fr))"
-      : "repeat(6, minmax(0, 1fr))",
-    gap: "0.58rem",
-  };
-}
 
 const replayTeamBoardStyle: CSSProperties = {
   display: "grid",
@@ -4324,16 +4462,24 @@ const replayTeamDividerStyle: CSSProperties = {
     "linear-gradient(90deg, transparent, rgba(148,163,184,0.7), transparent)",
 };
 
-function replayTeamLaneStyle(tone: string, won: boolean): CSSProperties {
+function replayTeamLaneStyle(
+  tone: string,
+  won: boolean,
+  backdrop: string,
+): CSSProperties {
   return {
+    position: "relative",
+    overflow: "hidden",
     border: `1px solid ${won ? tone : `${tone}38`}`,
-    background: `linear-gradient(180deg, ${tone}${won ? "1d" : "10"}, rgba(2,6,23,0.76) 34%, rgba(2,6,23,0.58))`,
-    padding: "0.82rem",
+    backgroundImage: `linear-gradient(180deg, ${tone}${won ? "23" : "12"}, rgba(2,6,23,0.86) 42%, rgba(2,6,23,0.70)), radial-gradient(circle at 12% 0%, ${tone}24, transparent 34%), url(${backdrop})`,
+    backgroundSize: "cover",
+    backgroundPosition: "center",
+    padding: "0.95rem",
     display: "grid",
-    gap: "0.72rem",
+    gap: "0.82rem",
     boxShadow: won
-      ? `0 0 34px ${tone}16, inset 0 1px 0 rgba(255,255,255,0.05)`
-      : "inset 0 1px 0 rgba(255,255,255,0.035)",
+      ? `0 0 38px ${tone}1b, inset 0 1px 0 rgba(255,255,255,0.06)`
+      : "inset 0 1px 0 rgba(255,255,255,0.04)",
   };
 }
 
@@ -4342,6 +4488,28 @@ const replayTeamLaneHeaderStyle: CSSProperties = {
   justifyContent: "space-between",
   gap: "0.75rem",
   alignItems: "flex-start",
+};
+
+function teamTelemetryEyebrowStyle(tone: string): CSSProperties {
+  return {
+    color: tone,
+    fontSize: "0.68rem",
+    fontWeight: 950,
+    letterSpacing: "0.18em",
+    textTransform: "uppercase",
+  };
+}
+
+const teamTelemetryTitleStyle: CSSProperties = {
+  display: "block",
+  marginTop: "0.16rem",
+  color: "#f8fafc",
+  fontFamily: "var(--font-display)",
+  fontSize: "clamp(1.05rem, 2vw, 1.45rem)",
+  fontWeight: 950,
+  letterSpacing: "0.075em",
+  textTransform: "uppercase",
+  textShadow: "0 0 18px rgba(0,0,0,0.45)",
 };
 
 function teamTelemetryResultStyle(won: boolean): CSSProperties {
@@ -4375,6 +4543,99 @@ const replayPlayerTableStyle: CSSProperties = {
   gap: "0.4rem",
 };
 
+const replayPlayerStackStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.34rem",
+};
+
+function replayTalentsToggleStyle(expanded: boolean): CSSProperties {
+  return {
+    marginTop: "0.28rem",
+    border: `1px solid ${expanded ? "rgba(125,211,252,0.44)" : "rgba(148,163,184,0.24)"}`,
+    background: expanded ? "rgba(14,165,233,0.14)" : "rgba(2,6,23,0.55)",
+    color: expanded ? "#bae6fd" : "#cbd5e1",
+    padding: "0.24rem 0.46rem",
+    fontSize: "0.56rem",
+    fontWeight: 900,
+    letterSpacing: "0.09em",
+    textTransform: "uppercase",
+    width: "fit-content",
+    cursor: "pointer",
+  };
+}
+
+function replayTalentsPanelStyle(tone: string): CSSProperties {
+  return {
+    border: `1px solid ${tone}2f`,
+    background: `linear-gradient(135deg, ${tone}12, rgba(2,6,23,0.74) 62%)`,
+    padding: "0.58rem 0.68rem",
+    display: "grid",
+    gap: "0.46rem",
+  };
+}
+
+const replayTalentsHeaderStyle: CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  justifyContent: "space-between",
+  gap: "0.5rem",
+  flexWrap: "wrap",
+};
+
+const replayTalentsTitleStyle: CSSProperties = {
+  color: "#e0f2fe",
+  fontSize: "0.62rem",
+  fontWeight: 950,
+  letterSpacing: "0.14em",
+  textTransform: "uppercase",
+};
+
+const replayTalentsMetaStyle: CSSProperties = {
+  color: "rgba(186,230,253,0.72)",
+  fontSize: "0.6rem",
+  fontWeight: 800,
+  letterSpacing: "0.08em",
+  textTransform: "uppercase",
+};
+
+const replayTalentsGridStyle: CSSProperties = {
+  display: "grid",
+  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+  gap: "0.42rem",
+};
+
+function replayTalentChipStyle(tone: string): CSSProperties {
+  return {
+    minWidth: 0,
+    border: `1px solid ${tone}36`,
+    background: `${tone}12`,
+    padding: "0.42rem 0.5rem",
+    display: "grid",
+    gap: "0.14rem",
+  };
+}
+
+const replayTalentTierStyle: CSSProperties = {
+  color: "rgba(125,211,252,0.84)",
+  fontSize: "0.56rem",
+  fontWeight: 900,
+  letterSpacing: "0.1em",
+  textTransform: "uppercase",
+};
+
+const replayTalentNameStyle: CSSProperties = {
+  color: "#f8fafc",
+  fontSize: "0.76rem",
+  fontWeight: 850,
+  lineHeight: 1.3,
+};
+
+const replayTalentsEmptyStyle: CSSProperties = {
+  color: "rgba(148,163,184,0.78)",
+  fontSize: "0.74rem",
+  lineHeight: 1.35,
+};
+
 const replayPlayerHeaderRowStyle: CSSProperties = {
   display: "grid",
   gridTemplateColumns:
@@ -4382,8 +4643,10 @@ const replayPlayerHeaderRowStyle: CSSProperties = {
   gap: "0.45rem",
   alignItems: "center",
   padding: "0 0.58rem",
-  color: "rgba(186,230,253,0.62)",
-  fontSize: "0.62rem",
+  border: "1px solid rgba(125,211,252,0.16)",
+  background: "linear-gradient(90deg, rgba(125,211,252,0.10), rgba(2,6,23,0.32))",
+  color: "rgba(219,234,254,0.86)",
+  fontSize: "0.7rem",
   fontWeight: 950,
   letterSpacing: "0.11em",
   textTransform: "uppercase",
@@ -4402,8 +4665,8 @@ function replayPlayerRowStyle(
     alignItems: "center",
     border: `1px solid ${current ? "#facc15" : won ? `${tone}40` : "rgba(148,163,184,0.14)"}`,
     background: `linear-gradient(90deg, ${tone}${won ? "18" : "0d"}, rgba(2,6,23,0.62))`,
-    padding: "0.52rem 0.58rem",
-    minHeight: "72px",
+    padding: "0.62rem 0.68rem",
+    minHeight: "82px",
     boxShadow: current
       ? "0 0 0 1px rgba(250,204,21,0.22), 0 0 22px rgba(250,204,21,0.12)"
       : "inset 0 1px 0 rgba(255,255,255,0.025)",
@@ -4438,15 +4701,50 @@ function replayHighlightCardStyle(tone: string): CSSProperties {
     minWidth: 0,
     position: "relative",
     overflow: "hidden",
-    border: `1px solid ${tone}30`,
-    background: `linear-gradient(135deg, ${tone}16, rgba(2,6,23,0.72) 58%, rgba(2,6,23,0.42))`,
-    padding: "0.78rem",
+    border: `1px solid ${tone}38`,
+    background: `linear-gradient(135deg, ${tone}1c, rgba(2,6,23,0.78) 54%, rgba(2,6,23,0.42))`,
+    padding: "0.92rem 0.9rem",
+    minHeight: "118px",
     display: "grid",
-    gap: "0.18rem",
-    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.04), 0 0 28px ${tone}0d`,
+    alignContent: "end",
+    gap: "0.2rem",
+    boxShadow: `inset 0 1px 0 rgba(255,255,255,0.045), 0 0 30px ${tone}10`,
     color: "rgba(226,232,240,0.72)",
   };
 }
+
+function replayHighlightOrbStyle(_tone: string): CSSProperties {
+  return {
+    position: "absolute",
+    top: "0.72rem",
+    right: "0.72rem",
+    width: "2.55rem",
+    height: "2.55rem",
+    display: "grid",
+    placeItems: "center",
+    opacity: 0.9,
+    overflow: "hidden",
+  };
+}
+
+const replayHighlightIconImageStyle: CSSProperties = {
+  width: "76%",
+  height: "76%",
+  objectFit: "contain",
+};
+
+
+const replayStatHeaderLabelStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "0.28rem",
+  minWidth: 0,
+  color: "rgba(219,234,254,0.86)",
+  fontSize: "0.7rem",
+  fontWeight: 950,
+  letterSpacing: "0.115em",
+  textTransform: "uppercase",
+};
 
 const replayPlayerMetricValueStyle: CSSProperties = {
   color: "#f8fafc",
@@ -4488,13 +4786,57 @@ function replayInlineMetricFillStyle(
 function telemetryMiniStatStyle(tone: string): CSSProperties {
   return {
     minWidth: 0,
-    border: `1px solid ${tone}22`,
-    background: "rgba(2,6,23,0.44)",
-    padding: "0.48rem 0.52rem",
+    border: `1px solid ${tone}2c`,
+    background: `linear-gradient(135deg, rgba(2,6,23,0.72), ${tone}0f)`,
+    padding: "0.56rem 0.58rem",
     display: "grid",
-    gap: "0.1rem",
+    gridTemplateColumns: "auto minmax(0, 1fr)",
+    gridTemplateRows: "auto auto",
+    columnGap: "0.48rem",
+    rowGap: "0.04rem",
+    alignItems: "center",
+    boxShadow: "inset 0 1px 0 rgba(255,255,255,0.035)",
   };
 }
+
+function telemetryMiniIconStyle(_tone: string): CSSProperties {
+  return {
+    gridRow: "1 / 3",
+    width: "1.75rem",
+    height: "1.75rem",
+    display: "grid",
+    placeItems: "center",
+    overflow: "hidden",
+  };
+}
+
+const telemetryMiniIconImageStyle: CSSProperties = {
+  width: "78%",
+  height: "78%",
+  objectFit: "contain",
+};
+
+const telemetryMiniLabelStyle: CSSProperties = {
+  minWidth: 0,
+  color: "rgba(186,230,253,0.70)",
+  fontSize: "0.58rem",
+  fontWeight: 950,
+  letterSpacing: "0.12em",
+  textTransform: "uppercase",
+};
+
+const telemetryMiniValueStyle: CSSProperties = {
+  minWidth: 0,
+  color: "#f8fafc",
+  fontFamily: "var(--font-display)",
+  fontSize: "0.86rem",
+  fontWeight: 950,
+  letterSpacing: "0.05em",
+  overflow: "hidden",
+  textOverflow: "ellipsis",
+  whiteSpace: "nowrap",
+};
+
 
 function heroEmblemStyle(
   tone: string,
@@ -4502,8 +4844,8 @@ function heroEmblemStyle(
   hasImage = false,
 ): CSSProperties {
   return {
-    width: "48px",
-    height: "48px",
+    width: "58px",
+    height: "58px",
     position: "relative",
     overflow: "hidden",
     display: "grid",
@@ -5099,79 +5441,69 @@ const infoBannerStyle: CSSProperties = {
 };
 
 const timelineWrapStyle: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "repeat(5, 1fr)",
-  gap: "0.42rem",
-  alignItems: "start",
-};
-
-const timelineStepStyle: CSSProperties = {
-  display: "grid",
-  gap: "0.35rem",
-};
-
-const timelineNodeRowStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",
+  gap: "0.32rem",
+  flexWrap: "wrap",
+  marginTop: "0.12rem",
 };
 
-const timelineLabelStyle = (active: boolean): CSSProperties => ({
-  color: active ? "#e2e8f0" : "#94a3b8",
-  fontSize: "0.68rem",
-  fontWeight: active ? 800 : 700,
-  textTransform: "uppercase",
-  letterSpacing: "0.1em",
-});
-
-function timelineNodeStyle(
+function timelinePillStyle(
   done: boolean,
   current: boolean,
   cancelled: boolean,
 ): CSSProperties {
   return {
-    width: "28px",
-    height: "28px",
-    borderRadius: "999px",
-    display: "flex",
+    display: "inline-flex",
     alignItems: "center",
-    justifyContent: "center",
-    fontFamily: "var(--font-display)",
-    fontWeight: 800,
+    gap: "0.24rem",
+    padding: current ? "0.22rem 0.42rem" : "0.18rem 0.36rem",
     border: `1px solid ${
       cancelled
-        ? "rgba(248,113,113,0.5)"
+        ? "rgba(248,113,113,0.44)"
         : current
-          ? "rgba(0,200,255,0.6)"
+          ? "rgba(125,211,252,0.54)"
           : done
-            ? "rgba(74,222,128,0.45)"
-            : "rgba(148,163,184,0.25)"
+            ? "rgba(74,222,128,0.28)"
+            : "rgba(148,163,184,0.18)"
     }`,
     background: cancelled
-      ? "rgba(127,29,29,0.35)"
+      ? "rgba(127,29,29,0.22)"
       : current
-        ? "rgba(0,200,255,0.16)"
+        ? "rgba(14,165,233,0.15)"
         : done
-          ? "rgba(74,222,128,0.14)"
-          : "rgba(15,23,42,0.82)",
+          ? "rgba(34,197,94,0.08)"
+          : "rgba(15,23,42,0.42)",
     color: cancelled
       ? "#fecaca"
       : current
-        ? "#7dd3fc"
+        ? "#e0f2fe"
         : done
-          ? "#86efac"
-          : "#94a3b8",
-    flexShrink: 0,
+          ? "rgba(187,247,208,0.78)"
+          : "rgba(148,163,184,0.66)",
+    fontSize: "0.58rem",
+    fontWeight: current ? 950 : 850,
+    letterSpacing: "0.105em",
+    lineHeight: 1,
+    textTransform: "uppercase",
+    whiteSpace: "nowrap",
   };
 }
 
-function timelineLineStyle(active: boolean): CSSProperties {
+function timelineGlyphStyle(
+  done: boolean,
+  current: boolean,
+  cancelled: boolean,
+): CSSProperties {
   return {
-    flex: 1,
-    height: "2px",
-    marginInline: "0.4rem",
-    background: active
-      ? "linear-gradient(90deg, #22c55e, #38bdf8)"
-      : "rgba(148,163,184,0.2)",
+    color: cancelled
+      ? "#fca5a5"
+      : current
+        ? "#38bdf8"
+        : done
+          ? "#4ade80"
+          : "rgba(148,163,184,0.5)",
+    fontSize: current ? "0.62rem" : "0.56rem",
   };
 }
 

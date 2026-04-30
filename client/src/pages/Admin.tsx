@@ -103,6 +103,7 @@ type AdminMatch = {
   status: string;
   selectedMap?: string | null;
   createdAt: string;
+  scrimDetails?: { team1Name: string; team2Name: string; notes?: string | null; scheduledAt?: string | null } | null;
   players: Array<{
     userId: string | null;
     isBot?: boolean;
@@ -135,6 +136,20 @@ type AdminUser = {
   discordUsername?: string | null;
   bnetBattletag?: string | null;
   createdAt: string;
+};
+
+type AdminScrimsResponse = {
+  scrims: AdminMatch[];
+};
+
+type TeamTestBotsResponse = {
+  ok: boolean;
+  teamId: string;
+  targetSize: number;
+  activeCountBefore: number;
+  activeCountAfter: number;
+  addedCount: number;
+  bots: Array<{ id: string; username: string; mmr: number; rank: string; isBot: boolean }>;
 };
 
 type AdminUsersResponse = {
@@ -240,6 +255,7 @@ export function Admin() {
   const [queue, setQueue] = useState<QueueResponse>({ count: 0, players: [] });
   const [matchmakingMetrics, setMatchmakingMetrics] = useState<MatchmakingMetrics | null>(null);
   const [matches, setMatches] = useState<AdminMatch[]>([]);
+  const [scrims, setScrims] = useState<AdminMatch[]>([]);
   const [usersResponse, setUsersResponse] = useState<AdminUsersResponse | null>(null);
   const [clientErrors, setClientErrors] = useState<ClientErrorEvent[]>([]);
   const [auditLogs, setAuditLogs] = useState<AdminAuditLog[]>([]);
@@ -250,6 +266,21 @@ export function Admin() {
   const [matchBusyId, setMatchBusyId] = useState<string | null>(null);
   const [userBusyId, setUserBusyId] = useState<string | null>(null);
   const [surfaceError, setSurfaceError] = useState<string | null>(null);
+  const [scrimBusy, setScrimBusy] = useState(false);
+  const [scrimForm, setScrimForm] = useState({
+    team1Name: 'Storm Alpha',
+    team2Name: 'Nexus Beta',
+    captain1UserId: '',
+    captain2UserId: '',
+    team1PlayerIds: '',
+    team2PlayerIds: '',
+    notes: '',
+  });
+  const [teamBotForm, setTeamBotForm] = useState({
+    teamId: '',
+    targetSize: 5,
+  });
+  const [teamBotResult, setTeamBotResult] = useState<TeamTestBotsResponse | null>(null);
 
   const loadUsers = useCallback(async (search = userSearch, filter = userFilter) => {
     const { data } = await api.get<AdminUsersResponse>("/admin/users", {
@@ -264,11 +295,12 @@ export function Admin() {
   const loadAdminSurface = useCallback(async () => {
     setIsRefreshing(true);
     try {
-      const [statsResponse, queueResponse, metricsResponse, matchesResponse, errorsResponse, auditResponse] = await Promise.all([
+      const [statsResponse, queueResponse, metricsResponse, matchesResponse, scrimsResponse, errorsResponse, auditResponse] = await Promise.all([
         api.get<AdminStats>("/admin/stats"),
         api.get<QueueResponse>("/admin/queue"),
         api.get<MatchmakingMetrics>("/admin/matchmaking/metrics"),
         api.get<AdminMatch[]>("/admin/matches"),
+        api.get<AdminScrimsResponse>("/admin/scrims"),
         api.get<ClientErrorsResponse>("/admin/monitoring/client-errors", {
           params: { limit: 12 },
         }),
@@ -285,6 +317,7 @@ export function Admin() {
           ["PENDING", "ACCEPTING", "VETOING", "PLAYING", "VOTING", "CANCELLED"].includes(match.status),
         ),
       );
+      setScrims(scrimsResponse.data.scrims);
       setClientErrors(errorsResponse.data.events);
       setAuditLogs(auditResponse.data.logs);
       setSurfaceError(null);
@@ -315,6 +348,50 @@ export function Admin() {
     () => usersResponse?.users.filter((entry) => entry.isSuspect || entry.isComputedSuspicious).length ?? 0,
     [usersResponse],
   );
+
+
+  function parsePlayerIds(value: string, captainId: string) {
+    return [captainId, ...value.split(/[\n,]+/)]
+      .map((entry) => entry.trim())
+      .filter(Boolean)
+      .filter((entry, index, arr) => arr.indexOf(entry) === index);
+  }
+
+  async function handleCreateScrim() {
+    try {
+      setScrimBusy(true);
+      const { data } = await api.post<{ matchId: string }>("/admin/scrims", {
+        team1Name: scrimForm.team1Name,
+        team2Name: scrimForm.team2Name,
+        captain1UserId: scrimForm.captain1UserId,
+        captain2UserId: scrimForm.captain2UserId,
+        team1PlayerIds: parsePlayerIds(scrimForm.team1PlayerIds, scrimForm.captain1UserId),
+        team2PlayerIds: parsePlayerIds(scrimForm.team2PlayerIds, scrimForm.captain2UserId),
+        notes: scrimForm.notes || undefined,
+      });
+      await loadAdminSurface();
+      navigate({ to: "/match/$matchId", params: { matchId: data.matchId } });
+    } catch (err: any) {
+      setSurfaceError(err?.response?.data?.error?.message ?? "No pude crear el scrim.");
+    } finally {
+      setScrimBusy(false);
+    }
+  }
+
+  async function handleAddTeamBots() {
+    try {
+      setScrimBusy(true);
+      const { data } = await api.post<TeamTestBotsResponse>(`/admin/teams/${teamBotForm.teamId.trim()}/test-bots`, {
+        targetSize: teamBotForm.targetSize,
+      });
+      setTeamBotResult(data);
+      await loadAdminSurface();
+    } catch (err: any) {
+      setSurfaceError(err?.response?.data?.error?.message ?? "No pude agregar bots al equipo.");
+    } finally {
+      setScrimBusy(false);
+    }
+  }
 
   async function handleFillBots() {
     try {
@@ -604,6 +681,71 @@ export function Admin() {
             )}
           </AdminSection>
 
+
+          <AdminSection
+            eyebrow="Scrims beta"
+            title="Crear equipo vs equipo"
+            subtitle="Scrim admin/manual para registrar Team A vs Team B sin esperar clanes completos. Pegá IDs de usuario separados por coma o línea."
+            actions={<Tag tone="#f0a500">TEAM mode</Tag>}
+          >
+            <div style={botToolsStyle}>
+              <div style={{ display: "grid", gap: "0.3rem" }}>
+                <div style={rowTitleStyle}>Bots para self-serve scrims</div>
+                <div style={sectionSubtitleStyle}>
+                  Pegá el teamId de un equipo real y completalo a 5 miembros con bots. En `/scrims`, el capitán real online puede seleccionarlos como titulares.
+                </div>
+              </div>
+              <div style={sectionActionRowStyle}>
+                <input value={teamBotForm.teamId} onChange={(event) => setTeamBotForm((prev) => ({ ...prev, teamId: event.target.value }))} placeholder="teamId" style={searchInputStyle} />
+                <input value={teamBotForm.targetSize} onChange={(event) => setTeamBotForm((prev) => ({ ...prev, targetSize: Number(event.target.value) || 5 }))} type="number" min={1} max={10} style={{ ...searchInputStyle, maxWidth: 110 }} />
+                <button type="button" onClick={() => void handleAddTeamBots()} disabled={scrimBusy || teamBotForm.teamId.trim().length < 1} style={softButtonStyle}>
+                  <Bot size={15} />
+                  Completar equipo
+                </button>
+              </div>
+              {teamBotResult ? (
+                <div style={tinyMetaStyle}>
+                  Agregados {teamBotResult.addedCount} bots · miembros activos {teamBotResult.activeCountBefore} → {teamBotResult.activeCountAfter}
+                  {teamBotResult.bots.length ? ` · ${teamBotResult.bots.map((bot) => bot.username).join(", ")}` : " · no hacía falta agregar más"}
+                </div>
+              ) : null}
+            </div>
+
+            <div style={scrimFormGridStyle}>
+              <input value={scrimForm.team1Name} onChange={(event) => setScrimForm((prev) => ({ ...prev, team1Name: event.target.value }))} placeholder="Nombre Team A" style={searchInputStyle} />
+              <input value={scrimForm.team2Name} onChange={(event) => setScrimForm((prev) => ({ ...prev, team2Name: event.target.value }))} placeholder="Nombre Team B" style={searchInputStyle} />
+              <input value={scrimForm.captain1UserId} onChange={(event) => setScrimForm((prev) => ({ ...prev, captain1UserId: event.target.value }))} placeholder="Captain A userId" style={searchInputStyle} />
+              <input value={scrimForm.captain2UserId} onChange={(event) => setScrimForm((prev) => ({ ...prev, captain2UserId: event.target.value }))} placeholder="Captain B userId" style={searchInputStyle} />
+              <textarea value={scrimForm.team1PlayerIds} onChange={(event) => setScrimForm((prev) => ({ ...prev, team1PlayerIds: event.target.value }))} placeholder="Roster A userIds" style={textareaStyle} />
+              <textarea value={scrimForm.team2PlayerIds} onChange={(event) => setScrimForm((prev) => ({ ...prev, team2PlayerIds: event.target.value }))} placeholder="Roster B userIds" style={textareaStyle} />
+              <textarea value={scrimForm.notes} onChange={(event) => setScrimForm((prev) => ({ ...prev, notes: event.target.value }))} placeholder="Notas del scrim: Bo3, mapa inicial, contexto" style={{ ...textareaStyle, gridColumn: "1 / -1" }} />
+            </div>
+            <div style={sectionActionRowStyle}>
+              <button type="button" onClick={() => void handleCreateScrim()} disabled={scrimBusy} style={primaryActionStyle}>
+                <Swords size={15} />
+                {scrimBusy ? "Creando scrim…" : "Crear sala scrim"}
+              </button>
+              <span style={tinyMetaStyle}>Tip: el capitán se agrega automáticamente al roster de su lado.</span>
+            </div>
+
+            {scrims.length > 0 ? (
+              <div style={{ display: "grid", gap: "0.65rem", marginTop: "0.85rem" }}>
+                {scrims.slice(0, 6).map((scrim) => (
+                  <div key={scrim.id} style={matchCardStyle}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={rowTitleStyle}>
+                        {scrim.scrimDetails?.team1Name ?? "Team A"} vs {scrim.scrimDetails?.team2Name ?? "Team B"}
+                        <Tag tone="#f0a500">{scrim.status}</Tag>
+                      </div>
+                      <div style={rowMetaStyle}>Creado {formatDateTime(scrim.createdAt)} · {scrim.players.filter((player) => !player.isBot).length} jugadores reales</div>
+                    </div>
+                    <Link to="/match/$matchId" params={{ matchId: scrim.id }} style={tinyLinkStyle}>Abrir sala</Link>
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </AdminSection>
+
           <AdminSection
             eyebrow="Match monitor"
             title="Matches operativos"
@@ -625,7 +767,8 @@ export function Admin() {
                     <div key={match.id} style={matchCardStyle}>
                       <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
                         <div style={rowTitleStyle}>
-                          {match.status} · {match.id.slice(0, 8)}
+                          {match.scrimDetails ? `${match.scrimDetails.team1Name} vs ${match.scrimDetails.team2Name}` : `${match.status} · ${match.id.slice(0, 8)}`}
+                          {match.scrimDetails ? <Tag tone="#f0a500">SCRIM</Tag> : null}
                           {match.selectedMap ? <Tag tone="#c084fc">{match.selectedMap}</Tag> : null}
                         </div>
                         <div style={rowMetaStyle}>
@@ -1341,3 +1484,14 @@ const emptyStateStyle: CSSProperties = {
   border: "1px dashed rgba(148,163,184,0.18)",
   background: "rgba(2,6,23,0.35)",
 };
+
+const botToolsStyle: CSSProperties = {
+  display: "grid",
+  gap: "0.65rem",
+  padding: "0.85rem",
+  border: "1px solid rgba(14,165,233,0.18)",
+  background: "rgba(14,165,233,0.08)",
+};
+
+const scrimFormGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: "0.65rem", marginBottom: "0.75rem" };
+const textareaStyle: CSSProperties = { ...searchInputStyle, minHeight: "78px", resize: "vertical" };

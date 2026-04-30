@@ -9,6 +9,8 @@ import { calculateRank } from '../users/player-progression'
 import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
 import { getIO } from '../../infrastructure/socket/server'
 import { clearQueue, fillQueueWithBots, getMatchmakingAdminMetrics } from '../matchmaking/matchmaking.service'
+import { attachScrimDetailsToMatches, createAdminScrim, listAdminScrims } from '../scrims/scrims.service'
+import { addTestBotsToTeam } from '../teams/teams.service'
 
 export const adminRouter = Router()
 
@@ -513,12 +515,84 @@ adminRouter.patch('/users/:id/role', async (req, res, next) => {
   }
 })
 
+
+const AdminScrimSchema = z.object({
+  team1Name: z.string().trim().min(2).max(80),
+  team2Name: z.string().trim().min(2).max(80),
+  captain1UserId: z.string().trim().min(1),
+  captain2UserId: z.string().trim().min(1),
+  team1PlayerIds: z.array(z.string().trim().min(1)).max(5).default([]),
+  team2PlayerIds: z.array(z.string().trim().min(1)).max(5).default([]),
+  notes: z.string().trim().max(500).optional().nullable(),
+  scheduledAt: z.string().datetime().optional().nullable(),
+})
+
+adminRouter.get('/scrims', async (req, res, next) => {
+  try {
+    const limit = z.coerce.number().int().min(1).max(100).parse(req.query.limit ?? 30)
+    res.json({ scrims: await listAdminScrims(limit) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+adminRouter.post('/scrims', async (req, res, next) => {
+  try {
+    const actorId = (req as unknown as AuthRequest).userId
+    const payload = AdminScrimSchema.parse(req.body ?? {})
+    const match = await createAdminScrim({
+      actorId,
+      ...payload,
+    })
+
+    await recordAdminAudit(db, {
+      actorId,
+      action: 'SCRIM_CREATED',
+      entityType: 'MATCH',
+      entityId: match.id,
+      summary: `Creó scrim ${payload.team1Name} vs ${payload.team2Name}.`,
+      metadata: {
+        team1Name: payload.team1Name,
+        team2Name: payload.team2Name,
+        playerCount: match.players?.length ?? 0,
+      } as Prisma.InputJsonValue,
+    })
+
+    res.status(201).json({ ok: true, match, matchId: match.id })
+  } catch (err) {
+    next(err)
+  }
+})
+
+adminRouter.post('/teams/:teamId/test-bots', async (req, res, next) => {
+  try {
+    const actorId = (req as unknown as AuthRequest).userId
+    const payload = z.object({
+      targetSize: z.number().int().min(1).max(10).default(5),
+    }).parse(req.body ?? {})
+    const result = await addTestBotsToTeam(req.params.teamId, payload)
+
+    await recordAdminAudit(db, {
+      actorId,
+      action: 'TEAM_TEST_BOTS_ADDED',
+      entityType: 'TEAM',
+      entityId: req.params.teamId,
+      summary: `Agregó ${result.addedCount} bots de prueba al equipo ${req.params.teamId.slice(0, 8)}.`,
+      metadata: result as Prisma.InputJsonValue,
+    })
+
+    res.status(201).json({ ok: true, ...result })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ─── Matches ──────────────────────────────────────────────
 
 adminRouter.get('/matches', async (req, res, next) => {
   try {
     const status = req.query.status as string | undefined
-    const matches = await db.match.findMany({
+    const matches = await (db.match as any).findMany({
       where: status ? { status: status as any } : undefined,
       include: {
         players: {
@@ -529,7 +603,7 @@ adminRouter.get('/matches', async (req, res, next) => {
       orderBy: { createdAt: 'desc' },
       take: 50,
     })
-    res.json(matches)
+    res.json(await attachScrimDetailsToMatches(matches))
   } catch (err) {
     next(err)
   }

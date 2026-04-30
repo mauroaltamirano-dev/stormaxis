@@ -47,6 +47,75 @@ enum ReplayUploadStatus {
   FAILED
 }
 
+enum TeamRole {
+  OWNER
+  CAPTAIN
+  MEMBER
+}
+
+enum TeamCompetitiveRole {
+  UNASSIGNED
+  CAPTAIN
+  STARTER
+  SUBSTITUTE
+  COACH
+  STAFF
+}
+
+enum TeamStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum TeamMemberStatus {
+  ACTIVE
+  INVITED
+  LEFT
+  KICKED
+}
+
+enum TeamInviteStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+enum TeamJoinRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  EXPIRED
+}
+
+enum ScrimSearchStatus {
+  OPEN
+  CHALLENGED
+  MATCHED
+  CANCELLED
+  EXPIRED
+}
+
+enum ScrimChallengeStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  EXPIRED
+}
+
+enum ScrimAccessRole {
+  COACH
+  OBSERVER
+}
+
+enum MatchOrigin {
+  QUEUE
+  SCRIM_SELF_SERVE
+  SCRIM_ADMIN
+}
+
 // ─── Models ───────────────────────────────────────────────
 
 model User {
@@ -80,6 +149,7 @@ model User {
   // Anti-smurfing
   isBanned   Boolean  @default(false)
   isSuspect  Boolean  @default(false)
+  isBot      Boolean  @default(false)
   banReason  String?
   bannedAt   DateTime?
 
@@ -94,6 +164,14 @@ model User {
   replayUploads    MatchReplayUpload[] @relation("ReplayUploader")
   adminAuditLogsAuthored AdminAuditLog[] @relation("AdminAuditActor")
   adminAuditLogsTargeted AdminAuditLog[] @relation("AdminAuditTargetUser")
+  ownedTeams Team[] @relation("TeamOwner")
+  teamMemberships TeamMember[]
+  teamInvitesSent TeamInvite[] @relation("TeamInviteSender")
+  teamInvitesReceived TeamInvite[] @relation("TeamInviteRecipient")
+  teamJoinRequestsSent TeamJoinRequest[] @relation("TeamJoinRequestSender")
+  teamJoinRequestsReviewed TeamJoinRequest[] @relation("TeamJoinRequestReviewer")
+  scrimSearchesCreated ScrimSearch[] @relation("ScrimSearchCreator")
+  scrimAccesses ScrimAccess[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -103,6 +181,163 @@ model User {
   @@index([mainRole])
   @@index([secondaryRole])
   @@index([countryCode])
+  @@index([isBot])
+}
+
+model Team {
+  id      String @id @default(cuid())
+  name    String @db.VarChar(80)
+  slug    String @unique @db.VarChar(90)
+  logoUrl String? @db.VarChar(500)
+  bannerUrl String? @db.VarChar(500)
+  description String? @db.VarChar(500)
+  availabilityDays Json?
+  status  TeamStatus @default(ACTIVE)
+
+  ownerId String
+  owner   User @relation("TeamOwner", fields: [ownerId], references: [id], onDelete: Cascade)
+
+  members TeamMember[]
+  invites TeamInvite[]
+  joinRequests TeamJoinRequest[]
+  scrimSearches ScrimSearch[]
+  challengesFrom ScrimChallenge[] @relation("ChallengeFromTeam")
+  challengesTo ScrimChallenge[] @relation("ChallengeToTeam")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([ownerId])
+  @@index([status, createdAt])
+}
+
+model TeamMember {
+  id     String @id @default(cuid())
+  teamId String
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  userId String
+  user   User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  role   TeamRole @default(MEMBER)
+  competitiveRole TeamCompetitiveRole @default(UNASSIGNED)
+  status TeamMemberStatus @default(ACTIVE)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([teamId, userId])
+  @@index([userId, status])
+  @@index([teamId, status])
+  @@index([teamId, competitiveRole, status])
+}
+
+model TeamInvite {
+  id     String @id @default(cuid())
+  teamId String
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  invitedUserId String
+  invitedUser   User @relation("TeamInviteRecipient", fields: [invitedUserId], references: [id], onDelete: Cascade)
+  invitedById String
+  invitedBy   User @relation("TeamInviteSender", fields: [invitedById], references: [id], onDelete: Cascade)
+
+  status TeamInviteStatus @default(PENDING)
+  respondedAt DateTime?
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teamId, status])
+  @@index([invitedUserId, status])
+}
+
+model TeamJoinRequest {
+  id     String @id @default(cuid())
+  teamId String
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+
+  userId String
+  user   User @relation("TeamJoinRequestSender", fields: [userId], references: [id], onDelete: Cascade)
+  reviewedById String?
+  reviewedBy User? @relation("TeamJoinRequestReviewer", fields: [reviewedById], references: [id], onDelete: SetNull)
+
+  status TeamJoinRequestStatus @default(PENDING)
+  respondedAt DateTime?
+  expiresAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([teamId, status])
+  @@index([userId, status])
+}
+
+model ScrimSearch {
+  id String @id @default(cuid())
+
+  teamId String
+  team   Team @relation(fields: [teamId], references: [id], onDelete: Cascade)
+  createdById String
+  createdBy   User @relation("ScrimSearchCreator", fields: [createdById], references: [id], onDelete: Cascade)
+
+  status ScrimSearchStatus @default(OPEN)
+  starterUserIds Json
+  coachUserId String?
+  observerUserIds Json?
+  notes String? @db.VarChar(500)
+
+  outgoingChallenges ScrimChallenge[] @relation("ChallengeFromSearch")
+  incomingChallenges ScrimChallenge[] @relation("ChallengeToSearch")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  expiresAt DateTime?
+
+  @@index([teamId, status])
+  @@index([status, createdAt])
+}
+
+model ScrimChallenge {
+  id String @id @default(cuid())
+
+  fromSearchId String
+  fromSearch ScrimSearch @relation("ChallengeFromSearch", fields: [fromSearchId], references: [id], onDelete: Cascade)
+  toSearchId String
+  toSearch ScrimSearch @relation("ChallengeToSearch", fields: [toSearchId], references: [id], onDelete: Cascade)
+
+  fromTeamId String
+  fromTeam Team @relation("ChallengeFromTeam", fields: [fromTeamId], references: [id], onDelete: Cascade)
+  toTeamId String
+  toTeam Team @relation("ChallengeToTeam", fields: [toTeamId], references: [id], onDelete: Cascade)
+
+  status ScrimChallengeStatus @default(PENDING)
+  matchId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  respondedAt DateTime?
+
+  @@unique([fromSearchId, toSearchId])
+  @@index([toTeamId, status])
+  @@index([fromTeamId, status])
+}
+
+model ScrimAccess {
+  id String @id @default(cuid())
+  matchId String
+  match Match @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  userId String
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  team Int
+  role ScrimAccessRole
+
+  createdAt DateTime @default(now())
+
+  @@unique([matchId, userId])
+  @@index([matchId, team])
+  @@index([userId])
 }
 
 model RefreshToken {
@@ -122,6 +357,7 @@ model Match {
   id     String      @id @default(cuid())
   status MatchStatus @default(PENDING)
   mode   GameMode    @default(COMPETITIVE)
+  origin MatchOrigin @default(QUEUE)
   region String      @default("SA")
 
   // Post-veto
@@ -140,6 +376,8 @@ model Match {
   votes    Vote[]
   mvpVotes MvpVote[]
   replayUploads MatchReplayUpload[]
+  scrimDetails ScrimDetails?
+  scrimAccesses ScrimAccess[]
 
   createdAt DateTime  @default(now())
   startedAt DateTime?
@@ -148,6 +386,30 @@ model Match {
   @@index([status])
   @@index([mvpUserId])
   @@index([createdAt])
+  @@index([origin, createdAt])
+}
+
+
+model ScrimDetails {
+  id      String @id @default(cuid())
+  matchId String @unique
+  match   Match  @relation(fields: [matchId], references: [id], onDelete: Cascade)
+
+  team1Name String @db.VarChar(80)
+  team2Name String @db.VarChar(80)
+  notes     String? @db.VarChar(500)
+  scheduledAt DateTime?
+  createdById String?
+  team1Id String?
+  team2Id String?
+  challengeId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([createdAt])
+  @@index([scheduledAt])
+  @@index([createdById])
 }
 
 model MatchReplayUpload {

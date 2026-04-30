@@ -1,0 +1,19 @@
+change: teams-self-serve-scrims
+status: apply
+artifacts:
+  exploration: complete
+  proposal: complete
+  specs: complete
+  design: complete
+  tasks: complete
+implementation: automated_verification_passed_manual_smoke_pending
+notes:
+  - Calendar/PRACC scheduled scrims are explicitly deferred.
+  - Existing admin/manual scrims remain fallback during beta.
+  - 2026-04-29: npm run test --workspace=server passed 39/39.
+  - 2026-04-29: npm run typecheck passed.
+  - 2026-04-29: npm run check passed, including client production build.
+  - 2026-04-29: Added member removal, duplicate invite cleanup, admin test bots, bot-aware scrim validation, and bot auto-accept.
+  - 2026-04-29: npm run test --workspace=server passed 46/46 after bot/member-removal changes.
+  - 2026-04-29: npm run check passed after bot/member-removal changes.
+  - Manual smoke 5.4 still requires two real teams/users plus Discord access.

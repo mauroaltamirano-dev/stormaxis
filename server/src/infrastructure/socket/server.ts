@@ -75,6 +75,16 @@ export function createSocketServer(httpServer: HttpServer) {
   return io
 }
 
+export async function getOnlineUserIds() {
+  if (!io) return new Set<string>()
+  const sockets = await io.fetchSockets()
+  return new Set(
+    sockets
+      .map((socket) => socket.data.userId as string | undefined)
+      .filter((userId): userId is string => Boolean(userId)),
+  )
+}
+
 export function getIO() {
   if (!io) throw new Error('Socket.io not initialized')
   return io

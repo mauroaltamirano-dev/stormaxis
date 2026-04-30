@@ -1,0 +1,13 @@
+change: teams-hub-live-scrims
+status: apply
+artifacts:
+  proposal: complete
+  design: complete
+  tasks: complete
+implementation: partial
+notes:
+  - 2026-04-29: Change created from live testing feedback on scrim UX and team management.
+  - Priority issues: global accept modal, live/semi-live updates, and separation of /teams vs /scrims responsibilities.
+  - 2026-04-29: Implemented first vertical slice (schema+migration, teams hub backend endpoints, events live/semi-live, Teams page, global match accept modal).
+  - 2026-04-29: Added targeted user-room socket emissions with versioned payloads, refactored /scrims to match-search focus, and added SCRIM vs QUEUE badge in active matchroom header.
+  - 2026-04-29: Added role-contract enforcement (single competitive captain + max five starters) and prepared manual smoke checklist doc.

@@ -260,9 +260,13 @@ export function Stats() {
             subtitle="Datos reales actuales: mapa, resultado, team, delta ELO y estado."
           >
             {loading ? (
-              <EmptyState text="Sincronizando tu historial competitivo..." />
+              <EmptyState title="Sincronizando historial" text="Estamos leyendo partidas, replays y deltas de ELO guardados por la beta." />
             ) : visibleMatches.length === 0 ? (
-              <EmptyState text="No hay partidas para este filtro. Cuando cierres una partida, este panel se llena solo con mapa, resultado y ELO." />
+              <EmptyState
+                title="Panel listo para tu primera muestra"
+                text="Cuando cierres una partida o scrim, este panel se llena con mapa, resultado, ELO y acceso directo al matchroom."
+                action="Siguiente paso: buscar partida o pedir una scrim beta."
+              />
             ) : (
               <div style={historyListStyle}>
                 {visibleMatches.map((entry) => {
@@ -316,7 +320,7 @@ export function Stats() {
             subtitle="Reconstrucción aproximada desde el MMR actual y los deltas de las últimas partidas."
           >
             {mmrTrend.length < 2 ? (
-              <EmptyState text="Faltan partidas con delta ELO para dibujar tendencia." />
+              <EmptyState title="Tendencia pendiente" text="Faltan al menos dos partidas con delta ELO para dibujar momentum real." />
             ) : (
               <MmrTrendCard points={mmrTrend} netElo={netElo} />
             )}
@@ -328,7 +332,7 @@ export function Stats() {
             subtitle="Lectura rápida tipo scouting."
           >
             {recentForm.length === 0 ? (
-              <EmptyState text="Todavía no hay forma reciente; necesitás al menos una partida completada." />
+              <EmptyState title="Sin forma reciente" text="Completá una partida para ver la racha de los últimos 10 resultados." />
             ) : (
               <div style={formRailStyle}>
                 {recentForm.map((entry, index) => {
@@ -353,7 +357,7 @@ export function Stats() {
             subtitle="Con el MVP actual sólo podemos medir mapa/resultado."
           >
             {mapStats.length === 0 ? (
-              <EmptyState text="Sin mapas consolidados en este rango. El map pool aparece apenas haya resultados cerrados." />
+              <EmptyState title="Map pool vacío" text="El map pool aparece apenas haya resultados cerrados en matchmaking o scrims." />
             ) : (
               <div style={{ display: "grid", gap: "0.6rem" }}>
                 {mapStats.map((map) => (
@@ -462,8 +466,14 @@ function MmrTrendCard({ points, netElo }: { points: Array<{ label: string; value
   );
 }
 
-function EmptyState({ text }: { text: string }) {
-  return <div style={emptyStyle}>{text}</div>;
+function EmptyState({ title, text, action }: { title: string; text: string; action?: string }) {
+  return (
+    <div style={emptyStyle}>
+      <strong>{title}</strong>
+      <span>{text}</span>
+      {action ? <small>{action}</small> : null}
+    </div>
+  );
 }
 
 const pageStyle: CSSProperties = { display: "grid", gap: "1rem" };
@@ -501,8 +511,7 @@ const trendCardStyle: CSSProperties = { display: "grid", gap: "0.55rem", border:
 const trendSvgStyle: CSSProperties = { width: "100%", height: "112px", overflow: "visible", filter: "drop-shadow(0 0 14px rgba(56,189,248,0.18))" };
 const trendFooterStyle: CSSProperties = { display: "flex", justifyContent: "space-between", gap: "0.75rem", color: "rgba(148,163,184,0.78)", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em" };
 const dataSlotStyle: CSSProperties = { display: "grid", gridTemplateColumns: "auto 0.7fr 1.3fr", alignItems: "center", gap: "0.5rem", color: "rgba(226,232,240,0.72)", fontSize: "0.8rem", border: "1px solid rgba(125,211,252,0.10)", background: "rgba(14,116,144,0.08)", padding: "0.55rem" };
-const emptyStyle: CSSProperties = { border: "1px dashed rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.35)", color: "rgba(148,163,184,0.78)", padding: "1rem", textAlign: "center", fontWeight: 800 };
+const emptyStyle: CSSProperties = { border: "1px dashed rgba(125,211,252,0.24)", background: "linear-gradient(135deg, rgba(14,116,144,0.10), rgba(2,6,23,0.35))", color: "rgba(226,232,240,0.78)", padding: "1rem", textAlign: "center", fontWeight: 800, display: "grid", gap: "0.35rem", lineHeight: 1.45 };
 const eloBandStyle: CSSProperties = { display: "grid", gap: "0.6rem", border: "1px solid rgba(125,211,252,0.14)", background: "rgba(8,20,34,0.38)", padding: "0.9rem" };
 const eloTrackStyle: CSSProperties = { height: "8px", overflow: "hidden", border: "1px solid rgba(148,163,184,0.14)", background: "linear-gradient(90deg, rgba(248,113,113,0.18), rgba(148,163,184,0.12) 50%, rgba(74,222,128,0.18))" };
 const eloTrackFillStyle: CSSProperties = { display: "block", height: "100%", background: "linear-gradient(90deg, #38bdf8, #4ade80)", boxShadow: "0 0 18px rgba(56,189,248,0.35)" };
-

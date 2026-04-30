@@ -164,7 +164,7 @@ export function Heroes() {
       </section>
 
       {loading ? (
-        <EmptyState title="Analizando historial" text="Cruzando partidas completadas con replays parseados..." />
+        <EmptyState title="Analizando historial" text="Cruzando partidas completadas con replays parseados..." actions={["Completá una partida", "Subí el replay al cierre"]} />
       ) : tab === 'pool' ? (
         <section style={styles.poolLayout}>
           <aside style={styles.featureCard}>
@@ -188,14 +188,14 @@ export function Heroes() {
 
           <div style={styles.heroGridCompact}>
             {filteredStats.length ? filteredStats.map((stat) => <HeroUsageCard key={stat.hero.id} stat={stat} />) : (
-              <EmptyState title="Sin héroes detectados" text="El historial por sí solo no trae picks: con replays cargados aparecen tus héroes, winrate, KDA y daño promedio." />
+              <EmptyState title="Sin héroes detectados" text="El historial por sí solo no trae picks: con replays cargados aparecen tus héroes, winrate, KDA y daño promedio." actions={["Cerrá una partida", "Cargá replay parseable"]} />
             )}
           </div>
         </section>
       ) : tab === 'maps' ? (
         <section style={styles.mapGrid}>
           {mapStats.length ? mapStats.map((map) => <MapCard key={map.name} stat={map} />) : (
-            <EmptyState title="Sin mapas jugados" text="Cuando completes partidas con replay, vamos a cruzar mapas, picks, winrate y rendimiento individual." />
+            <EmptyState title="Sin mapas jugados" text="Cuando completes partidas con replay, vamos a cruzar mapas, picks, winrate y rendimiento individual." actions={["Jugá matchmaking", "Usá una scrim beta"]} />
           )}
         </section>
       ) : (
@@ -358,7 +358,7 @@ function Metric({ label, value, tone }: { label: string; value: string; tone: st
 function Mini({ label, value }: { label: string; value: string | number }) { return <div style={styles.mini}><span>{label}</span><strong>{value}</strong></div> }
 function Inline({ label, value, tone }: { label: string; value: string; tone: string }) { return <div style={styles.inlineMetric}><span>{label}</span><strong style={{ color: tone }}>{value}</strong></div> }
 function SignalCard({ icon, label, value, text }: { icon: React.ReactNode; label: string; value: string; text: string }) { return <article style={styles.signalCard}><div style={styles.signalIcon}>{icon}</div><span>{label}</span><strong>{value}</strong><p>{text}</p></article> }
-function EmptyState({ title, text }: { title: string; text: string }) { return <div style={styles.empty}><strong>{title}</strong><p>{text}</p></div> }
+function EmptyState({ title, text, actions = [] }: { title: string; text: string; actions?: string[] }) { return <div style={styles.empty}><strong>{title}</strong><p>{text}</p>{actions.length ? <div style={styles.emptyActions}>{actions.map((action) => <span key={action}>{action}</span>)}</div> : null}</div> }
 
 function normalize(value?: string | null) { return (value ?? '').toLowerCase().normalize('NFD').replace(/\p{Diacritic}/gu, '').replace(/[^a-z0-9]+/g, '') }
 function numeric(value?: number | null) { return typeof value === 'number' && Number.isFinite(value) ? value : 0 }
@@ -414,7 +414,8 @@ const styles: Record<string, CSSProperties> = {
   signalsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.8rem' },
   signalCard: { border: '1px solid rgba(148,163,184,0.16)', background: 'rgba(3,8,18,0.74)', padding: '1rem', display: 'grid', gap: '0.45rem' },
   signalIcon: { color: '#7dd3fc' },
-  empty: { border: '1px dashed rgba(125,211,252,0.24)', background: 'rgba(2,6,23,0.42)', padding: '1rem', color: 'rgba(226,232,240,0.72)' },
+  empty: { border: '1px dashed rgba(125,211,252,0.24)', background: 'linear-gradient(135deg, rgba(14,116,144,0.10), rgba(2,6,23,0.42))', padding: '1rem', color: 'rgba(226,232,240,0.72)', display: 'grid', gap: '0.5rem' },
+  emptyActions: { display: 'flex', flexWrap: 'wrap', gap: '0.4rem', color: '#7dd3fc', fontSize: '0.68rem', fontWeight: 950, letterSpacing: '0.1em', textTransform: 'uppercase' },
   mutedText: { color: 'rgba(226,232,240,0.62)', lineHeight: 1.55 },
   error: { border: '1px solid rgba(248,113,113,0.28)', background: 'rgba(127,29,29,0.16)', color: '#fecaca', padding: '0.75rem 0.9rem' },
 }

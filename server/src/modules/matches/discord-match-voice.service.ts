@@ -2,6 +2,7 @@ import { db } from '../../infrastructure/database/client'
 import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
 import { logger } from '../../infrastructure/logging/logger'
 import { getIO } from '../../infrastructure/socket/server'
+import { getScrimAccessForUser } from '../scrims/scrims.service'
 
 const DISCORD_API_BASE = 'https://discord.com/api/v10'
 const DISCORD_VOICE_ALLOW = '3146752' // VIEW_CHANNEL + CONNECT + SPEAK
@@ -312,7 +313,12 @@ export async function getDiscordVoiceAccessForUser(
     where: { matchId, userId, isBot: false },
     include: { user: { select: { discordId: true } } },
   })
-  if (!participant) {
+  const staffAccess = participant ? null : await getScrimAccessForUser(matchId, userId)
+  const voiceParticipant = participant ?? (staffAccess
+    ? { team: staffAccess.team, user: { discordId: staffAccess.user?.discordId ?? null } }
+    : null)
+
+  if (!voiceParticipant) {
     return {
       enabled: true,
       status: 'spectator',
@@ -322,13 +328,13 @@ export async function getDiscordVoiceAccessForUser(
     }
   }
 
-  const hasLinkedDiscord = Boolean(participant.user?.discordId)
+  const hasLinkedDiscord = Boolean(voiceParticipant.user?.discordId)
   if (!hasLinkedDiscord) {
     return {
       enabled: true,
       status: 'missing_link',
       hasLinkedDiscord: false,
-      team: participant.team as 1 | 2,
+      team: voiceParticipant.team as 1 | 2,
       teamInviteUrl: null,
     }
   }
@@ -339,7 +345,7 @@ export async function getDiscordVoiceAccessForUser(
       enabled: true,
       status: 'pending',
       hasLinkedDiscord: true,
-      team: participant.team as 1 | 2,
+      team: voiceParticipant.team as 1 | 2,
       teamInviteUrl: null,
     }
   }
@@ -348,8 +354,8 @@ export async function getDiscordVoiceAccessForUser(
     enabled: true,
     status: 'ready',
     hasLinkedDiscord: true,
-    team: participant.team as 1 | 2,
-    teamInviteUrl: participant.team === 1 ? meta.team1InviteUrl : meta.team2InviteUrl,
+    team: voiceParticipant.team as 1 | 2,
+    teamInviteUrl: voiceParticipant.team === 1 ? meta.team1InviteUrl : meta.team2InviteUrl,
   }
 }
 

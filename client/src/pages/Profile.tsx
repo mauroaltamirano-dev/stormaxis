@@ -1126,7 +1126,10 @@ export function Profile() {
               </div>
 
               {visibleMatches.length === 0 ? (
-                <EmptyBlock text="No hay partidas para este filtro." />
+                <ProfileHistoryEmpty
+                  isOwnProfile={isOwnProfile}
+                  filtered={matchFilter !== "all"}
+                />
               ) : (
                 <div style={{ display: "grid", gap: "10px" }}>
                   {visibleMatches.map((entry) => {
@@ -2179,6 +2182,46 @@ function EmptyBlock({ text }: { text: string }) {
   );
 }
 
+function ProfileHistoryEmpty({
+  isOwnProfile,
+  filtered,
+}: {
+  isOwnProfile: boolean;
+  filtered: boolean;
+}) {
+  return (
+    <div style={profileEmptyStateStyle}>
+      <div>
+        <div style={profileEmptyKickerStyle}>Historial en construcción</div>
+        <strong style={profileEmptyTitleStyle}>
+          {filtered ? "No hay partidas para este filtro" : "Todavía no hay evidencia competitiva"}
+        </strong>
+        <p style={profileEmptyTextStyle}>
+          {isOwnProfile
+            ? "Jugá matchmaking o pedí una scrim beta para que este perfil muestre mapas, resultado, ELO y scouting real."
+            : "Este perfil todavía no tiene partidas visibles en la beta cerrada. Volvé cuando complete matches o scrims."}
+        </p>
+      </div>
+      <div style={profileEmptyActionsStyle}>
+        {isOwnProfile ? (
+          <>
+            <Link to="/dashboard" style={profileEmptyPrimaryLinkStyle}>
+              Buscar partida
+            </Link>
+            <a href="/profile?tab=accounts" style={profileEmptySecondaryLinkStyle}>
+              Vincular cuentas
+            </a>
+          </>
+        ) : (
+          <Link to="/leaderboard" style={profileEmptySecondaryLinkStyle}>
+            Ver leaderboard
+          </Link>
+        )}
+      </div>
+    </div>
+  );
+}
+
 const fieldStyle: CSSProperties = {
   width: "100%",
   background: "rgba(255,255,255,0.02)",
@@ -2187,6 +2230,67 @@ const fieldStyle: CSSProperties = {
   padding: "12px 14px",
   outline: "none",
   fontSize: "14px",
+};
+
+const profileEmptyStateStyle: CSSProperties = {
+  border: "1px dashed rgba(0,200,255,0.24)",
+  background:
+    "linear-gradient(135deg, rgba(0,200,255,0.08), rgba(255,255,255,0.018) 48%, rgba(139,92,246,0.08))",
+  padding: "16px",
+  display: "grid",
+  gap: "12px",
+  color: "var(--nexus-text)",
+};
+
+const profileEmptyKickerStyle: CSSProperties = {
+  color: "var(--nexus-accent)",
+  fontSize: "11px",
+  fontWeight: 900,
+  letterSpacing: "1.5px",
+  textTransform: "uppercase",
+};
+
+const profileEmptyTitleStyle: CSSProperties = {
+  display: "block",
+  marginTop: "4px",
+  fontFamily: "var(--font-display)",
+  fontSize: "16px",
+  letterSpacing: "1px",
+  textTransform: "uppercase",
+};
+
+const profileEmptyTextStyle: CSSProperties = {
+  margin: "6px 0 0",
+  color: "var(--nexus-muted)",
+  fontSize: "13px",
+  lineHeight: 1.55,
+};
+
+const profileEmptyActionsStyle: CSSProperties = {
+  display: "flex",
+  gap: "8px",
+  flexWrap: "wrap",
+};
+
+const profileEmptyPrimaryLinkStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  border: "1px solid rgba(0,200,255,0.42)",
+  background: "rgba(0,200,255,0.14)",
+  color: "var(--nexus-accent)",
+  padding: "9px 11px",
+  fontSize: "12px",
+  fontWeight: 900,
+  letterSpacing: "1px",
+  textTransform: "uppercase",
+  textDecoration: "none",
+};
+
+const profileEmptySecondaryLinkStyle: CSSProperties = {
+  ...profileEmptyPrimaryLinkStyle,
+  border: "1px solid rgba(255,255,255,0.10)",
+  background: "rgba(255,255,255,0.03)",
+  color: "var(--nexus-text)",
 };
 
 const primaryButtonStyle: CSSProperties = {

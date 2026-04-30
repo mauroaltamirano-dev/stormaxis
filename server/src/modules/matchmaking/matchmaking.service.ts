@@ -4,6 +4,7 @@ import { getIO } from '../../infrastructure/socket/server'
 import { Errors } from '../../shared/errors/AppError'
 import { calculateRank } from '../users/player-progression'
 import { HOTS_MAPS } from '@nexusgg/shared'
+import { initializeMatchVeto } from '../matches/veto-runtime.service'
 import { logger } from '../../infrastructure/logging/logger'
 import {
   cleanupDiscordMatchVoiceNow,
@@ -791,6 +792,7 @@ export async function getActiveMatch(userId: string) {
           players: { include: { user: { select: { id: true, username: true, avatar: true, mmr: true } } } },
           vetoes: { orderBy: { order: 'asc' } },
           votes: { select: { userId: true, winner: true } },
+          scrimDetails: { select: { id: true } },
         },
       },
     },
@@ -804,9 +806,13 @@ export async function getActiveMatch(userId: string) {
     ? JSON.parse(pendingRaw) as { expiresAt: number; acceptedBy: string[]; totalPlayers: number }
     : null
 
+  const matchOrigin = ((match as any).origin as string | undefined) ?? (match.scrimDetails ? 'SCRIM_SELF_SERVE' : 'QUEUE')
+
   return {
     id: match.id,
     status: match.status,
+    origin: matchOrigin,
+    isScrim: matchOrigin !== 'QUEUE',
     selectedMap: match.selectedMap,
     winner: match.winner,
     createdAt: match.createdAt,
@@ -1186,63 +1192,9 @@ async function cancelMatch(matchId: string, reason: string) {
 // Veto order: T1, T2, T1, T2 ... until only 1 map remains
 
 async function startVeto(matchId: string) {
-  await redis.del(REDIS_KEYS.pendingMatch(matchId))
-
-  const match = await db.match.update({
-    where: { id: matchId },
-    data: { status: 'VETOING' },
-    include: { players: { where: { isCaptain: true } } },
-  })
-
-  const vetoOrder = Array.from(
-    { length: Math.max(0, HOTS_MAPS.length - 1) },
-    (_, index) => (index % 2 === 0 ? 1 : 2) as TeamId,
-  ) as TeamId[]
-
-  const vetoState: MatchVetoState = {
-    remainingMaps: HOTS_MAPS.map((m) => m.id),
-    currentTurn: vetoOrder[0] ?? 1,
-    vetoOrder,
-    vetoIndex: 0,
-    timeoutAt: Date.now() + VETO_TIMEOUT_MS,
-    captains: {
-      1: match.players.find((p) => p.team === 1 && p.isCaptain)?.userId ?? '',
-      2: match.players.find((p) => p.team === 2 && p.isCaptain)?.userId ?? '',
-    },
-  }
-
-  if (!vetoState.captains[1] || !vetoState.captains[2]) {
-    throw Errors.CONFLICT('No se pudieron asignar capitanes humanos para el veto')
-  }
-
-  await redis.setex(
-    REDIS_KEYS.matchVetoState(matchId),
-    3600,
-    JSON.stringify(vetoState),
-  )
-
-  const io = getIO()
-  const timeoutAt = Date.now() + VETO_TIMEOUT_MS
-
-  io.to(`match:${matchId}`).emit('veto:start', {
-    captains: vetoState.captains,
-    maps: HOTS_MAPS,
-    order: vetoState.vetoOrder,
-    currentTurn: vetoState.currentTurn,
-    vetoIndex: vetoState.vetoIndex,
-    timeoutAt,
-    remainingMaps: vetoState.remainingMaps,
-  })
-
-  io.to(`match:${matchId}`).emit('veto:turn', {
-    team: vetoState.currentTurn,
-    currentTurn: vetoState.currentTurn,
-    vetoIndex: vetoState.vetoIndex,
-    vetoOrder: vetoState.vetoOrder,
-    captains: vetoState.captains,
-    captainId: vetoState.captains[vetoState.currentTurn],
-    timeoutAt,
-    remainingMaps: vetoState.remainingMaps,
+  const { timeoutAt } = await initializeMatchVeto(matchId, {
+    timeoutMs: VETO_TIMEOUT_MS,
+    emit: true,
   })
 
   scheduleVetoTimeout(matchId, 0, timeoutAt)

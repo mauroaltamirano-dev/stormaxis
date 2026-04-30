@@ -105,6 +105,12 @@ export function Leaderboard() {
   const averageMmr = filteredEntries.length
     ? Math.round(filteredEntries.reduce((sum, entry) => sum + entry.mmr, 0) / filteredEntries.length)
     : 0;
+  const hasActiveFilters = countryFilter !== "all" || roleFilter !== "all" || rankFilter !== "all";
+  const clearFilters = () => {
+    setCountryFilter("all");
+    setRoleFilter("all");
+    setRankFilter("all");
+  };
 
   return (
     <div style={{ display: "grid", gap: "1rem" }}>
@@ -128,11 +134,7 @@ export function Leaderboard() {
 
           <button
             type="button"
-            onClick={() => {
-              setCountryFilter("all");
-              setRoleFilter("all");
-              setRankFilter("all");
-            }}
+            onClick={clearFilters}
             style={resetButtonStyle}
           >
             Reset
@@ -185,9 +187,7 @@ export function Leaderboard() {
         {!loading && !error && (
           <div style={{ display: "grid", gap: "0.45rem" }}>
             {filteredEntries.length === 0 ? (
-              <div style={emptyStyle}>
-                <Filter size={18} /> No hay jugadores para esta combinación. Probá limpiar filtros o ampliar el rango.
-              </div>
+              <LeaderboardEmpty hasEntries={entries.length > 0} hasActiveFilters={hasActiveFilters} onReset={clearFilters} />
             ) : (
               filteredEntries.map((entry) => {
                 const meta = getRankMeta(entry.level);
@@ -248,6 +248,37 @@ function RolePill({ label, accent, ghost = false }: { label: string; accent: str
   );
 }
 
+function LeaderboardEmpty({
+  hasEntries,
+  hasActiveFilters,
+  onReset,
+}: {
+  hasEntries: boolean;
+  hasActiveFilters: boolean;
+  onReset: () => void;
+}) {
+  return (
+    <div style={emptyStyle}>
+      <Filter size={20} />
+      <div style={{ minWidth: 0 }}>
+        <strong style={emptyTitleStyle}>
+          {hasEntries ? "No hay jugadores para esta combinación" : "Leaderboard preparando la primera muestra"}
+        </strong>
+        <p style={emptyTextStyle}>
+          {hasEntries
+            ? "Probá limpiar filtros o ampliar país, rol y rango competitivo."
+            : "Cuando los testers completen partidas o scrims, el ranking va a mostrar MMR, roles y país para scouting."}
+        </p>
+      </div>
+      {hasActiveFilters ? (
+        <button type="button" onClick={onReset} style={emptyResetButtonStyle}>
+          Limpiar filtros
+        </button>
+      ) : null}
+    </div>
+  );
+}
+
 const boardStyle: CSSProperties = { border: "1px solid var(--nexus-border)", background: "var(--nexus-card)", padding: "1rem", display: "grid", gap: "0.9rem" };
 const toolbarStyle: CSSProperties = { display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "start", border: "1px solid rgba(125,211,252,0.10)", background: "linear-gradient(135deg, rgba(14,116,144,0.12), rgba(15,23,42,0.42))", padding: "0.85rem" };
 const eyebrowStyle: CSSProperties = { color: "#00c8ff", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase" };
@@ -261,7 +292,10 @@ const rankRailStyle: CSSProperties = { display: "grid", gridTemplateColumns: "re
 const rankButtonStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.48)", color: "rgba(226,232,240,0.72)", padding: "0.55rem", cursor: "pointer", display: "grid", gap: "0.12rem", fontWeight: 900, textTransform: "uppercase" };
 const activeRankButtonStyle: CSSProperties = { ...rankButtonStyle, border: "1px solid rgba(0,200,255,0.38)", background: "rgba(0,200,255,0.14)", color: "#bae6fd" };
 const errorStyle: CSSProperties = { border: "1px solid rgba(248,113,113,0.25)", background: "rgba(127,29,29,0.12)", color: "#fecaca", padding: "0.7rem 0.8rem" };
-const emptyStyle: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: "0.5rem", border: "1px dashed rgba(148,163,184,0.18)", background: "rgba(2,6,23,0.35)", color: "rgba(148,163,184,0.82)", padding: "1rem", fontWeight: 800 };
+const emptyStyle: CSSProperties = { display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", alignItems: "center", gap: "0.75rem", border: "1px dashed rgba(125,211,252,0.24)", background: "linear-gradient(135deg, rgba(14,116,144,0.10), rgba(2,6,23,0.35))", color: "rgba(226,232,240,0.82)", padding: "1rem", fontWeight: 800 };
+const emptyTitleStyle: CSSProperties = { display: "block", color: "#e2e8f0", fontFamily: "var(--font-display)", letterSpacing: "0.06em", textTransform: "uppercase" };
+const emptyTextStyle: CSSProperties = { margin: "0.25rem 0 0", color: "rgba(148,163,184,0.86)", fontSize: "0.82rem", lineHeight: 1.45 };
+const emptyResetButtonStyle: CSSProperties = { border: "1px solid rgba(125,211,252,0.38)", background: "rgba(14,116,144,0.14)", color: "#7dd3fc", padding: "0.55rem 0.7rem", cursor: "pointer", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" };
 const rowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "54px 72px minmax(0, 1fr) minmax(130px, 0.6fr) auto auto auto", gap: "0.8rem", alignItems: "center", border: "1px solid", padding: "0.65rem 0.8rem" };
 const rankLineStyle: CSSProperties = { marginTop: "0.16rem", fontSize: "0.78rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" };
 const roleStackStyle: CSSProperties = { display: "flex", gap: "0.35rem", flexWrap: "wrap", minWidth: 0 };

@@ -1,0 +1,44 @@
+schema: spec-driven
+
+context: |
+  Tech stack: React 19 + TypeScript + Vite frontend; Express + TypeScript backend; Prisma/PostgreSQL; Redis; Socket.io; Zustand; TanStack Router; Tailwind v4/CSS tokens.
+  Architecture: route-based frontend pages under client/src/pages, matchroom UI in client/src/components/matchmaking, backend modules under server/src/modules, Prisma schema in server/prisma/schema.prisma.
+  Testing: server node tests via npm run test --workspace=server; repo validation via npm run typecheck and npm run check.
+  Style: Spanish UX copy, dark esports visual identity, concrete local repo docs.
+
+strict_tdd: true
+
+testing:
+  runner:
+    framework: node-test-via-tsx
+    command: npm run test --workspace=server
+  layers:
+    unit: true
+    integration: partial
+    e2e: false
+  coverage:
+    available: false
+  quality:
+    linter: npm run lint --workspace=client
+    typecheck: npm run typecheck
+    build_check: npm run check
+
+rules:
+  proposal:
+    - Include rollback plan for risky changes
+    - Identify affected modules/packages
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Use RFC 2119 keywords (MUST, SHALL, SHOULD, MAY)
+  design:
+    - Document architecture decisions with rationale
+    - Include concrete file paths
+  tasks:
+    - Group tasks by phase
+    - Use hierarchical numbering
+    - Keep tasks small enough to complete in one session
+  apply:
+    - Follow existing code patterns and conventions
+    - Do not overwrite unrelated local edits
+  verify:
+    - Run typecheck/check before claiming implementation complete

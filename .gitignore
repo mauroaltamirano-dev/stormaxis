@@ -35,3 +35,6 @@ coverage/
 
 # Windows alternate data stream metadata copied from downloads
 *:Zone.Identifier
+
+# Local visual companion artifacts
+.superpowers/

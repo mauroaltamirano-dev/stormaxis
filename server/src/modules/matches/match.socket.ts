@@ -7,6 +7,7 @@ import { calculateRank } from '../users/player-progression'
 import { getDiscordVoiceAccessForUser } from './discord-match-voice.service'
 import { sanitizeMatchChatMessage } from './chat-policy'
 import { listMatchReplayUploads } from './replay-processor.service'
+import { getScrimAccessForUser, listScrimAccessForMatch } from '../scrims/scrims.service'
 
 async function getMatchPresencePayload(io: Server, matchId: string) {
   const sockets = await io.in(`match:${matchId}`).fetchSockets()
@@ -50,8 +51,10 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
       return
     }
 
+    const staffAccess = matchExists.players.length === 0 ? await getScrimAccessForUser(matchId, userId) : null
+
     socket.join(`match:${matchId}`)
-    const viewerTeam = matchExists.players[0]?.isBot ? null : matchExists.players[0]?.team ?? null
+    const viewerTeam = matchExists.players[0]?.isBot ? null : matchExists.players[0]?.team ?? staffAccess?.team ?? null
     if (viewerTeam === 1 || viewerTeam === 2) {
       socket.join(`match:${matchId}:team:${viewerTeam}`)
     }
@@ -99,7 +102,7 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
           LIMIT 80
         `
       : []
-    const [mvpVotes, mvpRecord, discordVoice, replayUploads] = match
+    const [mvpVotes, mvpRecord, discordVoice, replayUploads, scrimAccess] = match
       ? await Promise.all([
           db.$queryRaw<Array<{ userId: string; nomineeUserId: string }>>`
             SELECT "userId", "nomineeUserId" FROM "MvpVote" WHERE "matchId" = ${matchId}
@@ -109,8 +112,9 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
           `,
           getDiscordVoiceAccessForUser(matchId, userId),
           listMatchReplayUploads(matchId, 3),
+          listScrimAccessForMatch(matchId),
         ])
-      : [[], [], null, []]
+      : [[], [], null, [], []]
 
     socket.emit('match:state', match
       ? {
@@ -119,6 +123,7 @@ export function registerMatchHandlers(io: Server, socket: Socket) {
           mvpVotes,
           discordVoice,
           replayUploads,
+          scrimAccess,
           runtime,
           messages: visibleMessages.map((message) => ({
             id: message.id,
