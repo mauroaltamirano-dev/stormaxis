@@ -189,3 +189,65 @@ body::after {
   from { opacity: 0; transform: translateY(12px) scale(0.985); }
   to { opacity: 1; transform: translateY(0) scale(1); }
 }
+
+/* ─── Shared interactive controls ───────────────────────── */
+.nx-interactive {
+  transition: transform 140ms ease, filter 140ms ease, box-shadow 140ms ease, border-color 140ms ease, background-color 140ms ease;
+}
+
+.nx-interactive:hover:not(:disabled) {
+  filter: brightness(1.08);
+  border-color: var(--nexus-border-active) !important;
+  box-shadow: 0 0 0 1px rgba(0, 200, 255, 0.12);
+}
+
+.nx-interactive:active:not(:disabled) {
+  transform: translateY(1px) scale(0.99);
+}
+
+.nx-interactive:focus-visible {
+  outline: 2px solid rgba(0, 200, 255, 0.7);
+  outline-offset: 2px;
+}
+
+.nx-interactive:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nx-interactive {
+    transition: none;
+  }
+
+  .nx-interactive:active:not(:disabled) {
+    transform: none;
+  }
+}
+
+/* ─── Select Normalizer (cross-browser/theme) ───────────── */
+select,
+select option,
+select optgroup {
+  background: #0b1320 !important;
+  color: var(--nexus-text) !important;
+}
+
+select {
+  appearance: none;
+  -webkit-appearance: none;
+  -moz-appearance: none;
+  color-scheme: dark;
+  border-radius: 0;
+  box-shadow: none;
+}
+
+select:focus-visible {
+  outline: 2px solid rgba(0, 200, 255, 0.68);
+  outline-offset: 2px;
+}
+
+select:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}

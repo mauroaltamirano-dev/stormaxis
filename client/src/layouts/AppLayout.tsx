@@ -33,7 +33,7 @@ import {
   type MatchLifecycleStatus,
 } from "../lib/competitiveStatus";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
-import { getCountryFlag } from "../lib/countries";
+import { CountryBadge } from "../components/CountryBadge";
 import { MatchFoundModal } from "../components/matchmaking/MatchFoundModal";
 
 type SearchResult = {
@@ -649,8 +649,8 @@ export function AppLayout() {
 
           <div style={styles.compactNameBlock}>
             <div style={styles.compactNameRow}>
-              <span style={styles.spineNameFlag} title="Nacionalidad">
-                {getCountryFlag(user.countryCode)}
+              <span style={styles.spineNameFlag}>
+                <CountryBadge countryCode={user.countryCode} compact />
               </span>
               <span style={styles.compactName}>{user.username}</span>
             </div>

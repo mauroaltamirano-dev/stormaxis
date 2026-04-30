@@ -11,7 +11,7 @@ import {
 } from "@nexusgg/shared";
 import { RankBadge } from "../RankBadge";
 import { getMatchLifecycleMeta } from "../../lib/competitiveStatus";
-import { getCountryFlag } from "../../lib/countries";
+import { CountryBadge } from "../CountryBadge";
 
 type MatchStatus =
   | "ACCEPTING"
@@ -2551,7 +2551,7 @@ function TeamPlayerCard({
       <div style={playerHeaderIdentityStyle}>
         <div style={playerNameRowStyle()}>
           <span style={playerNameIdentityGroupStyle}>
-            <span title="Nacionalidad">{getCountryFlag(player.countryCode)}</span>
+            <CountryBadge countryCode={player.countryCode} compact />
             <span style={playerNameStyle}>{player.name}</span>
           </span>
           <span style={playerInlineEloStyle(accent)}>

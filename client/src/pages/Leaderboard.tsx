@@ -4,6 +4,7 @@ import { RankBadge } from "../components/RankBadge";
 import { PageHeader } from "../components/PageHeader";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
 import { getCountryFlag, getCountryName } from "../lib/countries";
+import { CountryBadge } from "../components/CountryBadge";
 import { getRoleMeta, ROLE_META, type PlayerRoleKey } from "../lib/roles";
 import { Filter, Trophy as TrophyIcon } from "lucide-react";
 
@@ -213,7 +214,7 @@ export function Leaderboard() {
                     <RankBadge level={entry.level} size="sm" showLabel={false} showMmr={false} glow={topGlow ? "strong" : "medium"} />
                     <div style={{ minWidth: 0 }}>
                       <div style={{ color: "#e2e8f0", fontWeight: 800 }}>
-                        <span style={{ marginRight: "0.35rem" }}>{getCountryFlag(entry.countryCode)}</span>
+                        <span style={{ marginRight: "0.35rem" }}><CountryBadge countryCode={entry.countryCode} compact /></span>
                         {entry.username}
                       </div>
                       <div style={{ ...rankLineStyle, color: meta.color }}>{meta.label}</div>

@@ -1,0 +1,16 @@
+change: remodel-teams-scrims-ui
+status: verify
+artifacts:
+  exploration: complete
+  proposal: complete
+  specs: complete
+  design: complete
+  tasks: complete
+implementation: complete
+notes:
+  - 2026-04-30: Created SDD exploration and proposal for premium UI/UX remodel of /teams and /scrims.
+  - Backend/API/schema changes are explicitly out of scope for this change.
+  - 2026-04-30: Created full spec for `teams-scrims-premium-ui` and technical design for UI-only implementation.
+  - 2026-04-30: Created implementation task breakdown; change is ready for sdd-apply.
+  - 2026-04-30: UI implementation completed for phases 1-4 plus automated verification (typecheck/check); manual smoke tasks 5.3/5.4 pending.
+  - 2026-04-30: Manual smoke validated through user QA feedback loop (issues reported and fixed on /scrims, /teams, Dashboard, country/select rendering).

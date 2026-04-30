@@ -6,11 +6,11 @@ import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { reportClientError } from "../lib/monitoring";
 import { PlayerSlotShell } from "../components/PlayerSlotShell";
-import { ChevronDown, Plus, Search, Shield, Swords, Trophy, Users } from "lucide-react";
+import { ChevronDown, Plus, Search } from "lucide-react";
 import { getRoleIconSources, getRoleMeta } from "../lib/roles";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
 import { getQueueLifecycleMeta } from "../lib/competitiveStatus";
-import { getCountryFlag } from "../lib/countries";
+import { CountryBadge } from "../components/CountryBadge";
 
 function formatCompactRating(value: number) {
   return value.toLocaleString("es-AR");
@@ -524,19 +524,6 @@ export function Dashboard() {
       .catch(() => {});
   }, [user?.username]);
 
-  function handleOpenScrimPath() {
-    if (user?.role === "ADMIN") {
-      navigate({ to: "/admin" });
-      return;
-    }
-
-    pushOpsEvent(
-      "Scrim equipo vs equipo",
-      "Para la beta cerrada, un admin crea la sala scrim con los dos capitanes y rosters.",
-      "neutral",
-    );
-  }
-
   async function handleFindMatch() {
     if (hasActiveMatch) return;
 
@@ -749,7 +736,7 @@ export function Dashboard() {
                     marginBottom: "0.45rem",
                   }}
                 >
-                  South America · Beta cerrada · Matchmaking + scrims
+                  South America · Beta cerrada · Matchmaking competitivo
                 </div>
                 <h1
                   style={{
@@ -828,39 +815,6 @@ export function Dashboard() {
             </div>
           </div>
         </header>
-
-
-        <section
-          style={{
-            display: "grid",
-            gridTemplateColumns: isMd ? "1fr" : "repeat(2, minmax(0, 1fr))",
-            gap: "1rem",
-          }}
-        >
-          <PlayPathCard
-            icon={<Swords size={22} />}
-            eyebrow="Ruta A · Matchmaking"
-            title="Buscar partida al azar"
-            description="Entrás a cola con tus roles, confirmás accept y la plataforma arma equipos para testear el flujo competitivo completo."
-            tone="#00c8ff"
-            stats={[`${queueOccupancy}/10 en señal`, queueStateMeta.phase, "MMR activo"]}
-            actionLabel={isSearching ? "Cancelar búsqueda" : hasActiveMatch ? "Partida activa" : "Buscar partida"}
-            onAction={() => void handleFindMatch()}
-            disabled={findMatchDisabled}
-            primary
-          />
-          <PlayPathCard
-            icon={<Users size={22} />}
-            eyebrow="Ruta B · Scrims beta"
-            title="Equipo vs equipo"
-            description="Para equipos organizados: un admin carga Team A vs Team B, capitanes y rosters; queda registro para replay, resultado e historial."
-            tone="#f0a500"
-            stats={["Admin/manual", "TEAM mode", "Base torneos"]}
-            actionLabel={user.role === "ADMIN" ? "Crear desde Admin" : "Pedir sala al admin"}
-            onAction={handleOpenScrimPath}
-            secondaryIcon={<Trophy size={15} />}
-          />
-        </section>
 
         <section
           style={{
@@ -1074,16 +1028,7 @@ export function Dashboard() {
                         minWidth: 0,
                       }}
                     >
-                      <span
-                        title="Nacionalidad"
-                        style={{
-                          fontSize: "1rem",
-                          lineHeight: 1,
-                          filter: "drop-shadow(0 0 7px rgba(255,255,255,0.18))",
-                        }}
-                      >
-                        {getCountryFlag(user.countryCode)}
-                      </span>
+                      <CountryBadge countryCode={user.countryCode} />
                       <span
                         style={{
                           color: "#fff",
@@ -1500,15 +1445,8 @@ export function Dashboard() {
                           textOverflow: "ellipsis",
                         }}
                       >
-                        <span
-                          title="Nacionalidad"
-                          style={{
-                            marginRight: "0.36rem",
-                            filter:
-                              "drop-shadow(0 0 6px rgba(255,255,255,0.16))",
-                          }}
-                        >
-                          {getCountryFlag(entry.countryCode)}
+                        <span style={{ marginRight: "0.36rem" }}>
+                          <CountryBadge countryCode={entry.countryCode} compact />
                         </span>
                         <span>{entry.username}</span>{" "}
                         {entry.userId === user.id ? (
@@ -2310,109 +2248,6 @@ function OpsEventRow({ event }: { event: OpsEvent }) {
   );
 }
 
-
-function PlayPathCard({
-  icon,
-  eyebrow,
-  title,
-  description,
-  tone,
-  stats,
-  actionLabel,
-  onAction,
-  disabled = false,
-  primary = false,
-  secondaryIcon,
-}: {
-  icon: React.ReactNode;
-  eyebrow: string;
-  title: string;
-  description: string;
-  tone: string;
-  stats: string[];
-  actionLabel: string;
-  onAction: () => void;
-  disabled?: boolean;
-  primary?: boolean;
-  secondaryIcon?: React.ReactNode;
-}) {
-  return (
-    <article
-      style={{
-        position: "relative",
-        overflow: "hidden",
-        border: `1px solid ${tone}33`,
-        background:
-          `radial-gradient(circle at 88% 0%, ${tone}22, transparent 34%), ` +
-          "linear-gradient(135deg, rgba(17,25,39,0.92), rgba(5,10,20,0.78))",
-        padding: "1rem",
-        display: "grid",
-        gap: "0.85rem",
-        minHeight: "210px",
-        boxShadow: `0 22px 50px ${tone}0d`,
-      }}
-    >
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          inset: "0 0 auto 0",
-          height: "2px",
-          background: `linear-gradient(90deg, transparent, ${tone}, transparent)`,
-        }}
-      />
-      <div style={{ display: "flex", alignItems: "start", justifyContent: "space-between", gap: "1rem" }}>
-        <div style={{ display: "grid", gap: "0.35rem", minWidth: 0 }}>
-          <span style={{ color: tone, fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase" }}>
-            {eyebrow}
-          </span>
-          <strong style={{ color: "#f8fafc", fontFamily: "var(--font-display)", fontSize: "1.2rem", letterSpacing: "0.06em", textTransform: "uppercase" }}>
-            {title}
-          </strong>
-        </div>
-        <div style={{ width: 44, height: 44, display: "grid", placeItems: "center", color: tone, border: `1px solid ${tone}33`, background: `${tone}12` }}>
-          {icon}
-        </div>
-      </div>
-      <p style={{ margin: 0, color: "rgba(226,232,240,0.70)", lineHeight: 1.5, fontSize: "0.86rem" }}>
-        {description}
-      </p>
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.45rem" }}>
-        {stats.map((stat) => (
-          <span key={stat} style={{ border: `1px solid ${tone}26`, background: `${tone}10`, color: "rgba(226,232,240,0.78)", padding: "0.28rem 0.48rem", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" }}>
-            {stat}
-          </span>
-        ))}
-      </div>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={onAction}
-        style={{
-          border: disabled ? "1px solid rgba(148,163,184,0.24)" : `1px solid ${tone}99`,
-          background: disabled
-            ? "rgba(148,163,184,0.12)"
-            : primary
-              ? `linear-gradient(90deg, ${tone}, #7dd3fc)`
-              : `${tone}14`,
-          color: disabled ? "#94a3b8" : primary ? "#020617" : tone,
-          padding: "0.78rem 0.9rem",
-          fontWeight: 950,
-          letterSpacing: "0.12em",
-          textTransform: "uppercase",
-          cursor: disabled ? "not-allowed" : "pointer",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          gap: "0.55rem",
-        }}
-      >
-        {secondaryIcon ?? <Shield size={15} />}
-        {actionLabel}
-      </button>
-    </article>
-  );
-}
 
 function StatPanel({
   label,
