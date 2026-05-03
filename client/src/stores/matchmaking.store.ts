@@ -114,7 +114,7 @@ export const useMatchmakingStore = create<MatchmakingState>((set) => ({
   setActiveMatch: (activeMatchId) => set({ activeMatchId }),
   clearPendingMatch: () => set((state) => ({
     pendingMatch: null,
-    status: state.activeMatchId ? state.status : 'idle',
+    status: state.status === 'found' && !state.activeMatchId ? 'idle' : state.status,
   })),
   resetMatchmaking: () =>
     set((state) => {

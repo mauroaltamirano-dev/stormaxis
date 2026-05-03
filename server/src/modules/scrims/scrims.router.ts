@@ -4,6 +4,8 @@ import { AuthRequest, authenticate } from '../../shared/middlewares/authenticate
 import { getOnlineUserIds } from '../../infrastructure/socket/server'
 import {
   acceptTeamScrimChallenge,
+  cancelTeamScrimChallenge,
+  cancelTeamScrimSearch,
   createTeamScrimChallenge,
   createTeamScrimSearch,
   declineTeamScrimChallenge,
@@ -46,6 +48,15 @@ scrimsRouter.post('/searches', async (req, res, next) => {
   }
 })
 
+scrimsRouter.post('/searches/:searchId/cancel', async (req, res, next) => {
+  try {
+    const authReq = req as unknown as AuthRequest
+    res.json({ search: await cancelTeamScrimSearch(authReq.userId, req.params.searchId) })
+  } catch (err) {
+    next(err)
+  }
+})
+
 scrimsRouter.post('/challenges', async (req, res, next) => {
   try {
     const authReq = req as unknown as AuthRequest
@@ -69,6 +80,15 @@ scrimsRouter.post('/challenges/:challengeId/decline', async (req, res, next) => 
   try {
     const authReq = req as unknown as AuthRequest
     res.json({ challenge: await declineTeamScrimChallenge(authReq.userId, req.params.challengeId) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+scrimsRouter.post('/challenges/:challengeId/cancel', async (req, res, next) => {
+  try {
+    const authReq = req as unknown as AuthRequest
+    res.json({ challenge: await cancelTeamScrimChallenge(authReq.userId, req.params.challengeId) })
   } catch (err) {
     next(err)
   }

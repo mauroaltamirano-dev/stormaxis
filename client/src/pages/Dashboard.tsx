@@ -1,82 +1,14 @@
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { useAuthStore } from "../stores/auth.store";
-import { useMatchmakingStore } from "../stores/matchmaking.store";
+import { Settings, Bell } from "lucide-react";
+import { MAP_ID_BY_NAME } from "@nexusgg/shared";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { reportClientError } from "../lib/monitoring";
-import { PlayerSlotShell } from "../components/PlayerSlotShell";
-import { ChevronDown, Plus, Search } from "lucide-react";
-import { getRoleIconSources, getRoleMeta } from "../lib/roles";
-import { getRankMeta, parseRankLevel } from "../lib/ranks";
-import { getQueueLifecycleMeta } from "../lib/competitiveStatus";
-import { CountryBadge } from "../components/CountryBadge";
-
-function formatCompactRating(value: number) {
-  return value.toLocaleString("es-AR");
-}
-
-function CardCorners({ color }: { color: string }) {
-  const common: React.CSSProperties = {
-    position: "absolute",
-    width: "18px",
-    height: "18px",
-    borderColor: color,
-    opacity: 0.7,
-    pointerEvents: "none",
-  };
-
-  return (
-    <>
-      <div
-        style={{
-          ...common,
-          top: "10px",
-          left: "10px",
-          borderTop: "2px solid",
-          borderLeft: "2px solid",
-        }}
-      />
-      <div
-        style={{
-          ...common,
-          top: "10px",
-          right: "10px",
-          borderTop: "2px solid",
-          borderRight: "2px solid",
-        }}
-      />
-      <div
-        style={{
-          ...common,
-          bottom: "10px",
-          left: "10px",
-          borderBottom: "2px solid",
-          borderLeft: "2px solid",
-        }}
-      />
-      <div
-        style={{
-          ...common,
-          bottom: "10px",
-          right: "10px",
-          borderBottom: "2px solid",
-          borderRight: "2px solid",
-        }}
-      />
-    </>
-  );
-}
-
-const MODES = [
-  { key: "COMPETITIVE", label: "Competitivo", desc: "Draft · MMR activo" },
-  // { key: 'UNRANKED', label: 'Unranked', desc: 'Draft · Sin MMR' },
-  // { key: 'TEAM', label: 'Equipo', desc: '5-Stack · Clan' },
-];
-
-// 5-slot party layout: indices 0-4, center is always index 2 (the user)
-const SLOT_ORDER = [0, 1, 2, 3, 4];
-const DISMISSED_ACTIVE_MATCH_KEY = "nexusgg.dismissedActiveMatchId";
+import { getRankMeta, getRankMetaFromMmr, parseRankLevel } from "../lib/ranks";
+import { getRoleMeta } from "../lib/roles";
+import { useAuthStore } from "../stores/auth.store";
+import { useMatchmakingStore } from "../stores/matchmaking.store";
 
 type LiveMatchRow = {
   id: string;
@@ -84,50 +16,73 @@ type LiveMatchRow = {
   mode: string;
   region: string;
   selectedMap: string | null;
+  scrimDetails?: {
+    team1Name: string;
+    team2Name: string;
+  } | null;
   createdAt: string;
   startedAt?: string | null;
-  viewerTeam: 1 | 2 | null;
   readyCount: number;
   totalPlayers: number;
-  voteCounts: {
-    team1Votes: number;
-    team2Votes: number;
-    total: number;
-  };
-  teams: Record<
-    1 | 2,
-    Array<{
-      userId: string | null;
-      username: string;
-      avatar: string | null;
-      mmr: number;
-      isCaptain: boolean;
-      isBot: boolean;
-    }>
-  >;
+  teams: Record<1 | 2, Array<{ mmr: number; rank?: string | null; isBot?: boolean }>>;
 };
 
-type OpsEventTone = "neutral" | "good" | "warn";
 
-type OpsEvent = {
+type MatchHistoryEntry = {
   id: string;
-  at: number;
-  title: string;
-  detail: string;
-  tone: OpsEventTone;
+  team: number;
+  mmrDelta: number | null;
+  match: {
+    id: string;
+    status: string;
+    selectedMap: string | null;
+    winner: number | null;
+    createdAt: string;
+    endedAt: string | null;
+    replayUploads?: Array<{
+      parsedSummary?: {
+        players?: Array<{
+          name?: string | null;
+          battleTag?: string | null;
+          hero?: string | null;
+          team?: 1 | 2 | null;
+        }>;
+      } | null;
+    }>;
+  };
 };
 
-function formatCountdown(seconds: number) {
-  return `0:${String(Math.max(0, seconds)).padStart(2, "0")}`;
-}
+type DisplayMatchRow = {
+  id: string;
+  selectedMap: string;
+  modeLabel: string;
+  avgMmr: number;
+  team1Rank: string;
+  team2Rank: string;
+  team1RankIconSrc: string;
+  team2RankIconSrc: string;
+  time: string;
+  statusLabel: string;
+  connected: string;
+};
 
-function formatEventTime(timestamp: number) {
-  return new Intl.DateTimeFormat("es-AR", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
-  }).format(timestamp);
-}
+type QueuePlayer = {
+  userId: string;
+  username: string;
+  avatar: string | null;
+  mmr: number;
+  joinedAt: number | null;
+  roles?: string[];
+  isBot?: boolean;
+};
+
+type PendingMatchPayload = NonNullable<ReturnType<typeof useMatchmakingStore.getState>["pendingMatch"]>;
+
+type QueueRequestError = { response?: { data?: { error?: { message?: string } } } };
+
+const MODES = [
+  { key: "COMPETITIVE", label: "Competitivo 5v5", icon: "⬟", enabled: true },
+] as const;
 
 export function Dashboard() {
   const navigate = useNavigate();
@@ -137,336 +92,91 @@ export function Dashboard() {
     searchStartedAt,
     pendingMatch,
     queueSize,
-    queuePosition,
     queueEtaSeconds,
     startSearching,
     stopSearching,
     setMatchFound,
-    clearPendingMatch,
     resetMatchmaking,
     setQueueSize,
     setQueueProgress,
-  } = useMatchmakingStore() as any;
+    activeMatchId,
+  } = useMatchmakingStore();
 
   const [selectedMode, setSelectedMode] = useState("COMPETITIVE");
   const [elapsed, setElapsed] = useState(0);
-  const [dismissedActiveMatchId, setDismissedActiveMatchId] = useState<
-    string | null
-  >(() => window.sessionStorage.getItem(DISMISSED_ACTIVE_MATCH_KEY));
-  const [hiddenActiveMatchId, setHiddenActiveMatchId] = useState<string | null>(
-    null,
-  );
-  const [hasActiveMatch, setHasActiveMatch] = useState(false);
-  const [queuePreview, setQueuePreview] = useState<
-    Array<{
-      userId: string;
-      username: string;
-      avatar: string | null;
-      countryCode?: string | null;
-      mmr: number;
-      joinedAt: number | null;
-      roles?: string[];
-      isBot?: boolean;
-    }>
-  >([]);
+  const [queuePreview, setQueuePreview] = useState<QueuePlayer[]>([]);
   const [liveMatches, setLiveMatches] = useState<LiveMatchRow[]>([]);
-  const [liveMatchesOpen, setLiveMatchesOpen] = useState(true);
-  const [avatarLoadError, setAvatarLoadError] = useState(false);
-  const [matchmakingLayout, setMatchmakingLayout] = useState<"split" | "stack">(
-    "split",
-  );
-  const [hoveredEmptySlot, setHoveredEmptySlot] = useState<number | null>(null);
-  const [acceptCountdown, setAcceptCountdown] = useState<number | null>(null);
-  const [opsEvents, setOpsEvents] = useState<OpsEvent[]>([]);
-  const [isOpsLogOpen, setIsOpsLogOpen] = useState(false);
-  const [currentStreak, setCurrentStreak] = useState(0);
-  const [streakType, setStreakType] = useState<"win" | "loss" | null>(null);
-  const [viewportWidth, setViewportWidth] = useState<number>(() =>
-    typeof window === "undefined" ? 1280 : window.innerWidth,
-  );
-  const queueSizeRef = useRef<number | null>(null);
-
-  const pushOpsEvent = useCallback(
-    (title: string, detail: string, tone: OpsEventTone = "neutral") => {
-      const event: OpsEvent = {
-        id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-        at: Date.now(),
-        title,
-        detail,
-        tone,
-      };
-      setOpsEvents((prev) => [event, ...prev].slice(0, 10));
-    },
-    [],
-  );
+  const [matchHistory, setMatchHistory] = useState<MatchHistoryEntry[]>([]);
 
   useEffect(() => {
     if (status !== "searching" || !searchStartedAt) return;
-    const iv = setInterval(
-      () => setElapsed(Math.floor((Date.now() - searchStartedAt) / 1000)),
-      1000,
-    );
-    return () => clearInterval(iv);
+    const tick = () => setElapsed(Math.max(0, Math.floor((Date.now() - searchStartedAt) / 1000)));
+    tick();
+    const interval = window.setInterval(tick, 1000);
+    return () => window.clearInterval(interval);
   }, [status, searchStartedAt]);
 
   useEffect(() => {
-    if (!pendingMatch?.expiresAt) {
-      setAcceptCountdown(null);
-      return;
-    }
-
-    const syncCountdown = () =>
-      setAcceptCountdown(
-        Math.max(0, Math.round((pendingMatch.expiresAt - Date.now()) / 1000)),
-      );
-
-    syncCountdown();
-    const iv = window.setInterval(syncCountdown, 1000);
-    return () => window.clearInterval(iv);
-  }, [pendingMatch?.expiresAt]);
-
-  useEffect(() => {
-    const onResize = () => setViewportWidth(window.innerWidth);
-    window.addEventListener("resize", onResize);
-    return () => window.removeEventListener("resize", onResize);
-  }, []);
-
-  useEffect(() => {
     const socket = getSocket();
-    socket.on("matchmaking:found", (data: any) => {
-      setHasActiveMatch(true);
-      setMatchFound(data);
-      pushOpsEvent(
-        "Match encontrado",
-        "Se abrió la ventana de confirmación para los 10 jugadores.",
-        "good",
-      );
-    });
-    socket.on("veto:start", () => {
-      pushOpsEvent(
-        "Veto iniciado",
-        "La lobby confirmó jugadores y pasó a selección de mapas.",
-        "good",
-      );
-      if (pendingMatch?.matchId) {
-        clearPendingMatch();
-        navigate({
-          to: "/match/$matchId",
-          params: { matchId: pendingMatch.matchId },
-        });
-      }
-    });
-    socket.on("matchmaking:cancelled", () => {
-      pushOpsEvent(
-        "Match cancelado",
-        "Una confirmación falló o el ciclo fue cancelado.",
-        "warn",
-      );
-      window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
-      setDismissedActiveMatchId(null);
-      setHiddenActiveMatchId(null);
-      setHasActiveMatch(false);
-      resetMatchmaking();
-    });
-    socket.on(
-      "matchmaking:queue_update",
-      (payload: {
-        position?: number;
-        etaSeconds?: number;
-        queueSize?: number;
-      }) => {
-        if (typeof payload?.queueSize === "number") {
-          setQueueSize(payload.queueSize);
-        }
-        if (
-          typeof payload?.position === "number" &&
-          payload.position > 0 &&
-          payload.position <= 3
-        ) {
-          pushOpsEvent(
-            "Prioridad de cola",
-            `Subiste a posición #${payload.position}.`,
-            "good",
-          );
-        }
-        setQueueProgress({
-          position: payload?.position,
-          etaSeconds: payload?.etaSeconds,
-        });
-      },
-    );
-    socket.on(
-      "matchmaking:queue_public_update",
-      (payload: { queueSize?: number }) => {
-        if (typeof payload?.queueSize === "number") {
-          setQueueSize(payload.queueSize);
-        }
-      },
-    );
-    socket.on(
-      "user:elo_update",
-      (data: { newMMR: number; delta: number; newRank: string }) => {
-        if (typeof updateUser === "function")
-          updateUser({ mmr: data.newMMR, rank: data.newRank });
-      },
-    );
-    return () => {
-      socket.off("matchmaking:found");
-      socket.off("veto:start");
-      socket.off("matchmaking:cancelled");
-      socket.off("matchmaking:queue_update");
-      socket.off("matchmaking:queue_public_update");
-      socket.off("user:elo_update");
+    const onMatchFound = (payload: PendingMatchPayload) => setMatchFound(payload);
+    const onCancelled = () => resetMatchmaking();
+    const onQueueUpdate = (payload: { position?: number; etaSeconds?: number; queueSize?: number }) => {
+      if (typeof payload.queueSize === "number") setQueueSize(payload.queueSize);
+      setQueueProgress({ position: payload.position, etaSeconds: payload.etaSeconds });
     };
-  }, [
-    clearPendingMatch,
-    navigate,
-    pendingMatch?.matchId,
-    resetMatchmaking,
-    setMatchFound,
-    setQueueProgress,
-    setQueueSize,
-    updateUser,
-    pushOpsEvent,
-  ]);
+    const onUserEloUpdate = (data: { newMMR: number; newRank: string }) => updateUser({ mmr: data.newMMR, rank: data.newRank });
+
+    socket.on("matchmaking:found", onMatchFound);
+    socket.on("matchmaking:cancelled", onCancelled);
+    socket.on("matchmaking:queue_update", onQueueUpdate);
+    socket.on("matchmaking:queue_public_update", onQueueUpdate);
+    socket.on("user:elo_update", onUserEloUpdate);
+    return () => {
+      socket.off("matchmaking:found", onMatchFound);
+      socket.off("matchmaking:cancelled", onCancelled);
+      socket.off("matchmaking:queue_update", onQueueUpdate);
+      socket.off("matchmaking:queue_public_update", onQueueUpdate);
+      socket.off("user:elo_update", onUserEloUpdate);
+    };
+  }, [resetMatchmaking, setMatchFound, setQueueProgress, setQueueSize, updateUser]);
 
   useEffect(() => {
-    api
-      .get<{
-        inQueue: boolean;
-        queueSize?: number;
-        mode?: string;
-        joinedAt?: number;
-      }>("/matchmaking/queue/status")
+    api.get<{ inQueue: boolean; queueSize?: number; mode?: string; joinedAt?: number }>("/matchmaking/queue/status")
       .then(({ data }) => {
-        if (!data.inQueue) {
-          if (!pendingMatch && !hasActiveMatch) {
-            resetMatchmaking();
-          }
-          return;
-        }
+        if (!data.inQueue) return;
         if (data.mode) setSelectedMode(data.mode);
-        if (data.queueSize != null) setQueueSize(data.queueSize);
-        setQueueProgress({ position: null, etaSeconds: null });
+        if (typeof data.queueSize === "number") setQueueSize(data.queueSize);
         startSearching(data.joinedAt);
       })
       .catch(() => {});
-  }, [
-    hasActiveMatch,
-    pendingMatch,
-    resetMatchmaking,
-    setQueueProgress,
-    setQueueSize,
-    startSearching,
-  ]);
+  }, [setQueueSize, startSearching]);
 
   useEffect(() => {
     let cancelled = false;
-
     async function loadQueueSnapshot() {
       try {
-        const { data } = await api.get<{
-          count: number;
-          players: Array<{
-            userId: string;
-            username: string;
-            avatar: string | null;
-            countryCode?: string | null;
-            mmr: number;
-            joinedAt: number | null;
-            roles?: string[];
-            isBot?: boolean;
-          }>;
-        }>("/matchmaking/queue/snapshot");
-
+        const { data } = await api.get<{ count: number; players: QueuePlayer[] }>("/matchmaking/queue/snapshot");
         if (cancelled) return;
         setQueuePreview(data.players);
         setQueueSize(data.count);
         if (user?.id) {
-          const position = data.players.findIndex(
-            (entry) => entry.userId === user.id,
-          );
-          if (position >= 0) {
-            setQueueProgress({ position: position + 1 });
-          }
+          const position = data.players.findIndex((entry) => entry.userId === user.id);
+          if (position >= 0) setQueueProgress({ position: position + 1 });
         }
       } catch {
         if (!cancelled) setQueuePreview([]);
       }
     }
-
     loadQueueSnapshot();
-    const interval = setInterval(loadQueueSnapshot, 5000);
-
+    const interval = window.setInterval(loadQueueSnapshot, 5000);
     return () => {
       cancelled = true;
-      clearInterval(interval);
+      window.clearInterval(interval);
     };
   }, [setQueueProgress, setQueueSize, user?.id]);
 
   useEffect(() => {
-    if (!user) return;
-
     let cancelled = false;
-
-    async function loadActiveMatch() {
-      try {
-        const { data } = await api.get<{
-          match: any | null;
-        }>("/matchmaking/active");
-
-        if (cancelled) return;
-        if (!data.match) {
-          setHasActiveMatch(false);
-          setHiddenActiveMatchId(null);
-          return;
-        }
-        setHasActiveMatch(true);
-
-        if (data.match.status === "ACCEPTING") {
-          if (data.match.pending) {
-            setMatchFound(data.match.pending);
-          } else {
-            clearPendingMatch();
-          }
-        } else {
-          if (dismissedActiveMatchId === data.match.id) {
-            setHiddenActiveMatchId(data.match.id);
-            return;
-          }
-          window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
-          setDismissedActiveMatchId(null);
-          setHiddenActiveMatchId(null);
-          clearPendingMatch();
-          navigate({
-            to: "/match/$matchId",
-            params: { matchId: data.match.id },
-          });
-        }
-      } catch {
-        // noop
-      }
-    }
-
-    loadActiveMatch();
-    const interval = setInterval(loadActiveMatch, 5000);
-
-    return () => {
-      cancelled = true;
-      clearInterval(interval);
-    };
-  }, [
-    clearPendingMatch,
-    dismissedActiveMatchId,
-    navigate,
-    pendingMatch?.matchId,
-    setMatchFound,
-    user,
-  ]);
-
-  useEffect(() => {
-    let cancelled = false;
-
     async function loadLiveMatches() {
       try {
         const { data } = await api.get<LiveMatchRow[]>("/matches/live");
@@ -475,7 +185,6 @@ export function Dashboard() {
         if (!cancelled) setLiveMatches([]);
       }
     }
-
     loadLiveMatches();
     const interval = window.setInterval(loadLiveMatches, 8000);
     return () => {
@@ -485,1966 +194,377 @@ export function Dashboard() {
   }, []);
 
   useEffect(() => {
-    setAvatarLoadError(false);
-  }, [user?.avatar]);
-
-  useEffect(() => {
     if (!user?.username) return;
-    api
-      .get<
-        Array<{
-          team: number;
-          match: { winner: number | null; createdAt: string };
-        }>
-      >(`/users/${user.username}/matches`)
+    let cancelled = false;
+    api.get<MatchHistoryEntry[]>(`/users/${encodeURIComponent(user.username)}/matches`)
       .then(({ data }) => {
-        const completed = [...data]
-          .filter((e) => e.match.winner !== null)
-          .sort(
-            (a, b) =>
-              new Date(b.match.createdAt).getTime() -
-              new Date(a.match.createdAt).getTime(),
-          );
-        if (!completed.length) {
-          setCurrentStreak(0);
-          setStreakType(null);
-          return;
-        }
-        const firstType =
-          completed[0].match.winner === completed[0].team ? "win" : "loss";
-        let count = 0;
-        for (const entry of completed) {
-          const type = entry.match.winner === entry.team ? "win" : "loss";
-          if (type === firstType) count++;
-          else break;
-        }
-        setCurrentStreak(count);
-        setStreakType(firstType);
+        if (!cancelled) setMatchHistory(data);
       })
-      .catch(() => {});
+      .catch(() => {
+        if (!cancelled) setMatchHistory([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [user?.username]);
 
   async function handleFindMatch() {
-    if (hasActiveMatch) return;
-
-    if (status === "searching") {
-      await api.post("/matchmaking/queue/leave");
-      stopSearching();
-      pushOpsEvent(
-        "Salida de cola",
-        "Cancelaste búsqueda manualmente desde dashboard.",
-        "warn",
-      );
+    if (pendingMatch) return;
+    if (activeMatchId) {
+      navigate({ to: "/match/$matchId", params: { matchId: activeMatchId } });
       return;
     }
-    try {
-      await api.post("/matchmaking/queue/join", {
-        mode: selectedMode,
-      });
-      startSearching();
-      pushOpsEvent(
-        "Entrada a cola",
-        "Iniciaste búsqueda competitiva con tus roles de perfil.",
-        "good",
-      );
-    } catch (err: any) {
-      console.error("Queue error:", err.response?.data);
-      reportClientError(err, "dashboard.queue.join_leave");
-      pushOpsEvent(
-        "Error de cola",
-        err?.response?.data?.error?.message ?? "No se pudo procesar la acción.",
-        "warn",
-      );
+
+    const leaveCurrentQueue = async () => {
+      await api.post("/matchmaking/queue/leave").catch((err) => reportClientError(err, "dashboard.queue.leave"));
+      stopSearching();
+    };
+
+    if (status === "searching") {
+      await leaveCurrentQueue();
+      return;
     }
-  }
 
-  const isSearching = status === "searching";
-  const isAccepting = Boolean(pendingMatch);
-  const findMatchDisabled = hasActiveMatch;
-  const queuePreviewForDisplay = queuePreview;
+    try {
+      const { data: queueStatus } = await api.get<{ inQueue: boolean; queueSize?: number; mode?: string; joinedAt?: number }>("/matchmaking/queue/status");
+      if (queueStatus.inQueue) {
+        await leaveCurrentQueue();
+        return;
+      }
 
-  function formatElapsed(s: number) {
-    const m = Math.floor(s / 60)
-      .toString()
-      .padStart(2, "0");
-    const sec = (s % 60).toString().padStart(2, "0");
-    return `${m}:${sec}`;
+      await api.post("/matchmaking/queue/join", { mode: selectedMode });
+      startSearching();
+    } catch (err: unknown) {
+      reportClientError(err, "dashboard.queue.join");
+      const queueError = err as QueueRequestError;
+      const message = queueError.response?.data?.error?.message;
+      if (message === "Already in queue") {
+        await leaveCurrentQueue();
+        return;
+      }
+      window.alert(message ?? "No se pudo entrar a cola.");
+    }
   }
 
   if (!user) return null;
 
-  const level = user.level ?? parseRankLevel(user.rank);
-  const rankMeta = getRankMeta(level);
-  const rankColor = rankMeta.color;
-
-  const profileRoles = [user.mainRole, user.secondaryRole].filter(
-    Boolean,
-  ) as string[];
-  const acceptedCount = pendingMatch?.acceptedBy?.length ?? 0;
-  const currentUserAccepted = user
-    ? (pendingMatch?.acceptedBy ?? []).includes(user.id)
-    : false;
-  const totalPendingPlayers =
-    pendingMatch?.totalPlayers ??
-    (pendingMatch?.teams.team1.length ?? 0) +
-      (pendingMatch?.teams.team2.length ?? 0);
-  const queueStateMeta = getQueueLifecycleMeta({
-    hasActiveMatch,
-    isAccepting,
-    isSearching,
-    queueEtaSeconds,
-    queuePosition,
-    acceptedCount,
-    totalPlayers: totalPendingPlayers,
-  });
-  const isMd = viewportWidth < 1024;
-  const isSm = viewportWidth < 768;
-  const isXs = viewportWidth < 560;
-  const queueOccupancy = isAccepting
-    ? totalPendingPlayers
-    : (queueSize ?? queuePreviewForDisplay.length);
-  const hasQueuePlayers = queueOccupancy > 0;
-  const liveQueueState:
-    | "idle"
-    | "warming"
-    | "active"
-    | "accepting"
-    | "blocked" = isAccepting
-    ? "accepting"
-    : hasActiveMatch
-      ? "blocked"
-      : hasQueuePlayers
-        ? queuePreviewForDisplay.length > 0
-          ? "active"
-          : "warming"
-        : "idle";
-  const liveQueueTitle =
-    liveQueueState === "accepting"
-      ? "Accept en progreso"
-      : liveQueueState === "blocked"
-        ? "Partida activa"
-        : "Jugadores buscando partida";
-  const liveQueueSignal =
-    liveQueueState === "accepting"
-      ? `Aceptaron ${acceptedCount}/${totalPendingPlayers} · Ventana ${
-          acceptCountdown != null ? formatCountdown(acceptCountdown) : "—"
-        }`
-      : liveQueueState === "blocked"
-        ? "Tenés una partida abierta. No podés re-entrar a cola."
-        : liveQueueState === "active"
-          ? `${queueSize ?? queuePreviewForDisplay.length}/10 buscando · Espera ${
-              queueEtaSeconds != null ? `~${queueEtaSeconds}s` : "calculando"
-            }`
-          : liveQueueState === "warming"
-            ? "Sincronizando snapshot en vivo de la cola."
-            : "No hay jugadores en cola ahora mismo.";
-
+  const rankMeta = getRankMeta(user.level ?? parseRankLevel(user.rank));
   const totalPlayed = user.wins + user.losses;
-  const userWinrate =
-    totalPlayed > 0 ? `${Math.round((user.wins / totalPlayed) * 100)}%` : "—";
-  const waitValue = isAccepting
-    ? acceptCountdown != null
-      ? formatCountdown(acceptCountdown)
-      : "—"
-    : isSearching
-      ? formatElapsed(elapsed)
-      : "—";
-
-  useEffect(() => {
-    if (!isSearching || typeof queueSize !== "number") {
-      queueSizeRef.current = null;
-      return;
-    }
-    if (queueSizeRef.current == null) {
-      queueSizeRef.current = queueSize;
-      return;
-    }
-    if (queueSizeRef.current !== queueSize) {
-      const diff = queueSize - queueSizeRef.current;
-      queueSizeRef.current = queueSize;
-      pushOpsEvent(
-        "Movimiento de cola",
-        diff > 0
-          ? `Entraron ${diff} jugador${diff > 1 ? "es" : ""}. Total: ${queueSize}/10.`
-          : `Salieron ${Math.abs(diff)} jugador${Math.abs(diff) > 1 ? "es" : ""}. Total: ${queueSize}/10.`,
-        diff > 0 ? "neutral" : "warn",
-      );
-    }
-  }, [isSearching, pushOpsEvent, queueSize]);
+  const winrate = totalPlayed > 0 ? Math.round((user.wins / totalPlayed) * 100) : 0;
+  const streak = calculateCurrentStreak(matchHistory);
+  const streakAsset = streak.value < 0 ? "/brand/lossStreak.webp" : "/brand/winStreak.webp";
+  const displayedQueue = queueSize ?? queuePreview.length;
+  const searchElapsedLabel = formatClock(elapsed);
+  const displayedEta = status === "searching" ? searchElapsedLabel : queueEtaSeconds != null ? formatClock(queueEtaSeconds) : "—";
+  const displayedLiveCount = liveMatches.length;
+  const activity = getActivityLabel(displayedQueue, displayedLiveCount);
+  const roleRows = buildRoleRows(queuePreview);
+  const matchesForDisplay = liveMatches.map(liveToDisplayRow);
+  const bestHero = getBestHero(matchHistory, user.username);
+  const bestMap = getBestMap(matchHistory);
+  const bestMapImageId = MAP_ID_BY_NAME[bestMap.label];
+  const bestMapImageSrc = bestMapImageId ? `/maps/${bestMapImageId}.webp` : null;
 
   return (
     <>
-      <section
-        style={{
-          display: "grid",
-          gap: "1.25rem",
-          maxWidth: "1180px",
-          margin: "0 auto",
-        }}
-      >
-        <header
-          style={{
-            position: "relative",
-            overflow: "hidden",
-            border: "1px solid rgba(0,200,255,0.14)",
-            background:
-              "linear-gradient(135deg, rgba(0,200,255,0.10), rgba(124,77,255,0.06) 42%, #02060e), url('/images/617568.webp') center/cover",
-            minHeight: "230px",
-            padding: "1.4rem",
-            display: "grid",
-            alignItems: "end",
-          }}
-        >
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              background:
-                "linear-gradient(90deg, rgba(2,6,14,0.96), rgba(2,6,14,0.76) 45%, rgba(2,6,14,0.42))",
-            }}
-          />
-          <div
-            style={{
-              position: "absolute",
-              inset: 0,
-              backgroundImage:
-                "linear-gradient(90deg, rgba(0,200,255,0.07) 1px, transparent 1px), linear-gradient(rgba(0,200,255,0.05) 1px, transparent 1px)",
-              backgroundSize: "34px 34px",
-              opacity: 0.45,
-            }}
-          />
+      <TopBar
+        user={user}
+        rankMeta={rankMeta}
+        status={pendingMatch ? "Aceptando" : status === "searching" ? "Buscando" : "Listo"}
+        bestHero={bestHero}
+        bestMap={bestMap}
+      />
 
-          <div style={{ position: "relative", display: "grid", gap: "1.1rem" }}>
-            <div
-              style={{
-                display: "flex",
-                alignItems: "center",
-                justifyContent: "space-between",
-                gap: "1rem",
-                flexWrap: "wrap",
-              }}
-            >
-              <div>
-                <div
-                  style={{
-                    color: "#7dd3fc",
-                    fontFamily: "var(--font-display)",
-                    fontSize: "0.72rem",
-                    fontWeight: 900,
-                    letterSpacing: "0.22em",
-                    textTransform: "uppercase",
-                    marginBottom: "0.45rem",
-                  }}
-                >
-                  South America · Beta cerrada · Matchmaking competitivo
-                </div>
-                <h1
-                  style={{
-                    margin: 0,
-                    color: "#fff",
-                    fontFamily: "var(--font-display)",
-                    fontSize: "clamp(2rem, 5vw, 4.1rem)",
-                    lineHeight: 0.9,
-                    fontWeight: 900,
-                    letterSpacing: "0.04em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Buscar partida
-                </h1>
-              </div>
-            </div>
+      <section className="storm-dashboard-grid">
+        <article className="storm-panel storm-hero">
+          <div className="storm-hero-scene" />
+          <div className="storm-hero-content">
+            <div className="storm-eyebrow">Sudamérica · Beta competitiva</div>
+            <h1 className="storm-hero-title">Buscar partida</h1>
+            <p className="storm-hero-subtitle">Únete a la batalla en el nexo</p>
 
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: isXs
-                  ? "repeat(2, minmax(120px, 1fr))"
-                  : isMd
-                    ? "repeat(2, minmax(120px, 1fr))"
-                    : "repeat(4, minmax(120px, 1fr))",
-                gap: "0.7rem",
-              }}
-            >
-              <StatPanel
-                label="Winrate"
-                value={userWinrate}
-                sub={`${user.wins}W / ${user.losses}L`}
-                tone="#4ade80"
-                iconSrc="/brand/winrate.thumb.webp"
-              />
-              <StatPanel
-                label="MMR actual"
-                value={user.mmr.toLocaleString("es-AR")}
-                sub={rankMeta.label}
-                tone={rankColor}
-                iconSrc={rankMeta.iconSrc}
-              />
-              <StatPanel
-                label="Partidas"
-                value={(user.wins + user.losses).toString()}
-                sub="Partidas Jugadas"
-                tone="#9417dd"
-                iconSrc="/brand/matches.thumb.webp"
-              />
-              <StatPanel
-                label="Racha"
-                value={currentStreak > 0 ? `${currentStreak}` : "—"}
-                sub={
-                  streakType === "win"
-                    ? `${currentStreak} victoria${currentStreak !== 1 ? "s" : ""} seguida${currentStreak !== 1 ? "s" : ""}`
-                    : streakType === "loss"
-                      ? `${currentStreak} derrota${currentStreak !== 1 ? "s" : ""} seguida${currentStreak !== 1 ? "s" : ""}`
-                      : "Sin partidas"
-                }
-                tone={
-                  streakType === "win"
-                    ? "#F98005"
-                    : streakType === "loss"
-                      ? "#71cffb"
-                      : "#94a3b8"
-                }
-                iconSrc={
-                  streakType === "win"
-                    ? "/brand/winStreak.thumb.webp"
-                    : streakType === "loss"
-                      ? "/brand/lossStreak.thumb.webp"
-                      : "/brand/logo.thumb.webp"
-                }
-              />
-            </div>
-          </div>
-        </header>
-
-        <section
-          style={{
-            display: "grid",
-            gridTemplateColumns:
-              matchmakingLayout === "stack" || isMd
-                ? "1fr"
-                : "minmax(0, 1.65fr) minmax(260px, 0.55fr)",
-            gap: "1rem",
-            alignItems: "stretch",
-          }}
-        >
-          <div
-            style={{
-              border: "1px solid rgba(232,244,255,0.07)",
-              background:
-                "linear-gradient(180deg, rgba(17,25,39,0.82), rgba(8,12,20,0.72))",
-              padding: "1rem",
-              display: "grid",
-              gap: "1rem",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "1rem",
-                flexWrap: "wrap",
-              }}
-            >
-              <PanelTitle
-                eyebrow="Centro de preparación"
-                title="Escuadra previa"
-              />
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: "0.75rem",
-                  flexWrap: "wrap",
-                }}
-              >
-                <div
-                  style={{
-                    color: "rgba(232,244,255,0.40)",
-                    fontSize: "0.8rem",
-                    fontWeight: 700,
-                  }}
-                >
-                  Identidad activa antes de entrar
-                </div>
-                <div
-                  style={{
-                    display: "flex",
-                    border: "1px solid rgba(232,244,255,0.08)",
-                    background: "rgba(2,6,14,0.45)",
-                  }}
-                >
-                  <LayoutToggleButton
-                    active={matchmakingLayout === "split"}
-                    label="Compacto"
-                    onClick={() => setMatchmakingLayout("split")}
-                  />
-                  <LayoutToggleButton
-                    active={matchmakingLayout === "stack"}
-                    label="Extendido"
-                    onClick={() => setMatchmakingLayout("stack")}
-                  />
-                </div>
-              </div>
-            </div>
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: isXs
-                  ? "repeat(2, minmax(90px, 1fr))"
-                  : isSm
-                    ? "repeat(3, minmax(90px, 1fr))"
-                    : "repeat(5, minmax(90px, 1fr))",
-                gap: matchmakingLayout === "stack" ? "0.9rem" : "0.7rem",
-              }}
-            >
-              {SLOT_ORDER.map((idx) => {
-                const isYou = idx === 2;
-                return isYou ? (
-                  <PlayerSlotShell
-                    key="you"
-                    color={rankColor}
-                    minHeight={320}
-                    isYou
-                  >
-                    {/* "Tú" label */}
-                    <div
-                      style={{
-                        border: `1px solid ${rankColor}55`,
-                        background: `${rankColor}14`,
-                        color: rankColor,
-                        padding: "2px 10px",
-                        fontSize: "9px",
-                        fontWeight: 900,
-                        letterSpacing: "0.22em",
-                        textTransform: "uppercase",
-                        fontFamily: "var(--font-display)",
-                      }}
-                    >
-                      Tú
-                    </div>
-
-                    {/* Hex avatar — wider proportions (regular hex ratio ~1.155) */}
-                    <div
-                      style={{
-                        width: "90px",
-                        height: "78px",
-                        clipPath:
-                          "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
-                        background: `linear-gradient(135deg, ${rankColor}, ${rankColor}44)`,
-                        display: "grid",
-                        placeItems: "center",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "84px",
-                          height: "72px",
-                          clipPath:
-                            "polygon(25% 0%, 75% 0%, 100% 50%, 75% 100%, 25% 100%, 0% 50%)",
-                          overflow: "hidden",
-                          display: "grid",
-                          placeItems: "center",
-                          background: "rgba(4,10,20,0.95)",
-                          color: rankColor,
-                          fontFamily: "var(--font-display)",
-                          fontWeight: 900,
-                          fontSize: "1.15rem",
-                        }}
-                      >
-                        {user.avatar && !avatarLoadError ? (
-                          <img
-                            src={user.avatar}
-                            alt={user.username}
-                            loading="lazy"
-                            decoding="async"
-                            onError={() => setAvatarLoadError(true)}
-                            style={{
-                              width: "100%",
-                              height: "100%",
-                              objectFit: "cover",
-                            }}
-                          />
-                        ) : (
-                          user.username.slice(0, 2).toUpperCase()
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Rank image + label + MMR (outside avatar) */}
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: "0.25rem",
-                      }}
-                    >
-                      <img
-                        src={rankMeta.iconSrc}
-                        alt={rankMeta.label}
-                        loading="lazy"
-                        decoding="async"
-                        style={{
-                          width: "44px",
-                          height: "44px",
-                          objectFit: "contain",
-                          filter: `drop-shadow(0 0 10px ${rankColor})`,
-                        }}
-                      />
-                      <div
-                        style={{
-                          color: rankColor,
-                          fontFamily: "var(--font-display)",
-                          fontWeight: 900,
-                          fontSize: "0.78rem",
-                          letterSpacing: "0.16em",
-                          textTransform: "uppercase",
-                          textShadow: `0 0 12px ${rankColor}55`,
-                        }}
-                      >
-                        {rankMeta.label}
-                      </div>
-                      <div
-                        style={{
-                          color: "rgba(255,255,255,0.55)",
-                          fontSize: "0.72rem",
-                          fontWeight: 700,
-                          letterSpacing: "0.04em",
-                        }}
-                      >
-                        {user.mmr.toLocaleString("es-AR")} MMR
-                      </div>
-                    </div>
-
-                    {/* Username + nationality */}
-                    <div
-                      style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        gap: "0.42rem",
-                        minWidth: 0,
-                      }}
-                    >
-                      <CountryBadge countryCode={user.countryCode} />
-                      <span
-                        style={{
-                          color: "#fff",
-                          fontFamily: "var(--font-display)",
-                          fontSize: "1rem",
-                          fontWeight: 900,
-                          letterSpacing: "0.06em",
-                          lineHeight: 1,
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                          whiteSpace: "nowrap",
-                        }}
-                      >
-                        {user.username}
-                      </span>
-                    </div>
-
-                    {/* Roles */}
-                    <div style={{ display: "flex", gap: "0.45rem" }}>
-                      {profileRoles.length > 0 ? (
-                        profileRoles.map((role) => (
-                          <RolePill key={role} role={role} iconOnly />
-                        ))
-                      ) : (
-                        <RolePill role="Sin rol" muted />
-                      )}
-                    </div>
-                  </PlayerSlotShell>
-                ) : (
-                  <div
-                    key={idx}
-                    onMouseEnter={() => setHoveredEmptySlot(idx)}
-                    onMouseLeave={() =>
-                      setHoveredEmptySlot((current) =>
-                        current === idx ? null : current,
-                      )
-                    }
-                    style={{
-                      ...slotBaseStyle,
-                      minHeight:
-                        matchmakingLayout === "stack"
-                          ? "290px"
-                          : slotBaseStyle.minHeight,
-                      border:
-                        hoveredEmptySlot === idx
-                          ? "1px solid rgba(0,200,255,0.28)"
-                          : "1px solid rgba(148,163,184,0.10)",
-                      background:
-                        hoveredEmptySlot === idx
-                          ? "linear-gradient(180deg, rgba(0,200,255,0.06), rgba(3,6,14,0.94))"
-                          : "linear-gradient(180deg, rgba(8,12,22,0.9), rgba(3,6,14,0.92))",
-                      clipPath:
-                        "polygon(0 0, calc(100% - 14px) 0, 100% 14px, 100% 100%, 14px 100%, 0 calc(100% - 14px))",
-                      transform:
-                        hoveredEmptySlot === idx
-                          ? "translateY(-2px)"
-                          : "translateY(0)",
-                      boxShadow:
-                        hoveredEmptySlot === idx
-                          ? "0 0 24px rgba(0,200,255,0.10), inset 0 0 24px rgba(0,200,255,0.04)"
-                          : slotBaseStyle.boxShadow,
-                      transition:
-                        "border-color 180ms ease, box-shadow 180ms ease, transform 180ms ease, background 180ms ease",
-                    }}
-                  >
-                    {/* Animated corner marks */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        animation: "slotIdlePulse 2.8s ease-in-out infinite",
-                        pointerEvents: "none",
-                      }}
-                    >
-                      <CardCorners
-                        color={
-                          hoveredEmptySlot === idx
-                            ? "rgba(0,200,255,0.6)"
-                            : "rgba(148,163,184,0.35)"
-                        }
-                      />
-                    </div>
-
-                    {/* Diagonal border overlays */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        top: 0,
-                        right: 0,
-                        width: "14px",
-                        height: "14px",
-                        background:
-                          hoveredEmptySlot === idx
-                            ? "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(0,200,255,0.7) 50%, transparent calc(50% + 0.6px))"
-                            : "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(148,163,184,0.25) 50%, transparent calc(50% + 0.6px))",
-                        pointerEvents: "none",
-                        transition: "background 180ms ease",
-                      }}
-                    />
-                    <div
-                      style={{
-                        position: "absolute",
-                        bottom: 0,
-                        left: 0,
-                        width: "14px",
-                        height: "14px",
-                        background:
-                          hoveredEmptySlot === idx
-                            ? "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(0,200,255,0.7) 50%, transparent calc(50% + 0.6px))"
-                            : "linear-gradient(to bottom right, transparent calc(50% - 0.6px), rgba(148,163,184,0.25) 50%, transparent calc(50% + 0.6px))",
-                        pointerEvents: "none",
-                        transition: "background 180ms ease",
-                      }}
-                    />
-
-                    {/* Watermark */}
-                    <div
-                      style={{
-                        position: "absolute",
-                        inset: 0,
-                        display: "grid",
-                        placeItems: "center",
-                        opacity: 0.04,
-                        pointerEvents: "none",
-                        fontSize: "6rem",
-                        fontFamily: "var(--font-display)",
-                        fontWeight: 900,
-                        color: "#7dd3fc",
-                      }}
-                    >
-                      V
-                    </div>
-
-                    {/* Plus icon */}
-                    <div
-                      style={{
-                        width: "48px",
-                        height: "48px",
-                        border:
-                          hoveredEmptySlot === idx
-                            ? "1px solid rgba(0,200,255,0.35)"
-                            : "1px solid rgba(232,244,255,0.10)",
-                        background:
-                          hoveredEmptySlot === idx
-                            ? "rgba(0,200,255,0.08)"
-                            : "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
-                        clipPath:
-                          "polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px))",
-                        display: "grid",
-                        placeItems: "center",
-                        color:
-                          hoveredEmptySlot === idx
-                            ? "rgba(0,200,255,0.8)"
-                            : "rgba(232,244,255,0.30)",
-                        transition: "all 180ms ease",
-                      }}
-                    >
-                      <Plus size={18} />
-                    </div>
-
-                    <div
-                      style={{
-                        display: "flex",
-                        flexDirection: "column",
-                        alignItems: "center",
-                        gap: "0.15rem",
-                      }}
-                    >
-                      <div
-                        style={{
-                          color:
-                            hoveredEmptySlot === idx
-                              ? "rgba(0,200,255,0.7)"
-                              : "rgba(232,244,255,0.25)",
-                          fontFamily: "var(--font-display)",
-                          fontWeight: 900,
-                          fontSize: "0.66rem",
-                          letterSpacing: "0.16em",
-                          textTransform: "uppercase",
-                          textAlign: "center",
-                          transition: "color 180ms ease",
-                        }}
-                      >
-                        Slot aliado
-                      </div>
-                      <div
-                        style={{
-                          color: "rgba(232,244,255,0.14)",
-                          fontSize: "0.6rem",
-                          letterSpacing: "0.06em",
-                          textTransform: "uppercase",
-                        }}
-                      >
-                        Invitar jugador
-                      </div>
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          </div>
-
-          <div
-            style={{
-              border: "1px solid rgba(0,200,255,0.14)",
-              background:
-                "linear-gradient(180deg, rgba(0,200,255,0.08), rgba(17,25,39,0.78))",
-              padding: "1rem",
-              display: "grid",
-              gap: "0.85rem",
-              alignContent: "space-between",
-            }}
-          >
-            <PanelTitle eyebrow="Matchmaking" title="Competitivo aleatorio" />
-
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns:
-                  matchmakingLayout === "stack" || isMd
-                    ? "minmax(180px, 0.85fr) minmax(0, 1.15fr)"
-                    : "1fr",
-                gap: "0.8rem",
-                alignItems: "stretch",
-              }}
-            >
-              <button
-                onClick={handleFindMatch}
-                disabled={findMatchDisabled}
-                style={{
-                  width: "100%",
-                  minHeight:
-                    matchmakingLayout === "stack" || isMd ? "100%" : "50px",
-                  border: findMatchDisabled
-                    ? "1px solid rgba(148,163,184,0.26)"
-                    : isSearching
-                      ? "1px solid rgba(0,200,255,0.75)"
-                      : "1px solid rgba(0,200,255,0.88)",
-                  background: findMatchDisabled
-                    ? "rgba(148,163,184,0.14)"
-                    : isSearching
-                      ? "rgba(0,200,255,0.06)"
-                      : "linear-gradient(90deg, #00c8ff, #7dd3fc)",
-                  color: findMatchDisabled
-                    ? "#cbd5e1"
-                    : isSearching
-                      ? "#7dd3fc"
-                      : "#020617",
-                  fontFamily: "var(--font-display)",
-                  fontWeight: 900,
-                  fontSize: "0.92rem",
-                  letterSpacing: "0.16em",
-                  textTransform: "uppercase",
-                  cursor: findMatchDisabled ? "not-allowed" : "pointer",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "0.65rem",
-                  boxShadow: findMatchDisabled
-                    ? "none"
-                    : "0 0 28px rgba(0,200,255,0.12)",
-                }}
-              >
-                {findMatchDisabled ? (
-                  "Partida activa"
-                ) : isSearching ? (
-                  <>
-                    <span
-                      style={{
-                        width: 10,
-                        height: 10,
-                        background: "#00c8ff",
-                        animation: "blink 1s infinite",
-                      }}
-                    />
-                    Cancelar búsqueda
-                  </>
-                ) : (
-                  <>
-                    <Search size={17} />
-                    Buscar partida
-                  </>
-                )}
-              </button>
-
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns:
-                    matchmakingLayout === "stack" || isMd
-                      ? "repeat(3, minmax(0, 1fr))"
-                      : "1fr",
-                  gap: "0.55rem",
-                }}
-              >
-                <QueueBriefStat
-                  label={isAccepting ? "Confirmados" : "Buscando ahora"}
-                  value={
-                    isAccepting
-                      ? `${acceptedCount}/${totalPendingPlayers}`
-                      : `${queueOccupancy}/10`
-                  }
-                  sub={
-                    isAccepting
-                      ? currentUserAccepted
-                        ? "Tu accept ya entró"
-                        : "Falta tu confirmación"
-                      : isSearching
-                        ? "Jugadores visibles en cola"
-                        : "Cola global en tiempo real"
-                  }
-                  tone={isAccepting ? queueStateMeta.tone : "#7dd3fc"}
-                />
-                <QueueBriefStat
-                  label={isAccepting ? "Ventana" : "Espera"}
-                  value={waitValue}
-                  sub={
-                    isAccepting
-                      ? "Tiempo para aceptar"
-                      : isSearching
-                        ? "Tiempo en cola"
-                        : "Sin búsqueda activa"
-                  }
-                  tone={isSearching || isAccepting ? "#4ade80" : "#94a3b8"}
-                />
-                <QueueBriefStat
-                  label="Formato"
-                  value={
-                    MODES.find((mode) => mode.key === selectedMode)?.label ??
-                    "Competitivo"
-                  }
-                  sub="SA · Draft · MMR activo"
-                  tone={rankColor}
-                />
-              </div>
-            </div>
-
-            {hasActiveMatch && (
-              <Notice
-                tone="warn"
-                text="No podés buscar otra partida hasta cerrar la actual."
-              />
-            )}
-          </div>
-        </section>
-
-        <section style={panelStyle}>
-          <div
-            style={{
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "1rem",
-              flexWrap: "wrap",
-            }}
-          >
-            <PanelTitle eyebrow="Live queue" title={liveQueueTitle} />
-            <div
-              style={{
-                color:
-                  liveQueueState === "accepting"
-                    ? "#fcd34d"
-                    : liveQueueState === "blocked"
-                      ? "#fb7185"
-                      : "#7dd3fc",
-                fontFamily: "var(--font-display)",
-                fontWeight: 900,
-                letterSpacing: "0.12em",
-                textTransform: "uppercase",
-              }}
-            >
-              {liveQueueSignal}
-            </div>
-          </div>
-
-          <div style={{ display: "grid", gap: "0.55rem" }}>
-            {liveQueueState === "idle" ? (
-              <Notice text="No hay jugadores en cola en este momento." />
-            ) : liveQueueState === "warming" ? (
-              <Notice text="Buscando snapshot inicial de cola. Si persiste, revisa conectividad realtime/polling." />
-            ) : liveQueueState === "accepting" ? (
-              <Notice
-                tone="warn"
-                text="Match encontrado. Confirmá desde el modal para evitar cancelación por timeout."
-              />
-            ) : liveQueueState === "blocked" ? (
-              <Notice
-                tone="warn"
-                text="Ya hay una partida activa asociada a tu sesión. Reabrí el matchroom para continuar."
-              />
-            ) : queuePreviewForDisplay.length === 0 ? (
-              <Notice text="Todavía no hay jugadores visibles en la cola." />
-            ) : (
-              queuePreviewForDisplay.map((entry, index) => (
-                <div key={entry.userId} style={queueRowStyle}>
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "0.75rem",
-                      minWidth: 0,
-                    }}
-                  >
-                    <div style={queueAvatarStyle}>
-                      {entry.username.slice(0, 2).toUpperCase()}
-                    </div>
-                    <div style={{ minWidth: 0 }}>
-                      <div
-                        style={{
-                          color: "#fff",
-                          fontWeight: 800,
-                          whiteSpace: "nowrap",
-                          overflow: "hidden",
-                          textOverflow: "ellipsis",
-                        }}
-                      >
-                        <span style={{ marginRight: "0.36rem" }}>
-                          <CountryBadge countryCode={entry.countryCode} compact />
-                        </span>
-                        <span>{entry.username}</span>{" "}
-                        {entry.userId === user.id ? (
-                          <span style={{ color: "#7dd3fc" }}>(vos)</span>
-                        ) : null}
-                      </div>
-                      <div
-                        style={{
-                          color: "rgba(232,244,255,0.34)",
-                          fontSize: "0.78rem",
-                        }}
-                      >
-                        #{index + 1} · {formatCompactRating(entry.mmr)} MMR ·{" "}
-                        {entry.isBot ? "bot testing" : "usuario real"}
-                      </div>
-                      {!entry.isBot &&
-                        entry.roles &&
-                        entry.roles.length > 0 && (
-                          <div
-                            style={{
-                              display: "flex",
-                              gap: "0.35rem",
-                              marginTop: "0.35rem",
-                              flexWrap: "wrap",
-                            }}
-                          >
-                            {entry.roles.map((role) => (
-                              <RolePill
-                                key={`${entry.userId}-${role}`}
-                                role={role}
-                                iconOnly
-                              />
-                            ))}
-                          </div>
-                        )}
-                    </div>
-                  </div>
-                  <div
-                    style={{
-                      color: "rgba(232,244,255,0.48)",
-                      fontSize: "0.8rem",
-                      textAlign: "right",
-                    }}
-                  >
-                    {entry.isBot
-                      ? "Sistema"
-                      : entry.joinedAt
-                        ? `${Math.max(0, Math.floor((Date.now() - entry.joinedAt) / 1000))}s`
-                        : "Esperando"}
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </section>
-
-        <section style={panelStyle}>
-          <button
-            type="button"
-            onClick={() => setLiveMatchesOpen((value) => !value)}
-            style={{
-              width: "100%",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "1rem",
-              flexWrap: "wrap",
-              border: "none",
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
-              padding: 0,
-              textAlign: "left",
-            }}
-          >
-            <PanelTitle
-              eyebrow="Nexus live rooms"
-              title={`Partidas en curso · ${liveMatches.length}`}
-            />
-            <div
-              style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}
-            >
-              <div
-                style={{
-                  color: liveMatches.length
-                    ? "#7dd3fc"
-                    : "rgba(232,244,255,0.38)",
-                  fontFamily: "var(--font-display)",
-                  fontSize: "0.86rem",
-                  fontWeight: 900,
-                  letterSpacing: "0.12em",
-                  textTransform: "uppercase",
-                }}
-              >
-                {liveMatches.length ? "Observar rooms" : "Sin actividad"}
-              </div>
-              <ChevronDown
-                size={16}
-                style={{
-                  color: "rgba(232,244,255,0.42)",
-                  transform: liveMatchesOpen
-                    ? "rotate(180deg)"
-                    : "rotate(0deg)",
-                  transition: "transform 160ms ease",
-                  flexShrink: 0,
-                }}
-              />
-            </div>
-          </button>
-
-          {liveMatchesOpen && (
-            <div
-              style={{ marginTop: "0.9rem", display: "grid", gap: "0.7rem" }}
-            >
-              {liveMatches.length === 0 ? (
-                <Notice text="No hay matchrooms en vivo ahora. Cuando empiece un veto o una partida, va a aparecer acá para observar." />
-              ) : (
-                liveMatches.map((match) => (
-                  <LiveMatchCard
-                    key={match.id}
-                    match={match}
-                    onOpen={() =>
-                      navigate({
-                        to: "/match/$matchId",
-                        params: { matchId: match.id },
-                      })
-                    }
-                  />
-                ))
-              )}
-            </div>
-          )}
-        </section>
-
-        {hiddenActiveMatchId && (
-          <section
-            style={{
-              ...panelStyle,
-              borderColor: "rgba(251,191,36,0.25)",
-              background: "rgba(251,191,36,0.07)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                gap: "1rem",
-              }}
-            >
-              <div>
-                <PanelTitle
-                  eyebrow="Match activo oculto"
-                  title="La partida sigue viva"
-                />
-                <div
-                  style={{
-                    color: "rgba(232,244,255,0.68)",
-                    marginTop: "0.25rem",
-                  }}
-                >
-                  Saliste del matchroom, pero podés volver cuando quieras.
-                </div>
-              </div>
-              <button
-                onClick={() => {
-                  window.sessionStorage.removeItem(DISMISSED_ACTIVE_MATCH_KEY);
-                  setDismissedActiveMatchId(null);
-                  navigate({
-                    to: "/match/$matchId",
-                    params: { matchId: hiddenActiveMatchId },
-                  });
-                }}
-                style={goldButtonStyle}
-              >
-                Reabrir match
-              </button>
-            </div>
-          </section>
-        )}
-
-        <section style={panelStyle}>
-          <button
-            type="button"
-            onClick={() => setIsOpsLogOpen((v) => !v)}
-            style={{
-              width: "100%",
-              display: "flex",
-              justifyContent: "space-between",
-              alignItems: "center",
-              gap: "1rem",
-              flexWrap: "wrap",
-              border: "none",
-              background: "transparent",
-              color: "inherit",
-              cursor: "pointer",
-              padding: 0,
-              textAlign: "left",
-            }}
-          >
-            <PanelTitle
-              eyebrow="Live logs"
-              title="Actividad operativa del matchmaking"
-            />
-            <div
-              style={{ display: "flex", alignItems: "center", gap: "0.6rem" }}
-            >
-              <div
-                style={{
-                  color: "rgba(232,244,255,0.42)",
-                  fontSize: "0.78rem",
-                  textTransform: "uppercase",
-                  letterSpacing: "0.14em",
-                  fontWeight: 800,
-                }}
-              >
-                {opsEvents.length}/10
-              </div>
-              <ChevronDown
-                size={16}
-                style={{
-                  color: "rgba(232,244,255,0.42)",
-                  transform: isOpsLogOpen ? "rotate(180deg)" : "rotate(0deg)",
-                  transition: "transform 160ms ease",
-                  flexShrink: 0,
-                }}
-              />
-            </div>
-          </button>
-
-          {isOpsLogOpen && (
-            <div style={{ marginTop: "0.75rem" }}>
-              {opsEvents.length === 0 ? (
-                <Notice text="Todavía no hay eventos. Entrá a cola para empezar a registrar actividad en vivo." />
-              ) : (
-                <div style={{ display: "grid", gap: "0.55rem" }}>
-                  {opsEvents.map((event) => (
-                    <OpsEventRow key={event.id} event={event} />
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-        </section>
-
-        {user.role === "ADMIN" && (
-          <section
-            style={{
-              ...panelStyle,
-              borderColor: "rgba(125,211,252,0.20)",
-              background: "rgba(8,47,73,0.12)",
-            }}
-          >
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                gap: "1rem",
-                alignItems: "center",
-                flexWrap: "wrap",
-              }}
-            >
-              <PanelTitle
-                eyebrow="Admin · War room"
-                title="Operación movida al panel /admin"
-              />
-              <div style={{ display: "flex", gap: "0.6rem", flexWrap: "wrap" }}>
-                <button
-                  onClick={() => navigate({ to: "/admin" })}
-                  style={blueGhostButtonStyle}
-                >
-                  Abrir panel admin
+            <div className="storm-mode-tabs" aria-label="Selector de modo">
+              {MODES.map((mode) => (
+                <button key={mode.key} type="button" disabled={!mode.enabled || status === "searching" || Boolean(activeMatchId)} onClick={() => setSelectedMode(mode.key)} className={`storm-mode-tab${selectedMode === mode.key ? " active" : ""}`}>
+                  {mode.icon} {mode.label}
                 </button>
+              ))}
+            </div>
+
+            <div className="storm-cta-wrap">
+              <button className={`storm-cta${status === "searching" ? " searching" : ""}`} type="button" onClick={handleFindMatch} disabled={Boolean(pendingMatch)}>
+                <span>{pendingMatch ? "Confirmando partida" : activeMatchId ? "Ir al matchroom" : status === "searching" ? `Cancelar búsqueda · ${searchElapsedLabel}` : "Encontrar partida"} ⚡</span>
+              </button>
+            </div>
+
+            <div className="storm-mini-stats" aria-label="Resumen del jugador">
+              <div className="storm-stat-card"><div className="storm-stat-icon"><img src="/brand/winrate.webp" alt="" /></div><div><div className="storm-stat-label">Winrate</div><div className="storm-stat-value">{winrate}%</div><div className="storm-stat-sub">{totalPlayed ? `${user.wins}W / ${user.losses}L` : "Sin partidas"}</div></div></div>
+              <div className="storm-stat-card"><div className="storm-stat-icon purple"><img src={rankMeta.iconSrc} alt="" /></div><div><div className="storm-stat-label">MMR</div><div className="storm-stat-value">{user.mmr.toLocaleString("es-AR")}</div><div className="storm-stat-sub">{rankMeta.label}</div></div></div>
+              <div className="storm-stat-card"><div className="storm-stat-icon"><img src="/brand/matches.webp" alt="" /></div><div><div className="storm-stat-label">Partidas</div><div className="storm-stat-value">{totalPlayed}</div><div className="storm-stat-sub">Persistidas</div></div></div>
+              <div className="storm-stat-card"><div className="storm-stat-icon green"><img src={streakAsset} alt="" /></div><div><div className="storm-stat-label">Racha</div><div className="storm-stat-value">{streak.label}</div><div className="storm-stat-sub">{streak.detail}</div></div></div>
+            </div>
+          </div>
+        </article>
+
+        <aside className="storm-right-stack">
+          <article className="storm-panel storm-live-panel">
+            <div className="storm-panel-head"><h2 className="storm-panel-title">En vivo ahora</h2><span className="storm-collapse">⌃</span></div>
+            <div className="storm-live-list">
+              <LiveMetric icon="♟" label="Jugadores en cola" value={`${displayedQueue}`} />
+              <LiveMetric icon="◴" label="Tiempo estimado" value={displayedEta} />
+              <LiveMetric icon="⚔" label="Partidas en vivo" value={`${displayedLiveCount}`} />
+              <LiveMetric icon="▥" label="Pico de actividad" value={activity} highlight />
+            </div>
+            <Sparkline />
+          </article>
+
+          <article className="storm-panel storm-event-panel">
+            <div className="storm-event-content"><div className="storm-event-label">Evento activo</div><div className="storm-event-title">Fase Beta Cerrada</div><div className="storm-event-copy">Estamos validando matchmaking competitivo y scrims en tiempo real.</div><div className="storm-event-time">◷ Feedback abierto en Discord</div></div><div className="storm-loot" aria-hidden="true" />
+          </article>
+        </aside>
+
+        <article className="storm-panel storm-live-matches">
+          <div className="storm-panel-head"><h2 className="storm-panel-title">Partidas en vivo</h2><span className="storm-collapse">⌃</span></div>
+          <div className="storm-table-wrap"><table className="storm-table"><thead><tr><th>Mapa</th><th>Rango vs rango</th><th>MMR prom.</th><th>Tiempo</th><th>Estado</th><th>Conectados</th></tr></thead><tbody>
+            {matchesForDisplay.length === 0 ? (
+              <tr>
+                <td colSpan={6} style={{ padding: "18px", textAlign: "center", color: "rgba(170,189,230,.72)" }}>
+                  No hay partidas en vivo ahora. Aparecen desde veto hasta finalización/cancelación.
+                </td>
+              </tr>
+            ) : matchesForDisplay.map((match) => (
+              <tr key={match.id} onClick={() => navigate({ to: "/match/$matchId", params: { matchId: match.id } })} style={{ cursor: "pointer" }}>
+                <td><div className="storm-map-cell"><MapThumb mapName={match.selectedMap} /><div><div className="storm-map-name">{match.selectedMap}</div><div className="storm-map-mode">{match.modeLabel}</div></div></div></td>
+                <td><span className="storm-versus"><span className="storm-team-rank" title={match.team1Rank} aria-label={match.team1Rank}><img src={match.team1RankIconSrc} alt="" /></span> VS <span className="storm-team-rank red" title={match.team2Rank} aria-label={match.team2Rank}><img src={match.team2RankIconSrc} alt="" /></span></span></td>
+                <td>{match.avgMmr.toLocaleString("es-AR")}</td><td>{match.time}</td><td><span className="storm-state">{match.statusLabel}</span></td><td><span className="storm-viewers">◉ {match.connected}</span></td>
+              </tr>
+            ))}
+          </tbody></table></div>
+          <div className="storm-table-button"><button className="storm-ghost-btn" type="button" disabled>Ver todas las partidas en vivo · Próximamente</button></div>
+        </article>
+
+        <aside className="storm-aside-grid">
+          <article className="storm-panel storm-queue-panel">
+            <div className="storm-panel-head"><h2 className="storm-panel-title">Cola en tiempo real</h2><div className="storm-drop-mini">Por rol ⌄</div></div>
+            <div className="storm-queue-list">
+              {roleRows.map((row) => <QueueRoleRow key={row.label} row={row} />)}
+            </div>
+            <div className="storm-queue-footer">Total en cola: {displayedQueue} jugadores ☷</div>
+          </article>
+
+          <article className="storm-panel storm-server-panel">
+            <div className="storm-panel-head"><h2 className="storm-panel-title">Rendimiento personal</h2></div>
+            <div className="storm-servers">
+              <div className="storm-personal-list">
+                <div className="storm-personal-item">
+                  <div className="storm-personal-copy">
+                    <span className="storm-personal-label">Mejor héroe</span>
+                    <span className="storm-personal-meta">{bestHero.winrate}</span>
+                  </div>
+                  <strong className="storm-personal-value">{bestHero.label}</strong>
+                </div>
+                <div className="storm-personal-item map">
+                  <div className="storm-personal-map-thumb-wrap">
+                    {bestMapImageSrc ? (
+                      <img className="storm-personal-map-thumb" src={bestMapImageSrc} alt={bestMap.label} />
+                    ) : (
+                      <span className="storm-personal-map-thumb empty" aria-hidden="true" />
+                    )}
+                  </div>
+                  <div className="storm-personal-copy">
+                    <span className="storm-personal-label">Mejor mapa</span>
+                    <span className="storm-personal-meta">{bestMap.winrate}</span>
+                    <strong className="storm-personal-value">{bestMap.label}</strong>
+                  </div>
+                </div>
               </div>
             </div>
-            <Notice
-              text="La cola, los matches, los usuarios, el ELO y los client errors ahora se operan desde /admin. El dashboard vuelve a quedar enfocado en jugar."
-            />
-          </section>
-        )}
+          </article>
+        </aside>
       </section>
     </>
   );
 }
 
-type Tone = "default" | "warn" | "danger";
+function TopBar({ user, rankMeta, status, bestHero, bestMap }: { user: { username: string; avatar: string | null; mmr: number }; rankMeta: { label: string; iconSrc: string }; status: string; bestHero: { label: string; winrate: string }; bestMap: { label: string; winrate: string } }) {
+  return <header className="storm-topbar"><div className="storm-filters"><div className="storm-select-chip">Mejor héroe: <strong>{bestHero.label}</strong> · {bestHero.winrate}</div><div className="storm-select-chip small">Mejor mapa: <strong>{bestMap.label}</strong> · {bestMap.winrate}</div></div><div className="storm-top-actions"><div className="storm-icon-btn" aria-label="Notificaciones"><Bell size={18} /><span className="badge">3</span></div><div className="storm-icon-btn" aria-label="Ajustes"><Settings size={18} /></div><section className="storm-user-card" aria-label="Perfil del jugador"><div className={`storm-avatar${user.avatar ? "" : " empty"}`}>{user.avatar ? <img src={user.avatar} alt={user.username} /> : null}</div><div className="storm-user-meta"><div className="storm-user-name">{user.username}</div><div className="storm-status-line"><span className="storm-status-dot" /> {status}</div></div><div className="storm-rank-divider" /><div className="storm-rank-box"><div className="storm-rank-emblem"><img src={rankMeta.iconSrc} alt="" /></div><div><div className="storm-rank-title">{rankMeta.label}</div><div className="storm-rank-sub">{user.mmr.toLocaleString("es-AR")} MMR</div></div></div><span className="storm-chev">⌄</span></section></div></header>;
+}
+function LiveMetric({ icon, label, value, highlight }: { icon: string; label: string; value: string; highlight?: boolean }) {
+  return <div className="storm-live-row"><span className="storm-row-icon">{icon}</span><span>{label}</span><strong className={highlight ? "highlight" : undefined}>{value}</strong></div>;
+}
+function Sparkline() { return <div className="storm-sparkline" aria-hidden="true"><svg viewBox="0 0 360 80" preserveAspectRatio="none"><defs><linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#277cff" /><stop offset="0.45" stopColor="#9b55ff" /><stop offset="1" stopColor="#37d9ff" /></linearGradient><linearGradient id="fillGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#9b55ff" stopOpacity="0.32" /><stop offset="1" stopColor="#37d9ff" stopOpacity="0" /></linearGradient></defs><path d="M0 62 L24 58 L42 60 L58 54 L76 55 L94 48 L110 50 L130 42 L148 47 L166 36 L184 41 L202 38 L220 43 L238 39 L258 41 L278 36 L294 39 L310 31 L330 34 L360 24 L360 80 L0 80 Z" fill="url(#fillGradient)" /><path d="M0 62 L24 58 L42 60 L58 54 L76 55 L94 48 L110 50 L130 42 L148 47 L166 36 L184 41 L202 38 L220 43 L238 39 L258 41 L278 36 L294 39 L310 31 L330 34 L360 24" fill="none" stroke="url(#lineGradient)" strokeWidth="3" strokeLinecap="round" /></svg><span className="storm-pulse-dot" /></div>; }
+function MapThumb({ mapName }: { mapName: string }) { const mapId = MAP_ID_BY_NAME[mapName]; return mapId ? <img className="storm-map-thumb" src={`/maps/${mapId}.webp`} alt="" /> : <span className="storm-map-thumb" />; }
+function QueueRoleRow({ row }: { row: { icon: string; label: string; count: number; percent: number; cyan?: boolean } }) { return <div className="storm-queue-row"><span className="storm-role-icon">{row.icon}</span><span>{row.label}</span><strong>{row.count}</strong><div className={`storm-bar${row.cyan ? " cyan" : ""}`}><span style={{ width: `${Math.max(4, row.percent)}%` }} /></div><span className="storm-percent">{row.percent}%</span></div>; }
 
-function PanelTitle({ eyebrow, title }: { eyebrow: string; title: string }) {
-  return (
-    <div>
-      <div
-        style={{
-          color: "rgba(232,244,255,0.30)",
-          fontSize: "0.68rem",
-          letterSpacing: "0.2em",
-          textTransform: "uppercase",
-          fontWeight: 900,
-        }}
-      >
-        {eyebrow}
-      </div>
-      <div
-        style={{
-          color: "#fff",
-          fontFamily: "var(--font-display)",
-          fontSize: "1.2rem",
-          fontWeight: 900,
-          letterSpacing: "0.08em",
-          textTransform: "uppercase",
-          marginTop: "0.12rem",
-        }}
-      >
-        {title}
-      </div>
-    </div>
-  );
+function buildRoleRows(players: QueuePlayer[]) {
+  const roles = [
+    { role: "TANK", icon: "⬟", label: "Guerrero" },
+    { role: "RANGED", icon: "⚔", label: "Asesino" },
+    { role: "HEALER", icon: "✚", label: "Apoyo", cyan: true },
+    { role: "OFFLANE", icon: "✦", label: "Especialista", cyan: true },
+    { role: "FLEX", icon: "◎", label: "Flex", cyan: true },
+  ];
+  const counts = roles.map((entry) => ({
+    ...entry,
+    count: players.filter((p) => !p.isBot && (p.roles ?? []).includes(entry.role)).length,
+  }));
+  const total = Math.max(1, counts.reduce((sum, row) => sum + row.count, 0));
+  return counts.map((entry) => ({
+    icon: entry.icon,
+    label: getRoleMeta(entry.role)?.label === "Tank" ? entry.label : entry.label,
+    count: entry.count,
+    percent: entry.count > 0 ? Math.round((entry.count / total) * 100) : 0,
+    cyan: entry.cyan,
+  }));
 }
 
-function QueueBriefStat({
-  label,
-  value,
-  sub,
-  tone,
-}: {
-  label: string;
-  value: string | number;
-  sub: string;
-  tone: string;
-}) {
-  return (
-    <div
-      style={{
-        border: "1px solid rgba(232,244,255,0.08)",
-        background:
-          "linear-gradient(180deg, rgba(2,6,14,0.62), rgba(2,6,14,0.38))",
-        padding: "0.72rem 0.8rem",
-        minWidth: 0,
-      }}
-    >
-      <div
-        style={{
-          color: "rgba(232,244,255,0.34)",
-          fontSize: "0.64rem",
-          textTransform: "uppercase",
-          letterSpacing: "0.16em",
-          fontWeight: 900,
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          color: tone,
-          fontFamily: "var(--font-display)",
-          fontSize: "1.12rem",
-          fontWeight: 900,
-          lineHeight: 1.05,
-          marginTop: "0.22rem",
-          letterSpacing: "0.06em",
-          textTransform: "uppercase",
-          whiteSpace: "nowrap",
-          overflow: "hidden",
-          textOverflow: "ellipsis",
-        }}
-      >
-        {value}
-      </div>
-      <div
-        style={{
-          color: "rgba(232,244,255,0.48)",
-          fontSize: "0.72rem",
-          lineHeight: 1.35,
-          marginTop: "0.26rem",
-        }}
-      >
-        {sub}
-      </div>
-    </div>
-  );
+function liveToDisplayRow(match: LiveMatchRow): DisplayMatchRow {
+  const team1Avg = averageMmr(match.teams[1] ?? []);
+  const team2Avg = averageMmr(match.teams[2] ?? []);
+  const team1Rank = resolveTeamRankMeta(match.teams[1] ?? [], team1Avg);
+  const team2Rank = resolveTeamRankMeta(match.teams[2] ?? [], team2Avg);
+  const players = [...(match.teams[1] ?? []), ...(match.teams[2] ?? [])];
+  const realPlayers = players.filter((p) => !p.isBot);
+  const avgMmr = realPlayers.length ? Math.round(realPlayers.reduce((sum, p) => sum + p.mmr, 0) / realPlayers.length) : 0;
+  return {
+    id: match.id,
+    selectedMap: match.selectedMap ?? "Mapa pendiente",
+    modeLabel: getModeLabel(match),
+    avgMmr,
+    team1Rank: team1Avg > 0 ? team1Rank.label : "Sin rango",
+    team2Rank: team2Avg > 0 ? team2Rank.label : "Sin rango",
+    team1RankIconSrc: team1Rank.iconSrc,
+    team2RankIconSrc: team2Rank.iconSrc,
+    time: formatRelativeMatchTime(match.startedAt, match.createdAt),
+    statusLabel: getMatchStatusLabel(match.status),
+    connected: `${Math.max(match.readyCount, match.totalPlayers)}/${match.totalPlayers || players.length || 10}`,
+  };
 }
 
-function LiveMatchCard({
-  match,
-  onOpen,
-}: {
-  match: LiveMatchRow;
-  onOpen: () => void;
-}) {
-  const teamOne = match.teams[1] ?? [];
-  const teamTwo = match.teams[2] ?? [];
-  const teamOneCaptain = teamOne.find((player) => player.isCaptain);
-  const teamTwoCaptain = teamTwo.find((player) => player.isCaptain);
-  const statusMeta = getLiveMatchStatusMeta(match.status);
-  const totalPlayers = teamOne.length + teamTwo.length;
-  const avgMmr =
-    totalPlayers > 0
-      ? Math.round(
-          [...teamOne, ...teamTwo].reduce(
-            (sum, player) => sum + player.mmr,
-            0,
-          ) / totalPlayers,
-        )
-      : 0;
-
-  return (
-    <div
-      style={{
-        border: `1px solid ${statusMeta.tone}2e`,
-        background:
-          "linear-gradient(135deg, rgba(2,6,14,0.82), rgba(15,23,42,0.72))",
-        padding: "0.9rem",
-        display: "grid",
-        gridTemplateColumns: "minmax(0, 1fr) auto",
-        gap: "0.9rem",
-        alignItems: "center",
-      }}
-    >
-      <div style={{ display: "grid", gap: "0.7rem", minWidth: 0 }}>
-        <div
-          style={{
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "0.75rem",
-            flexWrap: "wrap",
-          }}
-        >
-          <div style={{ minWidth: 0 }}>
-            <div
-              style={{
-                color: statusMeta.tone,
-                fontSize: "0.68rem",
-                fontWeight: 900,
-                letterSpacing: "0.18em",
-                textTransform: "uppercase",
-              }}
-            >
-              {statusMeta.label} · {match.region}
-              {match.viewerTeam ? ` · Tu equipo ${match.viewerTeam}` : ""}
-            </div>
-            <div
-              style={{
-                color: "#fff",
-                fontFamily: "var(--font-display)",
-                fontSize: "1rem",
-                fontWeight: 900,
-                letterSpacing: "0.08em",
-                textTransform: "uppercase",
-                marginTop: "0.15rem",
-                whiteSpace: "nowrap",
-                overflow: "hidden",
-                textOverflow: "ellipsis",
-              }}
-            >
-              {teamOneCaptain?.username ?? "Team Azul"} vs{" "}
-              {teamTwoCaptain?.username ?? "Team Rojo"}
-            </div>
-          </div>
-          <div
-            style={{
-              color: "rgba(232,244,255,0.46)",
-              fontSize: "0.78rem",
-              fontWeight: 800,
-              textAlign: "right",
-            }}
-          >
-            {match.selectedMap ?? "Mapa pendiente"} · {avgMmr} MMR avg
-          </div>
-        </div>
-
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "minmax(0, 1fr) auto minmax(0, 1fr)",
-            gap: "0.7rem",
-            alignItems: "center",
-          }}
-        >
-          <LiveTeamPreview team={teamOne} color="#00c8ff" align="left" />
-          <div
-            style={{
-              color: "rgba(232,244,255,0.24)",
-              fontFamily: "var(--font-display)",
-              fontWeight: 900,
-              letterSpacing: "0.2em",
-              textTransform: "uppercase",
-            }}
-          >
-            VS
-          </div>
-          <LiveTeamPreview team={teamTwo} color="#ff4757" align="right" />
-        </div>
-
-        <div
-          style={{
-            display: "flex",
-            gap: "0.45rem",
-            flexWrap: "wrap",
-            color: "rgba(232,244,255,0.48)",
-            fontSize: "0.76rem",
-            fontWeight: 700,
-          }}
-        >
-          <span>{totalPlayers}/10 jugadores</span>
-          <span>·</span>
-          <span>
-            Conectados {match.readyCount}/{match.totalPlayers}
-          </span>
-          {match.status === "VOTING" && (
-            <>
-              <span>·</span>
-              <span>
-                Votos {match.voteCounts.total}/{match.totalPlayers}
-              </span>
-            </>
-          )}
-          <span>·</span>
-          <span>ID {match.id.slice(0, 8)}</span>
-        </div>
-      </div>
-
-      <button onClick={onOpen} style={spectateButtonStyle}>
-        Ver room
-      </button>
-    </div>
-  );
+function getModeLabel(match: LiveMatchRow) {
+  if (match.mode === "TEAM" || match.scrimDetails) return "SCRIM";
+  return "Competitivo 5v5";
 }
 
-function LiveTeamPreview({
-  team,
-  color,
-  align,
-}: {
-  team: LiveMatchRow["teams"][1];
-  color: string;
-  align: "left" | "right";
-}) {
-  return (
-    <div
-      style={{
-        display: "flex",
-        justifyContent: align === "left" ? "flex-start" : "flex-end",
-        alignItems: "center",
-        gap: "0.35rem",
-        minWidth: 0,
-      }}
-    >
-      {team.slice(0, 5).map((player) => (
-        <div
-          key={player.userId ?? player.username}
-          title={player.username}
-          style={{
-            width: "30px",
-            height: "30px",
-            border: `1px solid ${player.isCaptain ? color : "rgba(232,244,255,0.12)"}`,
-            background: player.isCaptain ? `${color}22` : "rgba(2,6,14,0.72)",
-            color: player.isCaptain ? color : "rgba(232,244,255,0.72)",
-            display: "grid",
-            placeItems: "center",
-            fontFamily: "var(--font-display)",
-            fontSize: "0.7rem",
-            fontWeight: 900,
-            clipPath:
-              "polygon(0 0, calc(100% - 7px) 0, 100% 7px, 100% 100%, 7px 100%, 0 calc(100% - 7px))",
-          }}
-        >
-          {player.username.slice(0, 2).toUpperCase()}
-        </div>
-      ))}
-    </div>
-  );
+function getBestMap(matches: MatchHistoryEntry[]) {
+  const completed = matches.filter((entry) => (entry.match.winner === 1 || entry.match.winner === 2) && entry.match.selectedMap);
+  if (!completed.length) return { label: "Sin datos", winrate: "—" };
+
+  const byMap = new Map<string, { wins: number; played: number }>();
+  for (const entry of completed) {
+    const map = entry.match.selectedMap!;
+    const current = byMap.get(map) ?? { wins: 0, played: 0 };
+    current.played += 1;
+    if (entry.match.winner === entry.team) current.wins += 1;
+    byMap.set(map, current);
+  }
+
+  const sorted = [...byMap.entries()].sort((a, b) => {
+    const wrA = a[1].played ? a[1].wins / a[1].played : 0;
+    const wrB = b[1].played ? b[1].wins / b[1].played : 0;
+    if (wrB !== wrA) return wrB - wrA;
+    return b[1].played - a[1].played;
+  });
+  const [label, stats] = sorted[0];
+  const winrate = `${Math.round((stats.wins / stats.played) * 100)}% WR`;
+  return { label, winrate };
 }
 
-function getLiveMatchStatusMeta(status: LiveMatchRow["status"]) {
+function getBestHero(matches: MatchHistoryEntry[], username: string) {
+  const byHero = new Map<string, { wins: number; played: number }>();
+  for (const entry of matches) {
+    if (!(entry.match.winner === 1 || entry.match.winner === 2)) continue;
+    const hero = extractOwnHero(entry, username);
+    if (!hero) continue;
+    const current = byHero.get(hero) ?? { wins: 0, played: 0 };
+    current.played += 1;
+    if (entry.match.winner === entry.team) current.wins += 1;
+    byHero.set(hero, current);
+  }
+  if (byHero.size === 0) return { label: "Sin datos", winrate: "—" };
+
+  const sorted = [...byHero.entries()].sort((a, b) => {
+    const wrA = a[1].played ? a[1].wins / a[1].played : 0;
+    const wrB = b[1].played ? b[1].wins / b[1].played : 0;
+    if (wrB !== wrA) return wrB - wrA;
+    return b[1].played - a[1].played;
+  });
+
+  const [label, stats] = sorted[0];
+  return { label, winrate: `${Math.round((stats.wins / stats.played) * 100)}% WR` };
+}
+
+function extractOwnHero(entry: MatchHistoryEntry, username: string) {
+  const replay = entry.match.replayUploads?.[0];
+  const players = replay?.parsedSummary?.players ?? [];
+  if (!players.length) return null;
+  const normalizedUser = normalizeId(username);
+  const ownTeamPlayers = players.filter((player) => player.team == null || Number(player.team) === entry.team);
+  const own = ownTeamPlayers.find((player) => normalizeId(player.name ?? "").includes(normalizedUser) || normalizeId(player.battleTag ?? "").includes(normalizedUser)) ?? ownTeamPlayers[0];
+  return own?.hero ?? null;
+}
+
+function normalizeId(value: string) {
+  return value
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")
+    .replace(/[^a-z0-9]+/g, "");
+}
+
+function averageMmr(players: Array<{ mmr: number; isBot?: boolean }>) {
+  const realPlayers = players.filter((player) => !player.isBot);
+  if (!realPlayers.length) return 0;
+  return Math.round(realPlayers.reduce((sum, player) => sum + player.mmr, 0) / realPlayers.length);
+}
+
+function resolveTeamRankMeta(players: Array<{ mmr: number; rank?: string | null; isBot?: boolean }>, fallbackAvgMmr: number) {
+  const realPlayers = players.filter((player) => !player.isBot);
+  const rankedLevels = realPlayers
+    .map((player) => parseRankLevel(player.rank ?? null, 0))
+    .filter((level) => level >= 1 && level <= 10);
+
+  if (rankedLevels.length) {
+    const roundedLevel = Math.max(1, Math.min(10, Math.round(rankedLevels.reduce((sum, level) => sum + level, 0) / rankedLevels.length)));
+    return getRankMeta(roundedLevel);
+  }
+  return fallbackAvgMmr > 0 ? getRankMetaFromMmr(fallbackAvgMmr) : getRankMeta(1);
+}
+
+function calculateCurrentStreak(matches: MatchHistoryEntry[]) {
+  const completed = matches.filter((entry) => entry.match.winner === 1 || entry.match.winner === 2);
+  if (!completed.length) return { value: 0, label: "—", detail: "Sin historial" };
+
+  const firstWon = completed[0].match.winner === completed[0].team;
+  let count = 0;
+  for (const entry of completed) {
+    const won = entry.match.winner === entry.team;
+    if (won !== firstWon) break;
+    count += 1;
+  }
+
+  if (firstWon) return { value: count, label: `+${count}`, detail: `${count} victoria${count === 1 ? "" : "s"}` };
+  return { value: -count, label: `-${count}`, detail: `${count} derrota${count === 1 ? "" : "s"}` };
+}
+
+function getActivityLabel(queueCount: number, liveCount: number) {
+  const activityScore = queueCount + liveCount * 10;
+  if (activityScore >= 20) return "Alto";
+  if (activityScore >= 8) return "Medio";
+  if (activityScore > 0) return "Bajo";
+  return "Sin actividad";
+}
+
+function getMatchStatusLabel(status: LiveMatchRow["status"]) {
   switch (status) {
     case "VETOING":
-      return { label: "Veto en vivo", tone: "#7dd3fc" };
-    case "PLAYING":
-      return { label: "Jugando", tone: "#4ade80" };
+      return "Veto";
     case "VOTING":
-      return { label: "Votando resultado", tone: "#c084fc" };
+      return "Votación";
+    case "PLAYING":
+      return "En progreso";
   }
 }
 
-function RolePill({
-  role,
-  muted,
-  iconOnly,
-}: {
-  role: string;
-  muted?: boolean;
-  iconOnly?: boolean;
-}) {
-  const meta = getRoleMeta(role);
-  const iconSources = getRoleIconSources(role);
-  const color = meta?.accent ?? "rgba(232,244,255,0.34)";
-  return (
-    <span
-      style={{
-        display: "inline-flex",
-        alignItems: "center",
-        gap: "0.32rem",
-        border: `1px solid ${muted ? "rgba(232,244,255,0.12)" : `${color}66`}`,
-        background: muted ? "rgba(255,255,255,0.03)" : `${color}16`,
-        color: muted ? "rgba(232,244,255,0.42)" : color,
-        padding: iconOnly ? "0.22rem" : "0.28rem 0.45rem",
-        fontFamily: "var(--font-display)",
-        fontSize: "0.62rem",
-        fontWeight: 900,
-        letterSpacing: "0.08em",
-        textTransform: "uppercase",
-      }}
-    >
-      {meta && (
-        <img
-          src={iconSources?.primary}
-          alt=""
-          loading="lazy"
-          decoding="async"
-          onError={(event) => {
-            if (
-              !iconSources?.fallback ||
-              event.currentTarget.dataset.fallbackApplied === "1"
-            )
-              return;
-            event.currentTarget.dataset.fallbackApplied = "1";
-            event.currentTarget.src = iconSources.fallback;
-          }}
-          style={{
-            width: iconOnly ? "17px" : "15px",
-            height: iconOnly ? "17px" : "15px",
-            objectFit: "contain",
-            filter: `drop-shadow(0 0 5px ${color}66)`,
-          }}
-        />
-      )}
-      {iconOnly ? null : (meta?.label ?? role)}
-    </span>
-  );
-}
-
-function LayoutToggleButton({
-  active,
-  label,
-  onClick,
-}: {
-  active: boolean;
-  label: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      style={{
-        border: "none",
-        borderRight:
-          label === "Compacto" ? "1px solid rgba(232,244,255,0.08)" : "none",
-        background: active ? "rgba(0,200,255,0.14)" : "transparent",
-        color: active ? "#7dd3fc" : "rgba(232,244,255,0.42)",
-        padding: "0.45rem 0.65rem",
-        fontFamily: "var(--font-display)",
-        fontSize: "0.68rem",
-        fontWeight: 900,
-        letterSpacing: "0.12em",
-        textTransform: "uppercase",
-        cursor: "pointer",
-      }}
-    >
-      {label}
-    </button>
-  );
-}
-
-function Notice({ text, tone = "default" }: { text: string; tone?: Tone }) {
-  const palette =
-    tone === "danger"
-      ? {
-          border: "rgba(248,113,113,0.28)",
-          bg: "rgba(127,29,29,0.13)",
-          color: "#fecaca",
-        }
-      : tone === "warn"
-        ? {
-            border: "rgba(251,191,36,0.28)",
-            bg: "rgba(251,191,36,0.10)",
-            color: "#fde68a",
-          }
-        : {
-            border: "rgba(232,244,255,0.09)",
-            bg: "rgba(255,255,255,0.025)",
-            color: "rgba(232,244,255,0.54)",
-          };
-  return (
-    <div
-      style={{
-        border: `1px solid ${palette.border}`,
-        background: palette.bg,
-        color: palette.color,
-        padding: "0.8rem 0.9rem",
-        fontSize: "0.86rem",
-      }}
-    >
-      {text}
-    </div>
-  );
-}
-
-function OpsEventRow({ event }: { event: OpsEvent }) {
-  const palette =
-    event.tone === "good"
-      ? {
-          border: "rgba(74,222,128,0.22)",
-          bg: "rgba(21,128,61,0.12)",
-          dot: "#4ade80",
-          title: "#bbf7d0",
-        }
-      : event.tone === "warn"
-        ? {
-            border: "rgba(251,191,36,0.24)",
-            bg: "rgba(251,191,36,0.10)",
-            dot: "#fbbf24",
-            title: "#fde68a",
-          }
-        : {
-            border: "rgba(232,244,255,0.09)",
-            bg: "rgba(255,255,255,0.03)",
-            dot: "#7dd3fc",
-            title: "#e2e8f0",
-          };
-
-  return (
-    <div
-      style={{
-        border: `1px solid ${palette.border}`,
-        background: palette.bg,
-        padding: "0.65rem 0.8rem",
-        display: "grid",
-        gap: "0.24rem",
-      }}
-    >
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          gap: "0.65rem",
-        }}
-      >
-        <div
-          style={{
-            display: "inline-flex",
-            alignItems: "center",
-            gap: "0.45rem",
-            minWidth: 0,
-          }}
-        >
-          <span
-            style={{
-              width: "8px",
-              height: "8px",
-              borderRadius: "999px",
-              background: palette.dot,
-              boxShadow: `0 0 10px ${palette.dot}66`,
-              flexShrink: 0,
-            }}
-          />
-          <span
-            style={{
-              color: palette.title,
-              fontWeight: 800,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
-            {event.title}
-          </span>
-        </div>
-        <span
-          style={{
-            color: "rgba(232,244,255,0.40)",
-            fontSize: "0.74rem",
-            fontFamily: "var(--font-mono, monospace)",
-          }}
-        >
-          {formatEventTime(event.at)}
-        </span>
-      </div>
-      <div
-        style={{
-          color: "rgba(232,244,255,0.56)",
-          fontSize: "0.82rem",
-          lineHeight: 1.35,
-        }}
-      >
-        {event.detail}
-      </div>
-    </div>
-  );
-}
-
-
-function StatPanel({
-  label,
-  value,
-  sub,
-  tone,
-  iconSrc,
-}: {
-  label: string;
-  value: string;
-  sub: string;
-  tone: string;
-  iconSrc?: string;
-}) {
-  return (
-    <div
-      style={{
-        ...panelStyle,
-        position: "relative",
-        overflow: "hidden",
-        minHeight: "132px",
-        padding: "1rem 1rem 0.95rem",
-        borderColor: `${tone}33`,
-        background:
-          `radial-gradient(circle at 84% 20%, ${tone}24, transparent 32%), ` +
-          "linear-gradient(180deg, rgba(17,25,39,0.88), rgba(5,10,20,0.76))",
-        boxShadow: `inset 0 1px 0 rgba(255,255,255,0.05), 0 18px 40px ${tone}0f`,
-      }}
-    >
-      <div
-        style={{
-          position: "absolute",
-          inset: "0 0 auto 0",
-          height: "2px",
-          background: `linear-gradient(90deg, transparent, ${tone}, transparent)`,
-          opacity: 0.78,
-        }}
-      />
-
-      <div
-        style={{
-          position: "relative",
-          zIndex: 1,
-          width: iconSrc ? "calc(100% - 4rem)" : "100%",
-          color: "var(--nexus-faint)",
-          fontSize: "0.68rem",
-          textTransform: "uppercase",
-          letterSpacing: "0.16em",
-          fontWeight: 900,
-          marginLeft: "0.5rem",
-        }}
-      >
-        {label}
-      </div>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "flex-start",
-          gap: "1rem",
-          zIndex: 1,
-          color: tone,
-          fontFamily: "var(--font-display)",
-          fontSize: "2rem",
-          lineHeight: 1,
-          fontWeight: 900,
-          marginTop: "0.35rem",
-          textShadow: `0 0 22px ${tone}55`,
-        }}
-      >
-        {iconSrc && (
-          <img
-            src={iconSrc}
-            alt=""
-            loading="lazy"
-            decoding="async"
-            style={{
-              width: "80px",
-              height: "80px",
-              objectFit: "contain",
-              filter: `drop-shadow(0 0 12px ${tone}66)`,
-            }}
-          />
-        )}
-        <div
-          style={{
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "flex-start",
-            justifyContent: "flex-start",
-          }}
-        >
-          {value}
-          <div
-            style={{
-              zIndex: 1,
-              color: "rgba(232,244,255,0.36)",
-              fontSize: "0.8rem",
-              marginTop: "0.25rem",
-              lineHeight: 1.35,
-            }}
-          >
-            {sub}
-          </div>
-        </div>
-      </div>
-
-      <div
-        aria-hidden="true"
-        style={{
-          position: "absolute",
-          right: "-24px",
-          bottom: "-30px",
-          width: "120px",
-          height: "120px",
-          borderRadius: "999px",
-          border: `1px solid ${tone}16`,
-        }}
-      />
-    </div>
-  );
-}
-
-const panelStyle: React.CSSProperties = {
-  border: "1px solid rgba(232,244,255,0.07)",
-  background:
-    "linear-gradient(180deg, rgba(17,25,39,0.76), rgba(8,12,20,0.66))",
-  padding: "1rem",
-};
-
-const slotBaseStyle: React.CSSProperties = {
-  minHeight: "250px",
-  position: "relative",
-  overflow: "hidden",
-  border: "1px solid rgba(148,163,184,0.12)",
-  background: "linear-gradient(180deg, rgba(10,16,28,0.94), rgba(4,8,18,0.92))",
-  display: "flex",
-  flexDirection: "column",
-  alignItems: "center",
-  justifyContent: "center",
-  gap: "0.75rem",
-  padding: "1rem",
-  boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
-};
-
-const queueRowStyle: React.CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  alignItems: "center",
-  gap: "0.9rem",
-  border: "1px solid rgba(232,244,255,0.07)",
-  background: "rgba(2,6,14,0.42)",
-  padding: "0.75rem 0.85rem",
-};
-
-const queueAvatarStyle: React.CSSProperties = {
-  width: "34px",
-  height: "34px",
-  borderRadius: "999px",
-  border: "1px solid rgba(0,200,255,0.25)",
-  display: "grid",
-  placeItems: "center",
-  color: "#7dd3fc",
-  fontFamily: "var(--font-display)",
-  fontWeight: 900,
-  background: "rgba(0,200,255,0.08)",
-  flexShrink: 0,
-};
-
-const goldButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(251,191,36,0.55)",
-  background: "#fbbf24",
-  color: "#111827",
-  padding: "0.8rem 1rem",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const spectateButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(125,211,252,0.42)",
-  background: "rgba(14,116,144,0.18)",
-  color: "#bae6fd",
-  padding: "0.72rem 0.9rem",
-  fontFamily: "var(--font-display)",
-  fontSize: "0.76rem",
-  fontWeight: 900,
-  letterSpacing: "0.14em",
-  textTransform: "uppercase",
-  cursor: "pointer",
-  whiteSpace: "nowrap",
-};
-
-const blueGhostButtonStyle: React.CSSProperties = {
-  border: "1px solid rgba(125,211,252,0.4)",
-  background: "rgba(14,116,144,0.25)",
-  color: "#bae6fd",
-  padding: "0.65rem 0.9rem",
-  fontWeight: 900,
-  cursor: "pointer",
-};
+function formatClock(seconds: number) { const m = Math.floor(seconds / 60).toString().padStart(2, "0"); const s = (seconds % 60).toString().padStart(2, "0"); return `${m}:${s}`; }
+function formatRelativeMatchTime(startedAt?: string | null, createdAt?: string) { const source = startedAt ?? createdAt; if (!source) return "—"; return formatClock(Math.max(0, Math.floor((Date.now() - new Date(source).getTime()) / 1000))); }

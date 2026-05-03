@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { AlertCircle, RefreshCw, Sparkles, Swords, Users } from "lucide-react";
+import { AlertCircle, RefreshCw, Swords, Users } from "lucide-react";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { PageHeader } from "../components/PageHeader";
+import { getCountryFlag } from "../lib/countries";
+import { getRankMeta, getRankMetaFromMmr, parseRankLevel } from "../lib/ranks";
+import { getRoleMeta } from "../lib/roles";
 import {
-  computeScrimCommandSnapshot,
   getScrimChallengeActionState,
-  type Metric,
 } from "./teamsScrimsUi";
 
 type TeamMember = {
@@ -15,7 +16,17 @@ type TeamMember = {
   userId: string;
   role: "OWNER" | "CAPTAIN" | "MEMBER";
   competitiveRole?: "UNASSIGNED" | "CAPTAIN" | "STARTER" | "SUBSTITUTE" | "COACH" | "STAFF";
-  user: { id: string; username: string; avatar: string | null; mmr: number; rank?: string; isBot?: boolean };
+  user: {
+    id: string;
+    username: string;
+    avatar: string | null;
+    mmr: number;
+    rank?: string;
+    isBot?: boolean;
+    countryCode?: string | null;
+    mainRole?: string | null;
+    secondaryRole?: string | null;
+  };
 };
 
 type Team = {
@@ -40,6 +51,8 @@ type ScrimSearch = {
 
 type ScrimChallenge = {
   id: string;
+  status?: string;
+  createdAt?: string;
   fromTeam: { id: string; name: string; logoUrl?: string | null };
   toTeam: { id: string; name: string; logoUrl?: string | null };
   fromSearch: ScrimSearch;
@@ -56,8 +69,10 @@ type ScrimsResponse = {
 };
 
 const panelBase: CSSProperties = {
-  border: "1px solid var(--nexus-border)",
-  background: "var(--nexus-card)",
+  border: "1px solid rgba(112,158,255,.2)",
+  borderRadius: "14px",
+  background: "linear-gradient(180deg, rgba(10,20,39,.84), rgba(6,13,27,.8))",
+  boxShadow: "0 14px 34px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.03)",
 };
 
 export default function Scrims() {
@@ -80,24 +95,6 @@ export default function Scrims() {
   const myHumanMembers = data?.myTeam?.members.filter((member) => !member.user.isBot) ?? [];
   const myBotCount = data?.myTeam?.members.filter((member) => member.user.isBot).length ?? 0;
   const myOnlineCount = myHumanMembers.filter((member) => onlineUserIds.has(member.userId)).length;
-
-  const commandSnapshot = useMemo(() => computeScrimCommandSnapshot({
-    hasTeam: Boolean(data?.myTeam),
-    canManage: Boolean(canManage),
-    hasPublishedSearch: Boolean(myOpenSearch),
-    startersSelected: starters.length,
-    incomingChallenges: data?.incomingChallenges.length ?? 0,
-    outgoingChallenges: data?.outgoingChallenges.length ?? 0,
-    openCatalogRooms: catalog.length,
-  }), [
-    canManage,
-    myOpenSearch,
-    starters.length,
-    data?.myTeam,
-    data?.incomingChallenges.length,
-    data?.outgoingChallenges.length,
-    catalog.length,
-  ]);
 
   const challengeActionState = useMemo(() => getScrimChallengeActionState({
     hasTeam: Boolean(data?.myTeam),
@@ -188,6 +185,14 @@ export default function Scrims() {
     });
   }
 
+  function cancelSearch(searchId: string) {
+    void runAction(async () => {
+      await api.post(`/scrims/searches/${searchId}/cancel`);
+      setNotice("Búsqueda cancelada.");
+      await refresh();
+    });
+  }
+
   function challenge(toSearchId: string) {
     if (!myOpenSearch) return;
     void runAction(async () => {
@@ -212,6 +217,14 @@ export default function Scrims() {
     });
   }
 
+  function cancelChallenge(challengeId: string) {
+    void runAction(async () => {
+      await api.post(`/scrims/challenges/${challengeId}/cancel`);
+      setNotice("Solicitud cancelada.");
+      await refresh();
+    });
+  }
+
   if (loading) {
     return (
       <div style={styles.page}>
@@ -227,7 +240,7 @@ export default function Scrims() {
   }
 
   return (
-    <div style={styles.page}>
+    <div className="storm-page" style={styles.page}>
       <PageHeader
         eyebrow="Scrims"
         title="Equipo vs Equipo"
@@ -245,17 +258,6 @@ export default function Scrims() {
       {notice && <div style={styles.notice}>{notice}</div>}
       {refreshing && !loading && <p style={styles.smallMuted}>Actualizando scrims...</p>}
 
-      <section style={styles.panelAccent}>
-        <SectionTitle
-          eyebrow="Centro de comando"
-          title={commandSnapshot.readinessLabel}
-          meta={<StatusChip tone={commandSnapshot.badgeTone}>{commandSnapshot.readinessLabel}</StatusChip>}
-          icon={<Sparkles size={14} />}
-        />
-        <p style={styles.muted}>{challengeActionState.hint}</p>
-        <MetricGrid metrics={commandSnapshot.stats} />
-      </section>
-
       {!data?.myTeam ? (
         <section style={styles.panel}>
           <div style={styles.alert}><AlertCircle size={16} /><span>Necesitas un equipo para jugar scrims.</span></div>
@@ -271,15 +273,22 @@ export default function Scrims() {
               {myBotCount > 0 && <StatusChip tone="info">{myBotCount} bots</StatusChip>}
               <StatusChip tone={myOpenSearch ? "warn" : "muted"}>{myOpenSearch ? "Buscando" : "Standby"}</StatusChip>
             </div>
-            <div style={styles.memberGrid}>{data.myTeam.members.map((member) => (
+            <div style={styles.memberList}>{data.myTeam.members.map((member) => (
               <MemberCard key={member.userId} member={member} online={onlineUserIds.has(member.userId)} />
             ))}</div>
           </article>
 
           <article style={styles.panel}>
-            <SectionTitle eyebrow="Buscar partida" title={myOpenSearch ? "Sala publicada" : "Seleccionar titulares"} meta={<StatusChip tone="info">5 titulares</StatusChip>} />
+            <SectionTitle eyebrow="Buscar scrim" title={myOpenSearch ? "Buscando rival" : "Seleccionar titulares"} meta={<StatusChip tone="info">5 titulares</StatusChip>} />
             {canManage ? myOpenSearch ? (
-              <PublishedSearch search={myOpenSearch} team={data.myTeam} />
+              <>
+                <PublishedSearch search={myOpenSearch} team={data.myTeam} />
+                <div style={styles.row}>
+                  <button style={styles.cancelButton} className="nx-interactive" disabled={busy} onClick={() => cancelSearch(myOpenSearch.id)}>
+                    {busy ? "Cancelando..." : "Cancelar scrim"}
+                  </button>
+                </div>
+              </>
             ) : (
               <>
                 <RosterPicker
@@ -295,7 +304,7 @@ export default function Scrims() {
                 <textarea style={styles.textarea} value={notes} onChange={(event) => setNotes(event.target.value)} placeholder="Notas opcionales" />
                 <div style={styles.builderFooter}>
                   <span style={styles.muted}>Titulares: <strong style={{ color: starters.length === 5 ? "#22c55e" : "#f59e0b" }}>{starters.length}/5</strong></span>
-                  <button style={styles.primaryButton} className="nx-interactive" disabled={busy || starters.length !== 5} onClick={publishSearch}>Publicar búsqueda</button>
+                  <button style={styles.primaryButton} className="nx-interactive" disabled={busy || starters.length !== 5} onClick={publishSearch}>Buscar scrim</button>
                 </div>
                 <p style={styles.smallMuted}>Cada equipo necesita al menos 1 titular real online.</p>
               </>
@@ -335,7 +344,13 @@ export default function Scrims() {
 
       <section style={styles.panel}>
         <SectionTitle eyebrow="Outbox" title="Solicitudes enviadas" />
-        {data?.outgoingChallenges.length ? data.outgoingChallenges.map((challengeItem) => <p key={challengeItem.id} style={styles.line}>Pendiente vs <strong>{challengeItem.toTeam.name}</strong></p>) : <EmptyState text="Sin solicitudes pendientes." />}
+        {data?.outgoingChallenges.length ? (
+          <div style={styles.cardGrid}>
+            {data.outgoingChallenges.map((challengeItem) => (
+              <OutgoingChallengeCard key={challengeItem.id} challenge={challengeItem} busy={busy} onCancel={cancelChallenge} />
+            ))}
+          </div>
+        ) : <EmptyState text="Sin solicitudes pendientes." />}
       </section>
     </div>
   );
@@ -363,12 +378,6 @@ function SectionTitle({
   </div>;
 }
 
-function MetricGrid({ metrics }: { metrics: Metric[] }) {
-  return <div style={styles.metricGrid}>{metrics.map((metric) => (
-    <div key={metric.label} style={styles.metricTile}><strong>{metric.value}</strong><span>{metric.label}</span></div>
-  ))}</div>;
-}
-
 function StatusChip({ tone, children }: { tone: "success" | "warn" | "info" | "muted" | "danger"; children: ReactNode }) {
   const toneStyle = tone === "success"
     ? styles.chipSuccess
@@ -387,8 +396,17 @@ function Stat({ label, value }: { label: string; value: string }) {
 }
 
 function TeamBadge({ name, logoUrl, large = false }: { name: string; logoUrl: string | null; large?: boolean }) {
-  const size = large ? 64 : 40;
-  return <div style={{ ...styles.teamBadge, width: size, height: size }}>{logoUrl ? <img src={logoUrl} alt="" style={{ width: size, height: size, objectFit: "cover" }} /> : name.slice(0, 2).toUpperCase()}</div>;
+  const size = large ? 72 : 44;
+  const inner = large ? 58 : 34;
+  return (
+    <div style={{ ...styles.teamBadge, width: size, height: size }}>
+      {logoUrl ? (
+        <img src={logoUrl} alt="" style={{ width: inner, height: inner, objectFit: "cover", borderRadius: large ? 12 : 8 }} />
+      ) : (
+        <span style={styles.teamBadgeFallback}>{name.slice(0, 2).toUpperCase()}</span>
+      )}
+    </div>
+  );
 }
 
 function Avatar({ user }: { user: { username: string; avatar: string | null } }) {
@@ -397,11 +415,35 @@ function Avatar({ user }: { user: { username: string; avatar: string | null } })
 
 function MemberCard({ member, online }: { member: TeamMember; online: boolean }) {
   const isBot = Boolean(member.user.isBot);
+  const rankMeta = member.user.rank
+    ? getRankMeta(parseRankLevel(member.user.rank))
+    : getRankMetaFromMmr(member.user.mmr);
+  const mainRole = getRoleMeta(member.user.mainRole);
+  const secondaryRole = getRoleMeta(member.user.secondaryRole);
+
   return <div style={isBot ? styles.memberBot : online ? styles.memberOnline : styles.memberCard}>
-    <Avatar user={member.user} />
-    <div style={{ minWidth: 0 }}>
-      <strong style={styles.truncate}>{member.user.username}</strong>
-      <span style={styles.smallMuted}>{member.role}{member.competitiveRole && member.competitiveRole !== "UNASSIGNED" ? ` · ${member.competitiveRole}` : ""}{isBot ? " · BOT" : ` · ${online ? "online" : "offline"}`}</span>
+    <div style={styles.memberHead}>
+      <Avatar user={member.user} />
+      <div style={{ minWidth: 0 }}>
+        <strong style={styles.truncate}>{member.user.username}</strong>
+        <span style={styles.smallMuted}>
+          {isBot ? "BOT" : online ? "Online" : "Offline"} · {getCountryFlag(member.user.countryCode)}
+        </span>
+      </div>
+      <div style={styles.memberRank}>
+        <img src={rankMeta.iconSrc} alt="" style={styles.memberRankImg} />
+        <div style={styles.memberRankMeta}>
+          <strong>{rankMeta.label}</strong>
+          <span>{member.user.mmr} MMR</span>
+        </div>
+      </div>
+    </div>
+
+    <div style={styles.memberMetaRow}>
+      <StatusChip tone="muted">{member.role}</StatusChip>
+      {member.competitiveRole && member.competitiveRole !== "UNASSIGNED" ? <StatusChip tone="info">{member.competitiveRole}</StatusChip> : null}
+      {mainRole ? <StatusChip tone="warn">{mainRole.label}</StatusChip> : null}
+      {secondaryRole ? <StatusChip tone="success">{secondaryRole.label}</StatusChip> : null}
     </div>
   </div>;
 }
@@ -420,13 +462,13 @@ function RosterPicker({ members, onlineUserIds, starters, coachUserId, observerU
   onCoach: (userId: string) => void;
   onObserver: (userId: string) => void;
 }) {
-  return <div style={styles.pickerGrid}>{members.map((member) => {
+  return <div style={styles.rosterList}>{members.map((member) => {
     const online = onlineUserIds.has(member.userId);
     const isBot = Boolean(member.user.isBot);
     const isStarter = starters.includes(member.userId);
-    return <div key={member.userId} style={isStarter ? styles.pickerSelected : styles.pickerCard}>
-      <MemberCard member={member} online={online} />
-      <div style={styles.toggleRow}>
+    return <div key={member.userId} style={isStarter ? styles.rosterRowActive : styles.rosterRow}>
+      <div style={styles.rosterMember}><MemberCard member={member} online={online} /></div>
+      <div style={styles.rosterActions}>
         <RoleToggle label="Titular" disabled={(!online && !isBot) || (!isStarter && starters.length >= 5)} checked={isStarter} onChange={() => onStarter(member.userId)} />
         <RoleToggle label="Coach" type="radio" disabled={isBot || !online || isStarter} checked={coachUserId === member.userId} onChange={() => onCoach(coachUserId === member.userId ? "" : member.userId)} />
         <RoleToggle label="Obs" disabled={isBot || !online || isStarter || coachUserId === member.userId || (!observerUserIds.includes(member.userId) && observerUserIds.length >= 2)} checked={observerUserIds.includes(member.userId)} onChange={() => onObserver(member.userId)} />
@@ -472,6 +514,37 @@ function ChallengeCard({ challenge, busy, onAccept, onDecline }: { challenge: Sc
   </article>;
 }
 
+function OutgoingChallengeCard({ challenge, busy, onCancel }: { challenge: ScrimChallenge; busy: boolean; onCancel: (challengeId: string) => void }) {
+  return (
+    <article style={styles.roomCard}>
+      <div style={styles.roomHeader}>
+        <TeamBadge name={challenge.fromTeam.name} logoUrl={challenge.fromTeam.logoUrl ?? null} />
+        <div>
+          <h3 style={styles.roomTitle}>{challenge.fromTeam.name} vs {challenge.toTeam.name}</h3>
+          <p style={styles.smallMuted}>Enviada · esperando respuesta del rival</p>
+        </div>
+        <StatusChip tone="warn">Pendiente</StatusChip>
+      </div>
+      <div style={styles.outgoingTeamsRow}>
+        <div style={styles.outgoingTeamMini}>
+          <TeamBadge name={challenge.fromTeam.name} logoUrl={challenge.fromTeam.logoUrl ?? null} />
+          <span>{challenge.fromTeam.name}</span>
+        </div>
+        <span style={styles.outgoingVs}>VS</span>
+        <div style={styles.outgoingTeamMini}>
+          <TeamBadge name={challenge.toTeam.name} logoUrl={challenge.toTeam.logoUrl ?? null} />
+          <span>{challenge.toTeam.name}</span>
+        </div>
+      </div>
+      <div style={styles.row}>
+        <button style={styles.ghostButton} className="nx-interactive" disabled={busy} onClick={() => onCancel(challenge.id)}>
+          {busy ? "Cancelando..." : "Cancelar solicitud"}
+        </button>
+      </div>
+    </article>
+  );
+}
+
 function EmptyState({ text = "Sin salas rivales por ahora" }: { text?: string }) {
   return <div style={styles.emptyState}><Users size={28} /><strong>{text}</strong><p style={styles.muted}>Cuando otro capitán publique búsqueda, aparecerá acá.</p></div>;
 }
@@ -488,16 +561,17 @@ function average(values: number[]) {
 const styles: Record<string, CSSProperties> = {
   page: { display: "grid", gap: "1rem" },
   panel: { ...panelBase, padding: "1rem" },
-  panelAccent: { ...panelBase, padding: "1rem", borderColor: "rgba(0,200,255,0.24)", display: "grid", gap: "0.55rem" },
+  panelAccent: { ...panelBase, padding: "1rem", borderColor: "rgba(93,207,255,.4)", background: "linear-gradient(155deg, rgba(11,30,58,.86), rgba(7,15,30,.86)), radial-gradient(circle at 14% 0%, rgba(55,217,255,.14), transparent 36%), radial-gradient(circle at 86% 0%, rgba(155,85,255,.14), transparent 24%)", display: "grid", gap: "0.55rem" },
   commandGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", gap: "1rem" },
-  error: { padding: "0.85rem 1rem", border: "1px solid rgba(248,113,113,0.45)", background: "rgba(127,29,29,0.22)", color: "#fecaca" },
-  notice: { padding: "0.85rem 1rem", border: "1px solid rgba(34,197,94,0.34)", background: "rgba(22,101,52,0.18)", color: "#bbf7d0" },
+  error: { padding: "0.85rem 1rem", borderRadius: "12px", border: "1px solid rgba(248,113,113,0.45)", background: "rgba(127,29,29,0.22)", color: "#fecaca" },
+  notice: { padding: "0.85rem 1rem", borderRadius: "12px", border: "1px solid rgba(34,197,94,0.34)", background: "rgba(22,101,52,0.18)", color: "#bbf7d0" },
   alert: { display: "inline-flex", alignItems: "center", gap: "0.4rem", color: "#fde68a" },
   headerStats: { display: "grid", gridTemplateColumns: "repeat(3, minmax(70px, 1fr))", gap: "0.55rem" },
-  stat: { display: "grid", gap: "0.15rem", padding: "0.65rem 0.75rem", border: "1px solid rgba(148,163,184,0.16)", background: "rgba(2,6,23,0.55)", color: "#e2e8f0", fontSize: "0.78rem" },
-  secondaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0.65rem 0.9rem", border: "1px solid rgba(148,163,184,0.22)", color: "#e2e8f0", textDecoration: "none", background: "rgba(15,23,42,0.72)", fontWeight: 800 },
-  primaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.35rem", padding: "0.62rem 0.9rem", border: "1px solid rgba(125,211,252,0.38)", background: "rgba(14,116,144,0.14)", color: "#7dd3fc", fontWeight: 950, cursor: "pointer" },
-  ghostButton: { padding: "0.62rem 0.9rem", border: "1px solid rgba(148,163,184,0.2)", background: "rgba(15,23,42,0.7)", color: "#cbd5e1", fontWeight: 800, cursor: "pointer" },
+  stat: { display: "grid", gap: "0.15rem", borderRadius: "10px", padding: "0.65rem 0.75rem", border: "1px solid rgba(148,163,184,0.16)", background: "rgba(2,6,23,0.55)", color: "#e2e8f0", fontSize: "0.78rem" },
+  secondaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "10px", padding: "0.65rem 0.9rem", border: "1px solid rgba(148,163,184,0.22)", color: "#e2e8f0", textDecoration: "none", background: "rgba(15,23,42,0.72)", fontWeight: 800 },
+  primaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.35rem", borderRadius: "10px", padding: "0.62rem 0.9rem", border: "1px solid rgba(126,240,255,.5)", background: "linear-gradient(135deg, rgba(45,189,255,.26), rgba(138,70,255,.2))", color: "#dff8ff", fontWeight: 950, cursor: "pointer" },
+  cancelButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.35rem", borderRadius: "10px", padding: "0.62rem 0.9rem", border: "1px solid rgba(255,115,145,.5)", background: "linear-gradient(135deg, rgba(255,89,124,.28), rgba(129,54,163,.2))", color: "#ffe6ef", fontWeight: 950, cursor: "pointer" },
+  ghostButton: { borderRadius: "10px", padding: "0.62rem 0.9rem", border: "1px solid rgba(148,163,184,0.2)", background: "rgba(15,23,42,0.7)", color: "#cbd5e1", fontWeight: 800, cursor: "pointer" },
   sectionTitleRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.8rem", marginBottom: "0.9rem", flexWrap: "wrap" },
   sectionHeaderActions: { display: "inline-flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap", justifyContent: "flex-end" },
   eyebrow: { margin: 0, color: "#00c8ff", fontSize: "0.68rem", fontWeight: 950, letterSpacing: "0.18em", textTransform: "uppercase", display: "flex", alignItems: "center" },
@@ -505,7 +579,7 @@ const styles: Record<string, CSSProperties> = {
   muted: { margin: "0.35rem 0", color: "rgba(226,232,240,0.62)", lineHeight: 1.55 },
   smallMuted: { display: "block", color: "rgba(226,232,240,0.54)", fontSize: "0.76rem" },
 
-  chip: { padding: "0.3rem 0.52rem", border: "1px solid transparent", fontSize: "0.72rem", fontWeight: 850 },
+  chip: { padding: "0.3rem 0.52rem", borderRadius: "999px", border: "1px solid transparent", fontSize: "0.72rem", fontWeight: 850 },
   chipSuccess: { color: "#bbf7d0", background: "rgba(22,101,52,0.22)", borderColor: "rgba(34,197,94,0.28)" },
   chipWarn: { color: "#fde68a", background: "rgba(120,53,15,0.22)", borderColor: "rgba(245,158,11,0.28)" },
   chipInfo: { color: "#bae6fd", background: "rgba(14,165,233,0.14)", borderColor: "rgba(14,165,233,0.24)" },
@@ -513,35 +587,45 @@ const styles: Record<string, CSSProperties> = {
   chipDanger: { color: "#fecaca", background: "rgba(127,29,29,0.22)", borderColor: "rgba(248,113,113,0.38)" },
 
   metricGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "0.55rem" },
-  metricTile: { display: "grid", gap: "0.12rem", padding: "0.58rem 0.66rem", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.58)", color: "#e2e8f0" },
+  metricTile: { display: "grid", gap: "0.12rem", borderRadius: "10px", padding: "0.58rem 0.66rem", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.58)", color: "#e2e8f0" },
 
-  teamBadge: { flex: "0 0 auto", display: "grid", placeItems: "center", background: "linear-gradient(135deg, #00c8ff, #1e3a8a)", color: "#f8fafc", fontWeight: 950, overflow: "hidden" },
+  teamBadge: { flex: "0 0 auto", borderRadius: "14px", border: "2px solid rgba(148,163,184,.42)", boxShadow: "inset 0 0 0 1px rgba(255,255,255,.05)", display: "grid", placeItems: "center", background: "#050910", color: "#f8fafc", fontWeight: 950, overflow: "hidden" },
+  teamBadgeFallback: { fontFamily: "var(--font-display)", letterSpacing: ".06em" },
   pillRow: { display: "flex", flexWrap: "wrap", gap: "0.45rem", marginBottom: "0.8rem" },
-  memberGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 190px), 1fr))", gap: "0.6rem" },
-  memberCard: { display: "flex", alignItems: "center", gap: "0.6rem", minWidth: 0, padding: "0.62rem", background: "rgba(15,23,42,0.62)", border: "1px solid rgba(148,163,184,0.12)" },
-  memberOnline: { display: "flex", alignItems: "center", gap: "0.6rem", minWidth: 0, padding: "0.62rem", background: "rgba(22,101,52,0.14)", border: "1px solid rgba(34,197,94,0.22)" },
-  memberBot: { display: "flex", alignItems: "center", gap: "0.6rem", minWidth: 0, padding: "0.62rem", background: "rgba(14,165,233,0.1)", border: "1px solid rgba(14,165,233,0.22)" },
-  avatar: { width: 34, height: 34, display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto", background: "#0f172a", color: "#7dd3fc", fontSize: "0.68rem", fontWeight: 950, border: "1px solid rgba(125,211,252,0.25)" },
+  memberList: { display: "grid", gridTemplateColumns: "1fr", gap: "0.6rem" },
+  memberCard: { display: "grid", gap: "0.55rem", minWidth: 0, borderRadius: "12px", padding: "0.72rem", background: "rgba(15,23,42,0.62)", border: "1px solid rgba(148,163,184,0.12)" },
+  memberOnline: { display: "grid", gap: "0.55rem", minWidth: 0, borderRadius: "12px", padding: "0.72rem", background: "rgba(22,101,52,0.14)", border: "1px solid rgba(34,197,94,0.22)" },
+  memberBot: { display: "grid", gap: "0.55rem", minWidth: 0, borderRadius: "12px", padding: "0.72rem", background: "rgba(14,165,233,0.1)", border: "1px solid rgba(14,165,233,0.22)" },
+  memberHead: { display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto", gap: "0.6rem", alignItems: "center" },
+  avatar: { width: 34, height: 34, borderRadius: "9px", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto", background: "#0f172a", color: "#7dd3fc", fontSize: "0.68rem", fontWeight: 950, border: "1px solid rgba(125,211,252,0.25)" },
   avatarImg: { width: 34, height: 34, objectFit: "cover" },
+  memberRank: { display: "inline-flex", alignItems: "center", gap: "0.4rem", border: "1px solid rgba(126,170,255,.22)", borderRadius: "999px", padding: "0.2rem 0.4rem", background: "rgba(6,14,29,.75)" },
+  memberRankImg: { width: 24, height: 24, objectFit: "contain" },
+  memberRankMeta: { display: "grid", gap: "0.05rem", lineHeight: 1.15, fontSize: "0.67rem", color: "rgba(228,236,255,.84)" },
+  memberMetaRow: { display: "flex", flexWrap: "wrap", gap: "0.35rem" },
   truncate: { display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", color: "#f8fafc" },
-  textarea: { width: "100%", minHeight: 82, marginTop: "0.8rem", padding: "0.72rem 0.8rem", border: "1px solid rgba(148,163,184,0.2)", background: "rgba(2,6,23,0.78)", color: "#e2e8f0", outline: "none", resize: "vertical" },
-  pickerGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 220px), 1fr))", gap: "0.7rem" },
-  pickerCard: { padding: "0.65rem", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(15,23,42,0.5)" },
-  pickerSelected: { padding: "0.65rem", border: "1px solid rgba(0,200,255,0.36)", background: "rgba(0,200,255,0.08)" },
-  toggleRow: { display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: "0.35rem", marginTop: "0.55rem" },
-  toggle: { display: "flex", justifyContent: "center", gap: "0.25rem", padding: "0.42rem 0.35rem", background: "rgba(2,6,23,0.58)", color: "#94a3b8", fontSize: "0.72rem", cursor: "pointer" },
-  toggleChecked: { display: "flex", justifyContent: "center", gap: "0.25rem", padding: "0.42rem 0.35rem", background: "rgba(0,200,255,0.18)", color: "#bae6fd", fontSize: "0.72rem", cursor: "pointer" },
+  textarea: { width: "100%", minHeight: 82, marginTop: "0.8rem", borderRadius: "10px", padding: "0.72rem 0.8rem", border: "1px solid rgba(148,163,184,0.2)", background: "rgba(2,6,23,0.78)", color: "#e2e8f0", outline: "none", resize: "vertical" },
+  rosterList: { display: "grid", gap: "0.65rem" },
+  rosterRow: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "0.65rem", alignItems: "center", padding: "0.55rem", borderRadius: "12px", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(15,23,42,0.5)" },
+  rosterRowActive: { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "0.65rem", alignItems: "center", padding: "0.55rem", borderRadius: "12px", border: "1px solid rgba(0,200,255,0.36)", background: "rgba(0,200,255,0.08)" },
+  rosterMember: { minWidth: 0 },
+  rosterActions: { display: "inline-flex", alignItems: "center", gap: "0.35rem", flexWrap: "wrap", justifyContent: "flex-end" },
+  toggle: { display: "flex", justifyContent: "center", gap: "0.25rem", borderRadius: "8px", padding: "0.42rem 0.35rem", background: "rgba(2,6,23,0.58)", color: "#94a3b8", fontSize: "0.72rem", cursor: "pointer" },
+  toggleChecked: { display: "flex", justifyContent: "center", gap: "0.25rem", borderRadius: "8px", padding: "0.42rem 0.35rem", background: "rgba(0,200,255,0.18)", color: "#bae6fd", fontSize: "0.72rem", cursor: "pointer" },
   builderFooter: { display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.8rem", flexWrap: "wrap", marginTop: "0.75rem" },
   cardGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 240px), 1fr))", gap: "0.8rem" },
   catalogGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 260px), 1fr))", gap: "0.8rem" },
-  roomCard: { padding: "0.9rem", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(15,23,42,0.62)", display: "grid", gap: "0.55rem" },
+  roomCard: { padding: "0.9rem", borderRadius: "12px", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(15,23,42,0.62)", display: "grid", gap: "0.55rem" },
   roomHeader: { display: "grid", gridTemplateColumns: "auto 1fr auto", gap: "0.7rem", alignItems: "center" },
   roomTitle: { margin: 0, color: "#f8fafc", fontSize: "1rem" },
   avatarRow: { display: "flex", gap: "0.3rem", marginTop: "0.4rem" },
-  publishedBox: { display: "grid", gridTemplateColumns: "auto 1fr", gap: "0.85rem", alignItems: "center", padding: "0.85rem", background: "rgba(15,23,42,0.62)", border: "1px solid rgba(245,158,11,0.18)" },
-  emptyState: { minHeight: 150, display: "grid", placeItems: "center", textAlign: "center", border: "1px dashed rgba(148,163,184,0.18)", color: "#94a3b8" },
-  line: { margin: "0.35rem 0", padding: "0.7rem", background: "rgba(15,23,42,0.6)", color: "#cbd5e1" },
+  publishedBox: { display: "grid", gridTemplateColumns: "auto 1fr", borderRadius: "12px", gap: "0.85rem", alignItems: "center", padding: "0.85rem", background: "rgba(15,23,42,0.62)", border: "1px solid rgba(245,158,11,0.18)" },
+  emptyState: { minHeight: 150, borderRadius: "12px", display: "grid", placeItems: "center", textAlign: "center", border: "1px dashed rgba(148,163,184,0.18)", color: "#94a3b8" },
+  line: { margin: "0.35rem 0", borderRadius: "10px", padding: "0.7rem", background: "rgba(15,23,42,0.6)", color: "#cbd5e1" },
   row: { display: "flex", alignItems: "center", gap: "0.45rem", flexWrap: "wrap" },
+  outgoingTeamsRow: { display: "grid", gridTemplateColumns: "1fr auto 1fr", alignItems: "center", gap: "0.7rem" },
+  outgoingTeamMini: { display: "flex", alignItems: "center", gap: "0.45rem", minWidth: 0, color: "rgba(225,233,255,.84)" },
+  outgoingVs: { color: "rgba(177,196,255,.72)", fontWeight: 900, letterSpacing: ".12em" },
 
   skeletonHero: { border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.68)", padding: "1rem", display: "grid", gap: "0.7rem" },
   skeletonLineLg: { height: 26, width: "44%", background: "rgba(148,163,184,0.2)", animation: "pulseGlow 1.4s ease-in-out infinite" },

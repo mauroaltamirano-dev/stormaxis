@@ -215,7 +215,7 @@ export function Stats() {
   if (!user) return null;
 
   return (
-    <div style={pageStyle}>
+    <div className="storm-page" style={pageStyle}>
       <PageHeader
         eyebrow="Nexus analytics"
         title="Estadísticas competitivas"
@@ -479,39 +479,39 @@ function EmptyState({ title, text, action }: { title: string; text: string; acti
 const pageStyle: CSSProperties = { display: "grid", gap: "1rem" };
 const eyebrowStyle: CSSProperties = { color: "#00c8ff", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase" };
 const rangeRailStyle: CSSProperties = { display: "flex", gap: "0.45rem", flexWrap: "wrap" };
-const rangeButtonStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.16)", background: "rgba(2,6,23,0.58)", color: "rgba(226,232,240,0.72)", padding: "0.6rem 0.75rem", cursor: "pointer", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" };
+const rangeButtonStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.16)", borderRadius: "10px", background: "rgba(2,6,23,0.58)", color: "rgba(226,232,240,0.72)", padding: "0.6rem 0.75rem", cursor: "pointer", fontWeight: 900, letterSpacing: "0.1em", textTransform: "uppercase" };
 const activeRangeButtonStyle: CSSProperties = { ...rangeButtonStyle, border: "1px solid rgba(0,200,255,0.38)", background: "rgba(0,200,255,0.14)", color: "#bae6fd" };
-const errorStyle: CSSProperties = { border: "1px solid rgba(248,113,113,0.26)", background: "rgba(127,29,29,0.14)", color: "#fecaca", padding: "0.85rem 1rem" };
+const errorStyle: CSSProperties = { border: "1px solid rgba(248,113,113,0.26)", borderRadius: "12px", background: "rgba(127,29,29,0.14)", color: "#fecaca", padding: "0.85rem 1rem" };
 const metricGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))", gap: "0.8rem" };
-const metricCardStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.12)", background: "rgba(5,10,18,0.86)", padding: "0.9rem", display: "grid", gap: "0.45rem" };
+const metricCardStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.12)", borderRadius: "12px", background: "rgba(5,10,18,0.86)", padding: "0.9rem", display: "grid", gap: "0.45rem" };
 const metricHeaderStyle: CSSProperties = { display: "flex", justifyContent: "space-between", gap: "0.7rem", color: "rgba(226,232,240,0.7)", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase" };
 const metricValueStyle: CSSProperties = { fontFamily: "var(--font-display)", fontSize: "1.8rem", fontWeight: 900, letterSpacing: "0.05em" };
 const mainGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1.35fr) minmax(300px, 0.65fr)", gap: "1rem", alignItems: "start" };
-const panelStyle: CSSProperties = { minWidth: 0, border: "1px solid rgba(148,163,184,0.12)", background: "rgba(4,9,16,0.88)", padding: "1rem", display: "grid", gap: "0.85rem" };
+const panelStyle: CSSProperties = { minWidth: 0, border: "1px solid rgba(112,158,255,.2)", borderRadius: "14px", background: "linear-gradient(180deg, rgba(10,20,39,.84), rgba(6,13,27,.8))", boxShadow: "0 14px 34px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.03)", padding: "1rem", display: "grid", gap: "0.85rem" };
 const panelTitleStyle: CSSProperties = { marginTop: "0.15rem", color: "#f8fafc", fontFamily: "var(--font-display)", fontSize: "1rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" };
 const panelSubtitleStyle: CSSProperties = { color: "rgba(148,163,184,0.82)", fontSize: "0.82rem", lineHeight: 1.45 };
 const historyListStyle: CSSProperties = { display: "grid", gap: "0.58rem" };
-const historyRowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "76px minmax(0, 1fr) auto", alignItems: "center", gap: "0.75rem", minHeight: "68px", padding: "0.5rem 0.65rem 0.5rem 0.5rem", border: "1px solid", background: "rgba(15,23,42,0.44)", color: "inherit", textDecoration: "none" };
-const mapThumbStyle: CSSProperties = { position: "relative", width: "72px", height: "48px", overflow: "hidden", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.8)" };
+const historyRowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "76px minmax(0, 1fr) auto", alignItems: "center", gap: "0.75rem", minHeight: "68px", padding: "0.5rem 0.65rem 0.5rem 0.5rem", border: "1px solid", borderRadius: "10px", background: "rgba(15,23,42,0.44)", color: "inherit", textDecoration: "none" };
+const mapThumbStyle: CSSProperties = { position: "relative", width: "72px", height: "48px", borderRadius: "8px", overflow: "hidden", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.8)" };
 const mapThumbImageStyle: CSSProperties = { width: "100%", height: "100%", objectFit: "cover", display: "block", filter: "brightness(0.72)" };
 const mapThumbOverlayStyle: CSSProperties = { position: "absolute", inset: 0, background: "linear-gradient(135deg, rgba(255,255,255,0.08), transparent 42%, rgba(0,0,0,0.38))" };
 const historyTitleStyle: CSSProperties = { color: "#f8fafc", fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const historyMetaStyle: CSSProperties = { marginTop: "0.2rem", display: "flex", gap: "0.6rem", flexWrap: "wrap", alignItems: "center", color: "rgba(148,163,184,0.78)", fontSize: "0.76rem", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em" };
-const replayPillStyle: CSSProperties = { border: "1px solid rgba(125,211,252,0.28)", background: "rgba(14,116,144,0.16)", color: "#7dd3fc", padding: "0.1rem 0.35rem", fontSize: "0.62rem" };
+const replayPillStyle: CSSProperties = { border: "1px solid rgba(125,211,252,0.28)", borderRadius: "999px", background: "rgba(14,116,144,0.16)", color: "#7dd3fc", padding: "0.1rem 0.35rem", fontSize: "0.62rem" };
 const historySideStyle: CSSProperties = { display: "grid", justifyItems: "end", gap: "0.2rem", whiteSpace: "nowrap" };
 const dateStyle: CSSProperties = { color: "rgba(148,163,184,0.62)", fontSize: "0.72rem" };
-function deltaBadgeStyle(delta: number, completed: boolean): CSSProperties { const tone = !completed ? "#94a3b8" : delta >= 0 ? "#4ade80" : "#f87171"; return { minWidth: "78px", textAlign: "center", border: `1px solid ${tone}44`, background: `${tone}14`, color: tone, padding: "0.25rem 0.45rem", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.08em" }; }
+function deltaBadgeStyle(delta: number, completed: boolean): CSSProperties { const tone = !completed ? "#94a3b8" : delta >= 0 ? "#4ade80" : "#f87171"; return { minWidth: "78px", textAlign: "center", border: `1px solid ${tone}44`, borderRadius: "999px", background: `${tone}14`, color: tone, padding: "0.25rem 0.45rem", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.08em" }; }
 const formRailStyle: CSSProperties = { display: "flex", gap: "0.35rem", flexWrap: "wrap" };
-function formBoxStyle(won: boolean): CSSProperties { const tone = won ? "#4ade80" : "#f87171"; return { width: "34px", height: "34px", display: "grid", placeItems: "center", border: `1px solid ${tone}66`, background: `${tone}18`, color: tone, fontWeight: 950 }; }
-const mapStatRowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "0.75rem", alignItems: "center", padding: "0.7rem", border: "1px solid rgba(148,163,184,0.12)", background: "rgba(15,23,42,0.38)" };
+function formBoxStyle(won: boolean): CSSProperties { const tone = won ? "#4ade80" : "#f87171"; return { width: "34px", height: "34px", borderRadius: "8px", display: "grid", placeItems: "center", border: `1px solid ${tone}66`, background: `${tone}18`, color: tone, fontWeight: 950 }; }
+const mapStatRowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(0, 1fr) auto", gap: "0.75rem", alignItems: "center", borderRadius: "10px", padding: "0.7rem", border: "1px solid rgba(148,163,184,0.12)", background: "rgba(15,23,42,0.38)" };
 const mapNameStyle: CSSProperties = { color: "#e2e8f0", fontWeight: 900, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" };
 const tinyMetaStyle: CSSProperties = { marginTop: "0.15rem", color: "rgba(148,163,184,0.72)", fontSize: "0.75rem" };
 const dataSlotsStyle: CSSProperties = { display: "grid", gap: "0.55rem" };
-const trendCardStyle: CSSProperties = { display: "grid", gap: "0.55rem", border: "1px solid rgba(148,163,184,0.12)", background: "radial-gradient(circle at 20% 0%, rgba(56,189,248,0.16), transparent 34%), rgba(2,6,23,0.35)", padding: "0.75rem" };
+const trendCardStyle: CSSProperties = { display: "grid", gap: "0.55rem", borderRadius: "12px", border: "1px solid rgba(148,163,184,0.12)", background: "radial-gradient(circle at 20% 0%, rgba(56,189,248,0.16), transparent 34%), rgba(2,6,23,0.35)", padding: "0.75rem" };
 const trendSvgStyle: CSSProperties = { width: "100%", height: "112px", overflow: "visible", filter: "drop-shadow(0 0 14px rgba(56,189,248,0.18))" };
 const trendFooterStyle: CSSProperties = { display: "flex", justifyContent: "space-between", gap: "0.75rem", color: "rgba(148,163,184,0.78)", fontSize: "0.72rem", textTransform: "uppercase", letterSpacing: "0.08em" };
-const dataSlotStyle: CSSProperties = { display: "grid", gridTemplateColumns: "auto 0.7fr 1.3fr", alignItems: "center", gap: "0.5rem", color: "rgba(226,232,240,0.72)", fontSize: "0.8rem", border: "1px solid rgba(125,211,252,0.10)", background: "rgba(14,116,144,0.08)", padding: "0.55rem" };
-const emptyStyle: CSSProperties = { border: "1px dashed rgba(125,211,252,0.24)", background: "linear-gradient(135deg, rgba(14,116,144,0.10), rgba(2,6,23,0.35))", color: "rgba(226,232,240,0.78)", padding: "1rem", textAlign: "center", fontWeight: 800, display: "grid", gap: "0.35rem", lineHeight: 1.45 };
-const eloBandStyle: CSSProperties = { display: "grid", gap: "0.6rem", border: "1px solid rgba(125,211,252,0.14)", background: "rgba(8,20,34,0.38)", padding: "0.9rem" };
-const eloTrackStyle: CSSProperties = { height: "8px", overflow: "hidden", border: "1px solid rgba(148,163,184,0.14)", background: "linear-gradient(90deg, rgba(248,113,113,0.18), rgba(148,163,184,0.12) 50%, rgba(74,222,128,0.18))" };
+const dataSlotStyle: CSSProperties = { display: "grid", gridTemplateColumns: "auto 0.7fr 1.3fr", alignItems: "center", gap: "0.5rem", borderRadius: "10px", color: "rgba(226,232,240,0.72)", fontSize: "0.8rem", border: "1px solid rgba(125,211,252,0.10)", background: "rgba(14,116,144,0.08)", padding: "0.55rem" };
+const emptyStyle: CSSProperties = { border: "1px dashed rgba(125,211,252,0.24)", borderRadius: "12px", background: "linear-gradient(135deg, rgba(14,116,144,0.10), rgba(2,6,23,0.35))", color: "rgba(226,232,240,0.78)", padding: "1rem", textAlign: "center", fontWeight: 800, display: "grid", gap: "0.35rem", lineHeight: 1.45 };
+const eloBandStyle: CSSProperties = { display: "grid", gap: "0.6rem", borderRadius: "12px", border: "1px solid rgba(125,211,252,0.14)", background: "rgba(8,20,34,0.38)", padding: "0.9rem" };
+const eloTrackStyle: CSSProperties = { height: "8px", borderRadius: "999px", overflow: "hidden", border: "1px solid rgba(148,163,184,0.14)", background: "linear-gradient(90deg, rgba(248,113,113,0.18), rgba(148,163,184,0.12) 50%, rgba(74,222,128,0.18))" };
 const eloTrackFillStyle: CSSProperties = { display: "block", height: "100%", background: "linear-gradient(90deg, #38bdf8, #4ade80)", boxShadow: "0 0 18px rgba(56,189,248,0.35)" };

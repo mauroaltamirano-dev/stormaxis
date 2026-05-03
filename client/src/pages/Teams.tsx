@@ -269,7 +269,7 @@ export default function Teams() {
 
   if (loading) {
     return (
-      <div style={styles.page}>
+      <div className="storm-page" style={styles.page}>
         <section style={styles.skeletonHero}>
           <div style={styles.skeletonLineLg} />
           <div style={styles.skeletonLineMd} />
@@ -282,7 +282,7 @@ export default function Teams() {
   }
 
   return (
-    <div style={styles.page}>
+    <div className="storm-page" style={styles.page}>
       <PageHeader
         eyebrow="Equipos"
         title="Hub de Equipos"
@@ -556,34 +556,34 @@ const styles: Record<string, CSSProperties> = {
   teamsBoard: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 340px), 1fr))", gap: "1rem", alignItems: "start" },
   mainColumn: { display: "grid", gap: "1rem" },
   sideColumn: { display: "grid", gap: "1rem" },
-  panel: { border: "1px solid var(--nexus-border)", background: "var(--nexus-card)", padding: "1rem", display: "grid", gap: "0.8rem" },
-  panelAccent: { border: "1px solid rgba(0,200,255,0.24)", background: "linear-gradient(180deg, rgba(15,23,42,0.82), rgba(2,6,23,0.85))", padding: "1rem", display: "grid", gap: "0.8rem" },
+  panel: { border: "1px solid rgba(112,158,255,.2)", borderRadius: "14px", background: "linear-gradient(180deg, rgba(10,20,39,.84), rgba(6,13,27,.8))", boxShadow: "0 14px 34px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.03)", padding: "1rem", display: "grid", gap: "0.8rem" },
+  panelAccent: { border: "1px solid rgba(93,207,255,.4)", borderRadius: "16px", background: "linear-gradient(155deg, rgba(11,30,58,.86), rgba(7,15,30,.86)), radial-gradient(circle at 14% 0%, rgba(55,217,255,.14), transparent 36%), radial-gradient(circle at 86% 0%, rgba(155,85,255,.14), transparent 24%)", boxShadow: "0 16px 40px rgba(0,0,0,.22), inset 0 1px 0 rgba(255,255,255,.04)", padding: "1rem", display: "grid", gap: "0.8rem" },
   sectionTitleRow: { display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: "0.8rem", marginBottom: "0.4rem", flexWrap: "wrap" },
   eyebrow: { margin: 0, color: "#00c8ff", fontSize: "0.68rem", fontWeight: 950, letterSpacing: "0.18em", textTransform: "uppercase", display: "flex", alignItems: "center" },
   sectionTitle: { margin: "0.18rem 0 0", color: "#f8fafc", fontSize: "1.04rem", letterSpacing: "0.02em", textTransform: "uppercase", fontFamily: "var(--font-display)" },
 
   actionsRow: { display: "inline-flex", gap: "0.5rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" },
-  error: { padding: "0.85rem 1rem", border: "1px solid rgba(248,113,113,0.45)", background: "rgba(127,29,29,0.22)", color: "#fecaca" },
-  notice: { padding: "0.85rem 1rem", border: "1px solid rgba(34,197,94,0.34)", background: "rgba(22,101,52,0.18)", color: "#bbf7d0" },
+  error: { padding: "0.85rem 1rem", borderRadius: "12px", border: "1px solid rgba(248,113,113,0.45)", background: "rgba(127,29,29,0.22)", color: "#fecaca" },
+  notice: { padding: "0.85rem 1rem", borderRadius: "12px", border: "1px solid rgba(34,197,94,0.34)", background: "rgba(22,101,52,0.18)", color: "#bbf7d0" },
 
-  commandCard: { border: "1px solid rgba(148,163,184,0.14)", background: "rgba(15,23,42,0.6)", padding: "0.85rem", display: "grid", gap: "0.65rem" },
+  commandCard: { border: "1px solid rgba(116,157,255,.16)", borderRadius: "12px", background: "rgba(8,18,38,.65)", padding: "0.85rem", display: "grid", gap: "0.65rem" },
   commandHead: { display: "flex", alignItems: "center", gap: "0.8rem", minWidth: 0 },
   commandTitle: { margin: 0, color: "#f8fafc", fontSize: "1.02rem" },
 
   metricGrid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(120px, 1fr))", gap: "0.55rem" },
-  metricTile: { display: "grid", gap: "0.12rem", padding: "0.58rem 0.66rem", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.58)", color: "#e2e8f0" },
-  chip: { padding: "0.3rem 0.52rem", border: "1px solid transparent", fontSize: "0.72rem", fontWeight: 850 },
+  metricTile: { display: "grid", gap: "0.12rem", borderRadius: "10px", padding: "0.58rem 0.66rem", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(2,6,23,0.58)", color: "#e2e8f0" },
+  chip: { padding: "0.3rem 0.52rem", borderRadius: "999px", border: "1px solid transparent", fontSize: "0.72rem", fontWeight: 850 },
   chipSuccess: { color: "#bbf7d0", background: "rgba(22,101,52,0.22)", borderColor: "rgba(34,197,94,0.28)" },
   chipWarn: { color: "#fde68a", background: "rgba(120,53,15,0.22)", borderColor: "rgba(245,158,11,0.28)" },
   chipInfo: { color: "#bae6fd", background: "rgba(14,165,233,0.14)", borderColor: "rgba(14,165,233,0.24)" },
   chipMuted: { color: "#cbd5e1", background: "rgba(100,116,139,0.16)", borderColor: "rgba(148,163,184,0.18)" },
 
-  secondaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0.65rem 0.9rem", border: "1px solid rgba(148,163,184,0.22)", color: "#e2e8f0", textDecoration: "none", background: "rgba(15,23,42,0.72)", fontWeight: 800 },
-  primaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", padding: "0.58rem 0.86rem", border: "1px solid rgba(125,211,252,0.38)", background: "rgba(14,116,144,0.14)", color: "#7dd3fc", fontWeight: 900, cursor: "pointer" },
-  ghostButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.35rem", padding: "0.58rem 0.86rem", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(2,6,23,0.65)", color: "#cbd5e1", fontWeight: 800, cursor: "pointer" },
+  secondaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "10px", padding: "0.65rem 0.9rem", border: "1px solid rgba(148,163,184,0.22)", color: "#e2e8f0", textDecoration: "none", background: "rgba(15,23,42,0.72)", fontWeight: 800 },
+  primaryButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", borderRadius: "10px", padding: "0.58rem 0.86rem", border: "1px solid rgba(126,240,255,.5)", background: "linear-gradient(135deg, rgba(45,189,255,.26), rgba(138,70,255,.2))", color: "#dff8ff", fontWeight: 900, cursor: "pointer" },
+  ghostButton: { display: "inline-flex", alignItems: "center", justifyContent: "center", gap: "0.35rem", borderRadius: "10px", padding: "0.58rem 0.86rem", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(2,6,23,0.65)", color: "#cbd5e1", fontWeight: 800, cursor: "pointer" },
 
   grid: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(min(100%, 250px), 1fr))", gap: "0.7rem" },
-  card: { padding: "0.8rem", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(15,23,42,0.6)", display: "grid", gap: "0.45rem" },
+  card: { padding: "0.8rem", borderRadius: "12px", border: "1px solid rgba(148,163,184,0.14)", background: "rgba(15,23,42,0.6)", display: "grid", gap: "0.45rem" },
   cardHeader: { display: "flex", alignItems: "center", gap: "0.5rem", minWidth: 0 },
 
   muted: { margin: 0, color: "rgba(226,232,240,0.66)", fontSize: "0.86rem", lineHeight: 1.45 },
@@ -592,24 +592,24 @@ const styles: Record<string, CSSProperties> = {
 
   row: { display: "flex", alignItems: "center", gap: "0.5rem", flexWrap: "wrap" },
   formGrid: { display: "grid", gap: "0.6rem" },
-  input: { width: "100%", padding: "0.68rem 0.75rem", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(2,6,23,0.7)", color: "#e2e8f0" },
-  textarea: { width: "100%", minHeight: "86px", padding: "0.68rem 0.75rem", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(2,6,23,0.7)", color: "#e2e8f0", resize: "vertical" },
+  input: { width: "100%", borderRadius: "10px", padding: "0.68rem 0.75rem", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(2,6,23,0.7)", color: "#e2e8f0" },
+  textarea: { width: "100%", minHeight: "86px", borderRadius: "10px", padding: "0.68rem 0.75rem", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(2,6,23,0.7)", color: "#e2e8f0", resize: "vertical" },
   dayRow: { display: "flex", flexWrap: "wrap", gap: "0.45rem" },
-  day: { padding: "0.35rem 0.5rem", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(15,23,42,0.7)", color: "#94a3b8", fontSize: "0.75rem", cursor: "pointer" },
-  dayActive: { padding: "0.35rem 0.5rem", border: "1px solid rgba(34,197,94,0.3)", background: "rgba(22,101,52,0.2)", color: "#bbf7d0", fontSize: "0.75rem", cursor: "pointer" },
+  day: { padding: "0.35rem 0.5rem", borderRadius: "999px", border: "1px solid rgba(148,163,184,0.24)", background: "rgba(15,23,42,0.7)", color: "#94a3b8", fontSize: "0.75rem", cursor: "pointer" },
+  dayActive: { padding: "0.35rem 0.5rem", borderRadius: "999px", border: "1px solid rgba(34,197,94,0.3)", background: "rgba(22,101,52,0.2)", color: "#bbf7d0", fontSize: "0.75rem", cursor: "pointer" },
   subPanel: { borderTop: "1px solid rgba(148,163,184,0.12)", paddingTop: "0.8rem", display: "grid", gap: "0.55rem" },
   stack: { display: "grid", gap: "0.4rem" },
-  searchButton: { display: "flex", justifyContent: "space-between", width: "100%", padding: "0.56rem 0.65rem", border: "1px solid rgba(148,163,184,0.2)", background: "rgba(15,23,42,0.7)", color: "#e2e8f0", cursor: "pointer", gap: "0.4rem" },
+  searchButton: { display: "flex", justifyContent: "space-between", width: "100%", borderRadius: "10px", padding: "0.56rem 0.65rem", border: "1px solid rgba(148,163,184,0.2)", background: "rgba(15,23,42,0.7)", color: "#e2e8f0", cursor: "pointer", gap: "0.4rem" },
 
-  memberCard: { padding: "0.78rem", border: "1px solid rgba(148,163,184,0.16)", background: "rgba(15,23,42,0.62)", display: "grid", gap: "0.55rem" },
+  memberCard: { padding: "0.78rem", borderRadius: "12px", border: "1px solid rgba(148,163,184,0.16)", background: "rgba(15,23,42,0.62)", display: "grid", gap: "0.55rem" },
   pillRow: { display: "flex", flexWrap: "wrap", gap: "0.45rem", marginBottom: "0.2rem" },
-  select: { width: "100%", padding: "0.52rem 0.6rem", border: "1px solid rgba(125,211,252,0.3)", background: "rgba(2,6,23,0.8)", color: "#e2e8f0" },
+  select: { width: "100%", borderRadius: "10px", padding: "0.52rem 0.6rem", border: "1px solid rgba(125,211,252,0.3)", background: "rgba(2,6,23,0.8)", color: "#e2e8f0" },
 
-  teamBadge: { flex: "0 0 auto", display: "grid", placeItems: "center", background: "linear-gradient(135deg, #00c8ff, #1e3a8a)", color: "#f8fafc", fontWeight: 950, overflow: "hidden" },
-  avatar: { width: 34, height: 34, display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto", background: "#0f172a", color: "#7dd3fc", fontSize: "0.68rem", fontWeight: 950, border: "1px solid rgba(125,211,252,0.25)" },
+  teamBadge: { flex: "0 0 auto", borderRadius: "10px", display: "grid", placeItems: "center", background: "linear-gradient(135deg, #00c8ff, #1e3a8a)", color: "#f8fafc", fontWeight: 950, overflow: "hidden" },
+  avatar: { width: 34, height: 34, borderRadius: "9px", display: "grid", placeItems: "center", overflow: "hidden", flex: "0 0 auto", background: "#0f172a", color: "#7dd3fc", fontSize: "0.68rem", fontWeight: 950, border: "1px solid rgba(125,211,252,0.25)" },
   avatarImg: { width: 34, height: 34, objectFit: "cover" },
 
-  emptyState: { minHeight: 120, display: "grid", placeItems: "center", textAlign: "center", border: "1px dashed rgba(148,163,184,0.18)", color: "#94a3b8", gap: "0.35rem", padding: "0.6rem" },
+  emptyState: { minHeight: 120, borderRadius: "12px", display: "grid", placeItems: "center", textAlign: "center", border: "1px dashed rgba(148,163,184,0.18)", color: "#94a3b8", gap: "0.35rem", padding: "0.6rem" },
 
   skeletonHero: { border: "1px solid rgba(148,163,184,0.18)", background: "rgba(15,23,42,0.68)", padding: "1rem", display: "grid", gap: "0.7rem" },
   skeletonLineLg: { height: 26, width: "44%", background: "rgba(148,163,184,0.2)", animation: "pulseGlow 1.4s ease-in-out infinite" },

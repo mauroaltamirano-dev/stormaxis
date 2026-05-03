@@ -98,14 +98,15 @@ const PLAYER_ROLE_OPTIONS: Array<{ value: PlayerRole; label: string }> = [
 const MATCHES_PER_PAGE = 5;
 
 const cardStyle: CSSProperties = {
-  background: "var(--nexus-card)",
-  border: "1px solid var(--nexus-border)",
-  borderRadius: "0",
+  background: "linear-gradient(180deg, rgba(10,20,39,.84), rgba(6,13,27,.8))",
+  border: "1px solid rgba(112,158,255,.2)",
+  borderRadius: "14px",
+  boxShadow: "0 14px 34px rgba(0,0,0,.2), inset 0 1px 0 rgba(255,255,255,.03)",
   padding: "18px",
 };
 
 const neonPanelStyle: CSSProperties = {
-  border: "1px solid rgba(0,174,255,0.25)",
+  border: "1px solid rgba(93,207,255,.42)",
   boxShadow:
     "inset 0 0 0 1px rgba(0,174,255,0.08), 0 0 24px rgba(0,100,255,0.12)",
 };
@@ -485,7 +486,7 @@ export function Profile() {
 
   if (loading) {
     return (
-      <div style={{ display: "grid", gap: "16px" }}>
+      <div className="storm-page" style={{ display: "grid", gap: "16px" }}>
         <div style={{ ...cardStyle, minHeight: "180px" }} />
         <div style={{ ...cardStyle, minHeight: "320px" }} />
       </div>
@@ -525,7 +526,7 @@ export function Profile() {
     profile.linkedAccounts?.find((entry) => entry.provider === "bnet") ?? null;
 
   return (
-    <div style={{ display: "grid", gap: "18px" }}>
+    <div className="storm-page" style={{ display: "grid", gap: "18px" }}>
       <section
         style={{
           ...cardStyle,
@@ -2226,6 +2227,7 @@ const fieldStyle: CSSProperties = {
   width: "100%",
   background: "rgba(255,255,255,0.02)",
   border: "1px solid rgba(255,255,255,0.08)",
+  borderRadius: "10px",
   color: "var(--nexus-text)",
   padding: "12px 14px",
   outline: "none",
@@ -2234,6 +2236,7 @@ const fieldStyle: CSSProperties = {
 
 const profileEmptyStateStyle: CSSProperties = {
   border: "1px dashed rgba(0,200,255,0.24)",
+  borderRadius: "12px",
   background:
     "linear-gradient(135deg, rgba(0,200,255,0.08), rgba(255,255,255,0.018) 48%, rgba(139,92,246,0.08))",
   padding: "16px",
@@ -2276,6 +2279,7 @@ const profileEmptyPrimaryLinkStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   border: "1px solid rgba(0,200,255,0.42)",
+  borderRadius: "10px",
   background: "rgba(0,200,255,0.14)",
   color: "var(--nexus-accent)",
   padding: "9px 11px",
@@ -2297,9 +2301,10 @@ const primaryButtonStyle: CSSProperties = {
   display: "inline-flex",
   alignItems: "center",
   gap: "8px",
-  border: "1px solid rgba(0,200,255,0.35)",
-  background: "rgba(0,200,255,0.12)",
-  color: "var(--nexus-accent)",
+  border: "1px solid rgba(126,240,255,.5)",
+  borderRadius: "10px",
+  background: "linear-gradient(135deg, rgba(45,189,255,.26), rgba(138,70,255,.2))",
+  color: "#dff8ff",
   padding: "11px 14px",
   cursor: "pointer",
   fontWeight: 800,
@@ -2313,6 +2318,7 @@ function secondaryButtonStyle(disabled: boolean): CSSProperties {
     alignItems: "center",
     gap: "8px",
     border: "1px solid rgba(255,255,255,0.08)",
+    borderRadius: "10px",
     background: "rgba(255,255,255,0.02)",
     color: disabled ? "var(--nexus-faint)" : "var(--nexus-text)",
     padding: "10px 12px",

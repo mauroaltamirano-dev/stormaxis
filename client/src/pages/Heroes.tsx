@@ -129,7 +129,7 @@ export function Heroes() {
   })
 
   return (
-    <main style={styles.page}>
+    <main className="storm-page" style={styles.page}>
       <PageHeader
         eyebrow="Hero Lab personal"
         title="Tu pool competitivo"
@@ -368,10 +368,10 @@ function formatNumber(value: number) { return new Intl.NumberFormat('es-AR').for
 function formatKda(stat: HeroStat) { return `${formatNumber(avg(stat.totals.takedowns, stat.played))}/${formatNumber(avg(stat.totals.deaths, stat.played))}/${formatNumber(avg(stat.totals.assists, stat.played))}` }
 
 function tabButtonStyle(active: boolean): CSSProperties {
-  return { border: `1px solid ${active ? '#00c8ff' : 'rgba(148,163,184,0.16)'}`, background: active ? 'rgba(0,200,255,0.13)' : 'rgba(2,6,23,0.42)', color: active ? '#7dd3fc' : 'rgba(226,232,240,0.66)', padding: '0.68rem 0.78rem', cursor: 'pointer', display: 'inline-flex', gap: '0.45rem', alignItems: 'center', fontFamily: 'var(--font-display)', fontSize: '0.72rem', fontWeight: 950, letterSpacing: '0.09em', textTransform: 'uppercase' }
+  return { border: `1px solid ${active ? '#00c8ff' : 'rgba(148,163,184,0.16)'}`, borderRadius: '10px', background: active ? 'rgba(0,200,255,0.13)' : 'rgba(2,6,23,0.42)', color: active ? '#7dd3fc' : 'rgba(226,232,240,0.66)', padding: '0.68rem 0.78rem', cursor: 'pointer', display: 'inline-flex', gap: '0.45rem', alignItems: 'center', fontFamily: 'var(--font-display)', fontSize: '0.72rem', fontWeight: 950, letterSpacing: '0.09em', textTransform: 'uppercase' }
 }
 function heroUsageCardStyle(tone: string): CSSProperties {
-  return { minWidth: 0, border: `1px solid ${tone}30`, background: `linear-gradient(135deg, ${tone}12, rgba(2,6,23,0.86) 42%, rgba(2,6,23,0.62))`, display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', overflow: 'hidden', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.045), 0 18px 42px rgba(0,0,0,0.18), 0 0 26px ${tone}0c`, animation: 'heroCardIn 360ms ease both' }
+  return { minWidth: 0, border: `1px solid ${tone}30`, borderRadius: '12px', background: `linear-gradient(135deg, ${tone}12, rgba(2,6,23,0.86) 42%, rgba(2,6,23,0.62))`, display: 'grid', gridTemplateColumns: '96px minmax(0, 1fr)', overflow: 'hidden', boxShadow: `inset 0 1px 0 rgba(255,255,255,0.045), 0 18px 42px rgba(0,0,0,0.18), 0 0 26px ${tone}0c`, animation: 'heroCardIn 360ms ease both' }
 }
 
 const styles: Record<string, CSSProperties> = {
@@ -384,20 +384,20 @@ const styles: Record<string, CSSProperties> = {
   subtitle: { maxWidth: '880px', color: 'rgba(226,232,240,0.66)', lineHeight: 1.65, margin: '0.85rem 0 0' },
   commandStats: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.52rem' },
   metric: { border: '1px solid rgba(255,255,255,0.08)', padding: '0.65rem', display: 'grid', gap: '0.1rem', textTransform: 'uppercase' },
-  tabsPanel: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 380px)', gap: '0.75rem', border: '1px solid rgba(148,163,184,0.14)', background: 'rgba(3,8,18,0.72)', padding: '0.82rem' },
+  tabsPanel: { display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) minmax(260px, 380px)', gap: '0.75rem', border: '1px solid rgba(148,163,184,0.14)', borderRadius: '12px', background: 'rgba(3,8,18,0.72)', padding: '0.82rem' },
   tabs: { display: 'flex', flexWrap: 'wrap', gap: '0.45rem' },
-  searchBox: { display: 'flex', alignItems: 'center', gap: '0.62rem', border: '1px solid rgba(125,211,252,0.24)', background: 'rgba(2,6,23,0.58)', color: '#7dd3fc', padding: '0 0.75rem' },
+  searchBox: { display: 'flex', alignItems: 'center', gap: '0.62rem', borderRadius: '10px', border: '1px solid rgba(125,211,252,0.24)', background: 'rgba(2,6,23,0.58)', color: '#7dd3fc', padding: '0 0.75rem' },
   searchInput: { width: '100%', border: 'none', outline: 'none', background: 'transparent', color: '#f8fafc', minHeight: '44px', fontSize: '0.92rem' },
   poolLayout: { display: 'grid', gridTemplateColumns: 'minmax(240px, 320px) minmax(0, 1fr)', gap: '0.9rem', alignItems: 'start' },
-  featureCard: { border: '1px solid rgba(125,211,252,0.18)', background: 'linear-gradient(180deg, rgba(8,18,32,0.88), rgba(2,6,23,0.72))', padding: '1rem', display: 'grid', gap: '0.75rem' },
-  featurePortraitFrame: { position: 'relative', overflow: 'hidden', minHeight: '230px', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 22%, rgba(255,255,255,0.12), transparent 42%)' },
+  featureCard: { border: '1px solid rgba(125,211,252,0.18)', borderRadius: '14px', background: 'linear-gradient(180deg, rgba(8,18,32,0.88), rgba(2,6,23,0.72))', padding: '1rem', display: 'grid', gap: '0.75rem' },
+  featurePortraitFrame: { position: 'relative', borderRadius: '12px', overflow: 'hidden', minHeight: '230px', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 22%, rgba(255,255,255,0.12), transparent 42%)' },
   featurePortrait: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' },
   featureHeroName: { margin: 0, color: '#f8fafc', fontFamily: 'var(--font-display)', fontSize: '2rem', lineHeight: 0.95, textTransform: 'uppercase' },
   featureMeta: { color: 'rgba(226,232,240,0.62)', fontSize: '0.82rem', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.08em' },
   featureStatsGrid: { display: 'grid', gridTemplateColumns: 'repeat(2, minmax(0, 1fr))', gap: '0.5rem' },
-  mini: { border: '1px solid rgba(255,255,255,0.08)', background: 'rgba(255,255,255,0.035)', padding: '0.58rem', display: 'grid', gap: '0.1rem' },
+  mini: { border: '1px solid rgba(255,255,255,0.08)', borderRadius: '10px', background: 'rgba(255,255,255,0.035)', padding: '0.58rem', display: 'grid', gap: '0.1rem' },
   heroGridCompact: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: '0.75rem' },
-  portraitFrame: { position: 'relative', minHeight: '128px', display: 'grid', placeItems: 'center', background: 'radial-gradient(circle at 50% 22%, rgba(255,255,255,0.12), transparent 42%)' },
+  portraitFrame: { position: 'relative', minHeight: '128px', display: 'grid', borderRadius: '10px', placeItems: 'center', background: 'radial-gradient(circle at 50% 22%, rgba(255,255,255,0.12), transparent 42%)' },
   portrait: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover' },
   initialFallback: { fontFamily: 'var(--font-display)', fontSize: '2.2rem', fontWeight: 950, letterSpacing: '0.08em', opacity: 0.95 },
   heroUsageBody: { minWidth: 0, display: 'grid', alignContent: 'center', gap: '0.42rem', padding: '0.8rem' },
@@ -405,16 +405,16 @@ const styles: Record<string, CSSProperties> = {
   heroName: { margin: 0, color: '#f8fafc', fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 950, letterSpacing: '0.05em', textTransform: 'uppercase' },
   heroMeta: { color: 'rgba(226,232,240,0.58)', fontSize: '0.76rem', lineHeight: 1.35 },
   heroBars: { display: 'grid', gridTemplateColumns: 'repeat(3, minmax(0, 1fr))', gap: '0.35rem' },
-  inlineMetric: { border: '1px solid rgba(255,255,255,0.07)', background: 'rgba(2,6,23,0.42)', padding: '0.42rem', display: 'grid', gap: '0.08rem', fontSize: '0.68rem' },
+  inlineMetric: { border: '1px solid rgba(255,255,255,0.07)', borderRadius: '8px', background: 'rgba(2,6,23,0.42)', padding: '0.42rem', display: 'grid', gap: '0.08rem', fontSize: '0.68rem' },
   mapGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))', gap: '0.8rem' },
-  mapCard: { position: 'relative', overflow: 'hidden', minHeight: '190px', border: '1px solid rgba(125,211,252,0.16)', background: 'rgba(2,6,23,0.8)' },
+  mapCard: { position: 'relative', borderRadius: '12px', overflow: 'hidden', minHeight: '190px', border: '1px solid rgba(125,211,252,0.16)', background: 'rgba(2,6,23,0.8)' },
   mapImage: { position: 'absolute', inset: 0, width: '100%', height: '100%', objectFit: 'cover', opacity: 0.7 },
   mapShade: { position: 'absolute', inset: 0, background: 'linear-gradient(180deg, rgba(2,6,23,0.14), rgba(2,6,23,0.94))' },
   mapBody: { position: 'absolute', inset: 'auto 0 0 0', padding: '1rem', color: '#f8fafc' },
   signalsGrid: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(240px, 1fr))', gap: '0.8rem' },
-  signalCard: { border: '1px solid rgba(148,163,184,0.16)', background: 'rgba(3,8,18,0.74)', padding: '1rem', display: 'grid', gap: '0.45rem' },
+  signalCard: { border: '1px solid rgba(148,163,184,0.16)', borderRadius: '12px', background: 'rgba(3,8,18,0.74)', padding: '1rem', display: 'grid', gap: '0.45rem' },
   signalIcon: { color: '#7dd3fc' },
-  empty: { border: '1px dashed rgba(125,211,252,0.24)', background: 'linear-gradient(135deg, rgba(14,116,144,0.10), rgba(2,6,23,0.42))', padding: '1rem', color: 'rgba(226,232,240,0.72)', display: 'grid', gap: '0.5rem' },
+  empty: { border: '1px dashed rgba(125,211,252,0.24)', borderRadius: '12px', background: 'linear-gradient(135deg, rgba(14,116,144,0.10), rgba(2,6,23,0.42))', padding: '1rem', color: 'rgba(226,232,240,0.72)', display: 'grid', gap: '0.5rem' },
   emptyActions: { display: 'flex', flexWrap: 'wrap', gap: '0.4rem', color: '#7dd3fc', fontSize: '0.68rem', fontWeight: 950, letterSpacing: '0.1em', textTransform: 'uppercase' },
   mutedText: { color: 'rgba(226,232,240,0.62)', lineHeight: 1.55 },
   error: { border: '1px solid rgba(248,113,113,0.28)', background: 'rgba(127,29,29,0.16)', color: '#fecaca', padding: '0.75rem 0.9rem' },

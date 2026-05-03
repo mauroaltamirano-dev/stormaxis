@@ -384,6 +384,49 @@ export async function createTeamScrimSearch(
   return search
 }
 
+export async function cancelTeamScrimSearch(actorId: string, searchId: string) {
+  const search = await (db as any).scrimSearch.findFirst({
+    where: { id: searchId, status: 'OPEN' },
+    select: { id: true, teamId: true },
+  })
+  if (!search) throw Errors.NOT_FOUND('Scrim search')
+
+  await requireTeamManager(actorId, search.teamId)
+
+  const pendingChallenges = await (db as any).scrimChallenge.findMany({
+    where: {
+      status: 'PENDING',
+      OR: [{ fromSearchId: searchId }, { toSearchId: searchId }],
+    },
+    select: { id: true, fromTeamId: true, toTeamId: true },
+  })
+
+  await (db as any).$transaction(async (tx: any) => {
+    await tx.scrimSearch.update({
+      where: { id: searchId },
+      data: { status: 'CANCELLED' },
+    })
+
+    if (pendingChallenges.length > 0) {
+      await tx.scrimChallenge.updateMany({
+        where: { id: { in: pendingChallenges.map((entry: { id: string }) => entry.id) } },
+        data: { status: 'CANCELLED', respondedAt: new Date() },
+      })
+    }
+  })
+
+  const affectedTeamIds = new Set<string>([search.teamId])
+  for (const challenge of pendingChallenges) {
+    affectedTeamIds.add(challenge.fromTeamId)
+    affectedTeamIds.add(challenge.toTeamId)
+  }
+  const audience = await getTeamMemberUserIds([...affectedTeamIds])
+  emitScrimEvent('scrims:search_updated', [...audience, actorId])
+  if (pendingChallenges.length > 0) emitScrimEvent('scrims:challenge_updated', [...audience, actorId])
+
+  return { id: searchId, status: 'CANCELLED' as const }
+}
+
 export async function createTeamScrimChallenge(actorId: string, fromSearchId: string, toSearchId: string) {
   const fromSearch = await (db as any).scrimSearch.findFirst({
     where: { id: fromSearchId, status: 'OPEN' },
@@ -591,6 +634,22 @@ export async function declineTeamScrimChallenge(actorId: string, challengeId: st
   return updatedChallenge
 }
 
+export async function cancelTeamScrimChallenge(actorId: string, challengeId: string) {
+  const challenge = await (db as any).scrimChallenge.findFirst({ where: { id: challengeId, status: 'PENDING' } })
+  if (!challenge) throw Errors.NOT_FOUND('Scrim challenge')
+
+  await requireTeamManager(actorId, challenge.fromTeamId)
+
+  const updatedChallenge = await (db as any).scrimChallenge.update({
+    where: { id: challengeId },
+    data: { status: 'CANCELLED', respondedAt: new Date() },
+  })
+
+  const audience = await getTeamMemberUserIds([challenge.fromTeamId, challenge.toTeamId])
+  emitScrimEvent('scrims:challenge_updated', [...audience, actorId])
+  return updatedChallenge
+}
+
 export async function getScrimAccessForUser(matchId: string, userId: string) {
   return (db as any).scrimAccess.findFirst({
     where: { matchId, userId },
@@ -697,7 +756,7 @@ export async function listSelfServeScrimsForUser(userId: string) {
         include: {
           members: {
             where: { status: 'ACTIVE' },
-            include: { user: { select: userSelect({ id: true, username: true, avatar: true, mmr: true, rank: true }) } },
+            include: { user: { select: userSelect({ id: true, username: true, avatar: true, mmr: true, rank: true, countryCode: true, mainRole: true, secondaryRole: true }) } },
           },
           invites: {
             where: { status: 'PENDING' },
@@ -713,7 +772,7 @@ export async function listSelfServeScrimsForUser(userId: string) {
   const [searches, incomingChallenges, outgoingChallenges, myInvites] = await Promise.all([
     (db as any).scrimSearch.findMany({
       where: { status: 'OPEN' },
-      include: { team: { include: { members: { where: { status: 'ACTIVE' }, include: { user: { select: userSelect({ id: true, username: true, avatar: true, mmr: true, rank: true }) } } } } } },
+      include: { team: { include: { members: { where: { status: 'ACTIVE' }, include: { user: { select: userSelect({ id: true, username: true, avatar: true, mmr: true, rank: true, countryCode: true, mainRole: true, secondaryRole: true }) } } } } } },
       orderBy: { createdAt: 'desc' },
       take: 50,
     }),
