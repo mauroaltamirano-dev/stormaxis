@@ -12,6 +12,7 @@ import {
 import { RankBadge } from "../RankBadge";
 import { getMatchLifecycleMeta } from "../../lib/competitiveStatus";
 import { CountryBadge } from "../CountryBadge";
+import { PlayerLink } from "../PlayerLink";
 
 type MatchStatus =
   | "ACCEPTING"
@@ -501,7 +502,7 @@ export function ActiveMatchRoom({
           <div style={{ display: "grid", gap: 8 }}>
             {scrimCoaches.map((coach) => (
               <div key={coach.userId} style={{ display: "flex", justifyContent: "space-between", gap: 12, padding: 10, border: "1px solid rgba(34,211,238,.25)", borderRadius: 12, background: "rgba(8,145,178,.12)" }}>
-                <strong>{coach.user?.username ?? "Coach"}</strong>
+                <strong>{coach.user?.username ? <PlayerLink username={coach.user.username}>{coach.user.username}</PlayerLink> : "Coach"}</strong>
                 <span style={{ color: "#67e8f9" }}>Coach · {coach.team === 1 ? teams.left.name : teams.right.name}</span>
               </div>
             ))}
@@ -1525,7 +1526,7 @@ function MatchTelemetryPanel({
         <div style={telemetryUploadMetaStyle}>
           <span>Archivo: {latest.originalName}</span>
           <span>{formatBytes(latest.fileSize)}</span>
-          <span>Subido por {latest.uploadedBy?.username ?? "Usuario"}</span>
+          <span>Subido por {latest.uploadedBy?.username ? <PlayerLink username={latest.uploadedBy.username}>{latest.uploadedBy.username}</PlayerLink> : "Usuario"}</span>
           <span>
             {latest.sha256
               ? `SHA ${latest.sha256.slice(0, 10)}…`
@@ -2127,7 +2128,7 @@ function ReplayPlayerStatRow({
         <ReplayHeroPortrait hero={hero} fallbackName={player.hero} tone={tone} won={player.won} />
         <div style={{ minWidth: 0 }}>
           <div style={playerDossierNameRowStyle}>
-            <strong>{displayName}</strong>
+            <strong>{matchPlayer ? <PlayerLink username={matchPlayer.user.username}>{displayName}</PlayerLink> : displayName}</strong>
             {isCurrentUser && <span style={currentUserTagStyle}>Vos</span>}
           </div>
           <span style={playerDossierSubStyle}>{subtitle}</span>
@@ -2552,7 +2553,7 @@ function TeamPlayerCard({
         <div style={playerNameRowStyle()}>
           <span style={playerNameIdentityGroupStyle}>
             <CountryBadge countryCode={player.countryCode} compact />
-            <span style={playerNameStyle}>{player.name}</span>
+            <PlayerLink username={player.name} placeholder={player.placeholder} style={playerNameStyle}>{player.name}</PlayerLink>
           </span>
           <span style={playerInlineEloStyle(accent)}>
             <span>ELO</span>

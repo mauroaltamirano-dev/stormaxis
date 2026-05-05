@@ -13,7 +13,7 @@ export function AuthCallback() {
   const error = search.get('error')
   const provider = search.get('provider') ?? 'discord'
   const mode = search.get('mode')
-  const callbackAccessToken = search.get('accessToken')
+  const callbackCode = search.get('code')
 
   useEffect(() => {
     if (isLoading || handledRef.current) return
@@ -24,20 +24,27 @@ export function AuthCallback() {
       return
     }
 
-    if (callbackAccessToken) {
-      useAuthStore.getState().setAccessToken(callbackAccessToken)
-    }
-
     let resolvedUser: typeof user | null = null
+    let resolvedAccessToken: string | null = null
 
-    api
-      .get('/auth/me', callbackAccessToken
-        ? { headers: { Authorization: `Bearer ${callbackAccessToken}` } }
-        : undefined)
+    const authReady = callbackCode
+      ? api
+          .post<{ accessToken: string }>('/auth/oauth/exchange', { code: callbackCode })
+          .then(({ data }) => {
+            resolvedAccessToken = data.accessToken
+            useAuthStore.getState().setAccessToken(data.accessToken)
+            return data.accessToken
+          })
+      : Promise.resolve(useAuthStore.getState().accessToken)
+
+    authReady
+      .then((token) => api.get('/auth/me', token
+        ? { headers: { Authorization: `Bearer ${token}` } }
+        : undefined))
       .then((response) => {
         const nextUser = response.data
         resolvedUser = nextUser
-        const token = callbackAccessToken || useAuthStore.getState().accessToken
+        const token = resolvedAccessToken || useAuthStore.getState().accessToken
         if (token) setAuth(nextUser, token)
         else updateUser(nextUser)
       })
@@ -55,7 +62,7 @@ export function AuthCallback() {
 
         navigate({ to: nextTarget, replace: true })
       })
-  }, [accessToken, callbackAccessToken, error, isLoading, mode, navigate, setAuth, updateUser, user])
+  }, [accessToken, callbackCode, error, isLoading, mode, navigate, setAuth, updateUser, user])
 
   return (
     <div

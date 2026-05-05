@@ -16,6 +16,7 @@ import {
 import { api } from "../lib/api";
 import { useAuthStore } from "../stores/auth.store";
 import { PageHeader } from "../components/PageHeader";
+import { PlayerLink } from "../components/PlayerLink";
 
 type AdminStats = {
   totalUsers: number;
@@ -666,7 +667,7 @@ export function Admin() {
                   <div key={player.userId} style={listRowStyle}>
                     <div style={{ minWidth: 0 }}>
                       <div style={rowTitleStyle}>
-                        {player.username ?? player.userId}
+                        {player.username ? <PlayerLink username={player.username} isBot={player.isBot} style={adminPlayerLinkStyle}>{player.username}</PlayerLink> : player.userId}
                         {player.isBot && <Tag tone="#38bdf8">BOT</Tag>}
                       </div>
                       <div style={rowMetaStyle}>
@@ -772,9 +773,15 @@ export function Admin() {
                           {match.selectedMap ? <Tag tone="#c084fc">{match.selectedMap}</Tag> : null}
                         </div>
                         <div style={rowMetaStyle}>
-                          {match.players
-                            .map((player) => player.user?.username ?? player.botName ?? player.userId?.slice(0, 6) ?? "Bot")
-                            .join(" · ")}
+                          {match.players.map((player, index) => {
+                            const label = player.user?.username ?? player.botName ?? player.userId?.slice(0, 6) ?? "Bot";
+                            return (
+                              <span key={`${match.id}-${index}-${label}`}>
+                                {index > 0 ? " · " : ""}
+                                {player.user?.username ? <PlayerLink username={player.user.username} style={adminInlinePlayerLinkStyle}>{player.user.username}</PlayerLink> : label}
+                              </span>
+                            );
+                          })}
                         </div>
                         <div style={tinyMetaStyle}>
                           {match.status === "ACCEPTING"
@@ -872,7 +879,7 @@ export function Admin() {
                 >
                   <div style={{ display: "grid", gap: "0.28rem", minWidth: 0 }}>
                     <div style={rowTitleStyle}>
-                      {entry.username}
+                      <PlayerLink username={entry.username} style={adminPlayerLinkStyle}>{entry.username}</PlayerLink>
                       <Tag tone={entry.isBanned ? "#f87171" : entry.role === "ADMIN" ? "#7dd3fc" : "#94a3b8"}>
                         {entry.role}
                       </Tag>
@@ -985,8 +992,8 @@ export function Admin() {
                       <Tag tone="#7dd3fc">{entry.action.replaceAll("_", " ")}</Tag>
                     </div>
                     <div style={rowMetaStyle}>
-                      {entry.actor?.username ?? "Admin"} · {entry.entityType}
-                      {entry.targetUser?.username ? ` · Target ${entry.targetUser.username}` : ""}
+                      {entry.actor?.username ? <PlayerLink username={entry.actor.username} style={adminInlinePlayerLinkStyle}>{entry.actor.username}</PlayerLink> : "Admin"} · {entry.entityType}
+                      {entry.targetUser?.username ? <> · Target <PlayerLink username={entry.targetUser.username} style={adminInlinePlayerLinkStyle}>{entry.targetUser.username}</PlayerLink></> : ""}
                     </div>
                     <div style={tinyMetaStyle}>
                       {formatDateTime(entry.createdAt)}
@@ -1370,6 +1377,8 @@ const listRowStyle: CSSProperties = {
   background: "rgba(15,23,42,0.48)",
 };
 
+const adminPlayerLinkStyle: CSSProperties = { color: "#e2e8f0", fontWeight: 900, textDecoration: "underline", textDecorationColor: "rgba(125,211,252,0.28)", textUnderlineOffset: "3px" };
+const adminInlinePlayerLinkStyle: CSSProperties = { color: "#bae6fd", fontWeight: 900, textDecoration: "underline", textDecorationColor: "rgba(125,211,252,0.28)", textUnderlineOffset: "3px" };
 const rowTitleStyle: CSSProperties = {
   display: "flex",
   alignItems: "center",

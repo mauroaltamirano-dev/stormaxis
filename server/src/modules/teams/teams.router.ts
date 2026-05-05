@@ -8,7 +8,10 @@ import {
   createTeam,
   createTeamInvite,
   createTeamJoinRequest,
+  deleteTeam,
   getMyTeam,
+  getPublicTeamBySlug,
+  getPublicTeamStatsBySlug,
   getTeamsHub,
   listMyTeamInvites,
   removeTeamMember,
@@ -26,6 +29,14 @@ const CreateTeamSchema = z.object({
   logoUrl: z.string().trim().url().max(500).optional().nullable(),
   bannerUrl: z.string().trim().url().max(500).optional().nullable(),
   description: z.string().trim().max(500).optional().nullable(),
+  countryCode: z.string().trim().length(2).optional().nullable(),
+  about: z.string().trim().max(700).optional().nullable(),
+  isRecruiting: z.boolean().optional().nullable(),
+  recruitingRoles: z.array(z.enum(['RANGED', 'HEALER', 'OFFLANE', 'FLEX', 'TANK'])).max(5).optional().nullable(),
+  socialLinks: z.array(z.object({
+    label: z.string().trim().min(1).max(32),
+    url: z.string().trim().url().max(500),
+  })).max(5).optional().nullable(),
   availabilityDays: z.array(z.string().trim().min(1).max(24)).max(14).optional().nullable(),
 })
 
@@ -51,11 +62,24 @@ const UpdateTeamProfileSchema = z.object({
   logoUrl: z.string().trim().url().max(500).optional().nullable(),
   bannerUrl: z.string().trim().url().max(500).optional().nullable(),
   description: z.string().trim().max(500).optional().nullable(),
+  countryCode: z.string().trim().length(2).optional().nullable(),
+  about: z.string().trim().max(700).optional().nullable(),
+  isRecruiting: z.boolean().optional().nullable(),
+  recruitingRoles: z.array(z.enum(['RANGED', 'HEALER', 'OFFLANE', 'FLEX', 'TANK'])).max(5).optional().nullable(),
+  socialLinks: z.array(z.object({
+    label: z.string().trim().min(1).max(32),
+    url: z.string().trim().url().max(500),
+  })).max(5).optional().nullable(),
   availabilityDays: z.array(z.string().trim().min(1).max(24)).max(14).optional().nullable(),
 })
 
 const UpdateCompetitiveRoleSchema = z.object({
   competitiveRole: z.enum(['UNASSIGNED', 'CAPTAIN', 'STARTER', 'SUBSTITUTE', 'COACH', 'STAFF']),
+})
+
+const PublicTeamStatsQuerySchema = z.object({
+  limit: z.coerce.number().int().min(1).max(25).optional(),
+  cursor: z.string().trim().optional(),
 })
 
 teamsRouter.get('/me', async (req, res, next) => {
@@ -71,6 +95,24 @@ teamsRouter.get('/hub', async (req, res, next) => {
   try {
     const authReq = req as unknown as AuthRequest
     res.json({ ...(await getTeamsHub(authReq.userId)), onlineUserIds: [...(await getOnlineUserIds())] })
+  } catch (err) {
+    next(err)
+  }
+})
+
+teamsRouter.get('/public/:slug', async (req, res, next) => {
+  try {
+    const authReq = req as unknown as AuthRequest
+    res.json({ team: await getPublicTeamBySlug(req.params.slug, authReq.userId) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+teamsRouter.get('/public/:slug/stats', async (req, res, next) => {
+  try {
+    const query = PublicTeamStatsQuerySchema.parse(req.query ?? {})
+    res.json(await getPublicTeamStatsBySlug(req.params.slug, query))
   } catch (err) {
     next(err)
   }
@@ -148,6 +190,15 @@ teamsRouter.delete('/:teamId/members/:userId', async (req, res, next) => {
   try {
     const authReq = req as unknown as AuthRequest
     res.json({ member: await removeTeamMember(authReq.userId, req.params.teamId, req.params.userId) })
+  } catch (err) {
+    next(err)
+  }
+})
+
+teamsRouter.delete('/:teamId', async (req, res, next) => {
+  try {
+    const authReq = req as unknown as AuthRequest
+    res.json({ team: await deleteTeam(authReq.userId, req.params.teamId) })
   } catch (err) {
     next(err)
   }

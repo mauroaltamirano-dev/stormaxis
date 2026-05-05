@@ -12,7 +12,7 @@
     "db:recalculate-stats": "tsx prisma/recalculate-user-stats.ts",
     "db:generate": "prisma generate",
     "typecheck": "tsc --noEmit",
-    "test": "tsx --test src/modules/auth/auth.router.test.ts src/modules/matches/matches.service.test.ts src/modules/matches/chat-policy.test.ts src/modules/matchmaking/matchmaking.service.test.ts src/modules/scrims/scrims.service.test.ts src/modules/scrims/self-serve-scrims.service.test.ts src/modules/teams/teams.service.test.ts src/shared/middlewares/authenticate.test.ts"
+    "test": "tsx --test src/modules/auth/auth.router.test.ts src/modules/auth/oauth-callback-code.test.ts src/modules/friends/friends.service.test.ts src/modules/matches/matches.service.test.ts src/modules/matches/chat-policy.test.ts src/modules/matchmaking/matchmaking.service.test.ts src/modules/scrims/scrims.service.test.ts src/modules/scrims/self-serve-scrims.service.test.ts src/modules/teams/teams.service.test.ts src/shared/middlewares/authenticate.test.ts"
   },
   "dependencies": {
     "@aws-sdk/client-s3": "^3.1036.0",

@@ -8,6 +8,7 @@ import { RankBadge } from '../RankBadge'
 import { parseRankLevel } from '../../lib/ranks'
 import { useMatchmakingStore } from '../../stores/matchmaking.store'
 import { useAuthStore } from '../../stores/auth.store'
+import { PlayerLink } from '../PlayerLink'
 
 interface Player {
   id: string
@@ -731,7 +732,7 @@ function PlayerRow({
                 textOverflow: 'ellipsis',
               }}
             >
-              {player.username} {self ? '(vos)' : ''}
+              <PlayerLink username={player.username}>{player.username}</PlayerLink> {self ? '(vos)' : ''}
             </div>
             <div style={{ color: 'rgba(232,244,255,0.36)', fontSize: '0.74rem' }}>
               {accepted ? 'Confirmado' : 'Esperando respuesta'}
@@ -764,7 +765,7 @@ function PlayerRow({
                 textOverflow: 'ellipsis',
               }}
             >
-              {player.username} {self ? '(vos)' : ''}
+              <PlayerLink username={player.username}>{player.username}</PlayerLink> {self ? '(vos)' : ''}
             </div>
             <div style={{ color: 'rgba(232,244,255,0.36)', fontSize: '0.74rem' }}>
               {accepted ? 'Confirmado' : 'Esperando respuesta'}

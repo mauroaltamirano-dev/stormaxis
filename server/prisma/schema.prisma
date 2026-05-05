@@ -89,6 +89,14 @@ enum TeamJoinRequestStatus {
   EXPIRED
 }
 
+enum FriendRequestStatus {
+  PENDING
+  ACCEPTED
+  DECLINED
+  CANCELLED
+  REMOVED
+}
+
 enum ScrimSearchStatus {
   OPEN
   CHALLENGED
@@ -170,6 +178,8 @@ model User {
   teamInvitesReceived TeamInvite[] @relation("TeamInviteRecipient")
   teamJoinRequestsSent TeamJoinRequest[] @relation("TeamJoinRequestSender")
   teamJoinRequestsReviewed TeamJoinRequest[] @relation("TeamJoinRequestReviewer")
+  friendRequestsSent FriendRequest[] @relation("FriendRequestSender")
+  friendRequestsReceived FriendRequest[] @relation("FriendRequestRecipient")
   scrimSearchesCreated ScrimSearch[] @relation("ScrimSearchCreator")
   scrimAccesses ScrimAccess[]
 
@@ -191,6 +201,11 @@ model Team {
   logoUrl String? @db.VarChar(500)
   bannerUrl String? @db.VarChar(500)
   description String? @db.VarChar(500)
+  countryCode String? @db.VarChar(2)
+  about String? @db.VarChar(700)
+  isRecruiting Boolean @default(false)
+  recruitingRoles Json?
+  socialLinks Json?
   availabilityDays Json?
   status  TeamStatus @default(ACTIVE)
 
@@ -271,6 +286,25 @@ model TeamJoinRequest {
 
   @@index([teamId, status])
   @@index([userId, status])
+}
+
+model FriendRequest {
+  id String @id @default(cuid())
+
+  fromUserId String
+  fromUser   User @relation("FriendRequestSender", fields: [fromUserId], references: [id], onDelete: Cascade)
+  toUserId   String
+  toUser     User @relation("FriendRequestRecipient", fields: [toUserId], references: [id], onDelete: Cascade)
+
+  status FriendRequestStatus @default(PENDING)
+  respondedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([fromUserId, status])
+  @@index([toUserId, status])
+  @@index([status, createdAt])
 }
 
 model ScrimSearch {

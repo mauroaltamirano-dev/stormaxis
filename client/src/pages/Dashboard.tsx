@@ -1,7 +1,10 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
-import { Settings, Bell } from "lucide-react";
+import type { ReactNode } from "react";
+import { Activity, ArrowRight, Clock3, Loader2, Shield, Swords, Timer, Users, X } from "lucide-react";
 import { MAP_ID_BY_NAME } from "@nexusgg/shared";
+import { CountryBadge } from "../components/CountryBadge";
+import { PlayerLink } from "../components/PlayerLink";
 import { api } from "../lib/api";
 import { getSocket } from "../lib/socket";
 import { reportClientError } from "../lib/monitoring";
@@ -70,6 +73,7 @@ type QueuePlayer = {
   userId: string;
   username: string;
   avatar: string | null;
+  countryCode?: string | null;
   mmr: number;
   joinedAt: number | null;
   roles?: string[];
@@ -242,6 +246,10 @@ export function Dashboard() {
         await leaveCurrentQueue();
         return;
       }
+      if (message === "Cannot join queue while selected in an open scrim search") {
+        window.alert("Estás seleccionado en una búsqueda de scrim activa. Cancela la scrim o pide al captain que te quite antes de buscar partida.");
+        return;
+      }
       window.alert(message ?? "No se pudo entrar a cola.");
     }
   }
@@ -260,21 +268,10 @@ export function Dashboard() {
   const activity = getActivityLabel(displayedQueue, displayedLiveCount);
   const roleRows = buildRoleRows(queuePreview);
   const matchesForDisplay = liveMatches.map(liveToDisplayRow);
-  const bestHero = getBestHero(matchHistory, user.username);
-  const bestMap = getBestMap(matchHistory);
-  const bestMapImageId = MAP_ID_BY_NAME[bestMap.label];
-  const bestMapImageSrc = bestMapImageId ? `/maps/${bestMapImageId}.webp` : null;
+  const searchingPlayers = queuePreview.filter((player) => !player.isBot);
 
   return (
     <>
-      <TopBar
-        user={user}
-        rankMeta={rankMeta}
-        status={pendingMatch ? "Aceptando" : status === "searching" ? "Buscando" : "Listo"}
-        bestHero={bestHero}
-        bestMap={bestMap}
-      />
-
       <section className="storm-dashboard-grid">
         <article className="storm-panel storm-hero">
           <div className="storm-hero-scene" />
@@ -286,16 +283,69 @@ export function Dashboard() {
             <div className="storm-mode-tabs" aria-label="Selector de modo">
               {MODES.map((mode) => (
                 <button key={mode.key} type="button" disabled={!mode.enabled || status === "searching" || Boolean(activeMatchId)} onClick={() => setSelectedMode(mode.key)} className={`storm-mode-tab${selectedMode === mode.key ? " active" : ""}`}>
-                  {mode.icon} {mode.label}
+                  <Shield size={16} /> {mode.label}
                 </button>
               ))}
             </div>
 
             <div className="storm-cta-wrap">
-              <button className={`storm-cta${status === "searching" ? " searching" : ""}`} type="button" onClick={handleFindMatch} disabled={Boolean(pendingMatch)}>
-                <span>{pendingMatch ? "Confirmando partida" : activeMatchId ? "Ir al matchroom" : status === "searching" ? `Cancelar búsqueda · ${searchElapsedLabel}` : "Encontrar partida"} ⚡</span>
+              <button
+                className={[
+                  "storm-cta",
+                  status === "searching" ? "searching" : "",
+                  pendingMatch ? "confirming" : "",
+                  activeMatchId && status !== "searching" && !pendingMatch ? "active-match" : "",
+                ].filter(Boolean).join(" ")}
+                type="button"
+                onClick={handleFindMatch}
+                disabled={Boolean(pendingMatch)}
+              >
+                <span className="storm-cta-content">
+                  <span className="storm-cta-ico" aria-hidden="true">
+                    {pendingMatch
+                      ? <Loader2 size={24} className="storm-cta-spin" />
+                      : activeMatchId
+                      ? <ArrowRight size={24} />
+                      : status === "searching"
+                      ? <X size={22} />
+                      : <Swords size={24} />}
+                  </span>
+                  <span className="storm-cta-text">
+                    {pendingMatch
+                      ? "Confirmando partida"
+                      : activeMatchId
+                      ? "Ir al matchroom"
+                      : status === "searching"
+                      ? `Cancelar · ${searchElapsedLabel}`
+                      : "Encontrar partida"}
+                  </span>
+                </span>
+                <span className="storm-cta-shimmer" aria-hidden="true" />
               </button>
             </div>
+
+            {status === "searching" && (
+              <div className="storm-queue-bar" role="status" aria-live="polite">
+                <span className="storm-queue-bar-dot" aria-hidden="true" />
+                <span className="storm-queue-bar-group">
+                  <span className="storm-queue-bar-label">En cola</span>
+                  <strong className="storm-queue-bar-val">Buscando</strong>
+                </span>
+                <span className="storm-queue-bar-sep" aria-hidden="true" />
+                <span className="storm-queue-bar-group">
+                  <span className="storm-queue-bar-label">Tiempo estimado</span>
+                  <strong className="storm-queue-bar-val">
+                    <Timer size={13} style={{ verticalAlign: "middle", marginRight: 4 }} />
+                    {displayedEta}
+                  </strong>
+                </span>
+                <span className="storm-queue-bar-sep" aria-hidden="true" />
+                <span className="storm-queue-bar-group">
+                  <span className="storm-queue-bar-label">Jugadores</span>
+                  <strong className="storm-queue-bar-val">{displayedQueue}</strong>
+                </span>
+              </div>
+            )}
 
             <div className="storm-mini-stats" aria-label="Resumen del jugador">
               <div className="storm-stat-card"><div className="storm-stat-icon"><img src="/brand/winrate.webp" alt="" /></div><div><div className="storm-stat-label">Winrate</div><div className="storm-stat-value">{winrate}%</div><div className="storm-stat-sub">{totalPlayed ? `${user.wins}W / ${user.losses}L` : "Sin partidas"}</div></div></div>
@@ -308,23 +358,23 @@ export function Dashboard() {
 
         <aside className="storm-right-stack">
           <article className="storm-panel storm-live-panel">
-            <div className="storm-panel-head"><h2 className="storm-panel-title">En vivo ahora</h2><span className="storm-collapse">⌃</span></div>
+            <div className="storm-panel-head"><h2 className="storm-panel-title">En vivo ahora</h2><span className="storm-panel-badge">Live</span></div>
             <div className="storm-live-list">
-              <LiveMetric icon="♟" label="Jugadores en cola" value={`${displayedQueue}`} />
-              <LiveMetric icon="◴" label="Tiempo estimado" value={displayedEta} />
-              <LiveMetric icon="⚔" label="Partidas en vivo" value={`${displayedLiveCount}`} />
-              <LiveMetric icon="▥" label="Pico de actividad" value={activity} highlight />
+              <LiveMetric icon={<Users size={17} />} label="Jugadores en cola" value={`${displayedQueue}`} />
+              <LiveMetric icon={<Clock3 size={17} />} label="Tiempo estimado" value={displayedEta} />
+              <LiveMetric icon={<Swords size={17} />} label="Partidas en vivo" value={`${displayedLiveCount}`} />
+              <LiveMetric icon={<Activity size={17} />} label="Pico de actividad" value={activity} highlight />
             </div>
             <Sparkline />
           </article>
 
           <article className="storm-panel storm-event-panel">
-            <div className="storm-event-content"><div className="storm-event-label">Evento activo</div><div className="storm-event-title">Fase Beta Cerrada</div><div className="storm-event-copy">Estamos validando matchmaking competitivo y scrims en tiempo real.</div><div className="storm-event-time">◷ Feedback abierto en Discord</div></div><div className="storm-loot" aria-hidden="true" />
+            <div className="storm-event-content"><div className="storm-event-label">Evento activo</div><div className="storm-event-title">Fase Beta Cerrada</div><div className="storm-event-copy">Estamos validando matchmaking competitivo y scrims en tiempo real.</div><div className="storm-event-time"><Clock3 size={14} /> Feedback abierto en Discord</div></div><div className="storm-loot" aria-hidden="true" />
           </article>
         </aside>
 
         <article className="storm-panel storm-live-matches">
-          <div className="storm-panel-head"><h2 className="storm-panel-title">Partidas en vivo</h2><span className="storm-collapse">⌃</span></div>
+          <div className="storm-panel-head"><h2 className="storm-panel-title">Partidas en vivo</h2><span className="storm-panel-badge">Click en una fila</span></div>
           <div className="storm-table-wrap"><table className="storm-table"><thead><tr><th>Mapa</th><th>Rango vs rango</th><th>MMR prom.</th><th>Tiempo</th><th>Estado</th><th>Conectados</th></tr></thead><tbody>
             {matchesForDisplay.length === 0 ? (
               <tr>
@@ -336,48 +386,34 @@ export function Dashboard() {
               <tr key={match.id} onClick={() => navigate({ to: "/match/$matchId", params: { matchId: match.id } })} style={{ cursor: "pointer" }}>
                 <td><div className="storm-map-cell"><MapThumb mapName={match.selectedMap} /><div><div className="storm-map-name">{match.selectedMap}</div><div className="storm-map-mode">{match.modeLabel}</div></div></div></td>
                 <td><span className="storm-versus"><span className="storm-team-rank" title={match.team1Rank} aria-label={match.team1Rank}><img src={match.team1RankIconSrc} alt="" /></span> VS <span className="storm-team-rank red" title={match.team2Rank} aria-label={match.team2Rank}><img src={match.team2RankIconSrc} alt="" /></span></span></td>
-                <td>{match.avgMmr.toLocaleString("es-AR")}</td><td>{match.time}</td><td><span className="storm-state">{match.statusLabel}</span></td><td><span className="storm-viewers">◉ {match.connected}</span></td>
+                <td>{match.avgMmr.toLocaleString("es-AR")}</td><td>{match.time}</td><td><span className="storm-state">{match.statusLabel}</span></td><td><span className="storm-viewers"><Users size={14} /> {match.connected}</span></td>
               </tr>
             ))}
           </tbody></table></div>
-          <div className="storm-table-button"><button className="storm-ghost-btn" type="button" disabled>Ver todas las partidas en vivo · Próximamente</button></div>
+          <p className="storm-table-note">Solo mostramos partidas reales activas. Abrí cualquier fila para ir a su matchroom.</p>
         </article>
 
         <aside className="storm-aside-grid">
           <article className="storm-panel storm-queue-panel">
-            <div className="storm-panel-head"><h2 className="storm-panel-title">Cola en tiempo real</h2><div className="storm-drop-mini">Por rol ⌄</div></div>
+            <div className="storm-panel-head"><h2 className="storm-panel-title">Cola en tiempo real</h2><span className="storm-panel-badge">Por rol</span></div>
             <div className="storm-queue-list">
               {roleRows.map((row) => <QueueRoleRow key={row.label} row={row} />)}
             </div>
-            <div className="storm-queue-footer">Total en cola: {displayedQueue} jugadores ☷</div>
+            <div className="storm-queue-footer">Total en cola: {displayedQueue} jugadores</div>
           </article>
 
           <article className="storm-panel storm-server-panel">
-            <div className="storm-panel-head"><h2 className="storm-panel-title">Rendimiento personal</h2></div>
-            <div className="storm-servers">
-              <div className="storm-personal-list">
-                <div className="storm-personal-item">
-                  <div className="storm-personal-copy">
-                    <span className="storm-personal-label">Mejor héroe</span>
-                    <span className="storm-personal-meta">{bestHero.winrate}</span>
-                  </div>
-                  <strong className="storm-personal-value">{bestHero.label}</strong>
+            <div className="storm-panel-head"><h2 className="storm-panel-title">Jugadores buscando partida</h2><span className="storm-panel-badge">{searchingPlayers.length}</span></div>
+            <div className="storm-searching-players" aria-label="Jugadores buscando partida">
+              {searchingPlayers.length === 0 ? (
+                <div className="storm-searching-empty">No hay jugadores reales buscando en este momento.</div>
+              ) : (
+                <div className="storm-searching-list">
+                  {searchingPlayers.map((player) => (
+                    <QueuePlayerRow key={player.userId} player={player} />
+                  ))}
                 </div>
-                <div className="storm-personal-item map">
-                  <div className="storm-personal-map-thumb-wrap">
-                    {bestMapImageSrc ? (
-                      <img className="storm-personal-map-thumb" src={bestMapImageSrc} alt={bestMap.label} />
-                    ) : (
-                      <span className="storm-personal-map-thumb empty" aria-hidden="true" />
-                    )}
-                  </div>
-                  <div className="storm-personal-copy">
-                    <span className="storm-personal-label">Mejor mapa</span>
-                    <span className="storm-personal-meta">{bestMap.winrate}</span>
-                    <strong className="storm-personal-value">{bestMap.label}</strong>
-                  </div>
-                </div>
-              </div>
+              )}
             </div>
           </article>
         </aside>
@@ -386,10 +422,32 @@ export function Dashboard() {
   );
 }
 
-function TopBar({ user, rankMeta, status, bestHero, bestMap }: { user: { username: string; avatar: string | null; mmr: number }; rankMeta: { label: string; iconSrc: string }; status: string; bestHero: { label: string; winrate: string }; bestMap: { label: string; winrate: string } }) {
-  return <header className="storm-topbar"><div className="storm-filters"><div className="storm-select-chip">Mejor héroe: <strong>{bestHero.label}</strong> · {bestHero.winrate}</div><div className="storm-select-chip small">Mejor mapa: <strong>{bestMap.label}</strong> · {bestMap.winrate}</div></div><div className="storm-top-actions"><div className="storm-icon-btn" aria-label="Notificaciones"><Bell size={18} /><span className="badge">3</span></div><div className="storm-icon-btn" aria-label="Ajustes"><Settings size={18} /></div><section className="storm-user-card" aria-label="Perfil del jugador"><div className={`storm-avatar${user.avatar ? "" : " empty"}`}>{user.avatar ? <img src={user.avatar} alt={user.username} /> : null}</div><div className="storm-user-meta"><div className="storm-user-name">{user.username}</div><div className="storm-status-line"><span className="storm-status-dot" /> {status}</div></div><div className="storm-rank-divider" /><div className="storm-rank-box"><div className="storm-rank-emblem"><img src={rankMeta.iconSrc} alt="" /></div><div><div className="storm-rank-title">{rankMeta.label}</div><div className="storm-rank-sub">{user.mmr.toLocaleString("es-AR")} MMR</div></div></div><span className="storm-chev">⌄</span></section></div></header>;
+function QueuePlayerRow({ player }: { player: QueuePlayer }) {
+  const rankMeta = getRankMetaFromMmr(player.mmr);
+  return (
+    <div className="storm-searching-player-row">
+      <div className={`storm-avatar storm-avatar--queue${player.avatar ? "" : " empty"}`}>
+        {player.avatar ? <img src={player.avatar} alt={player.username} /> : null}
+      </div>
+      <div className="storm-searching-player-copy">
+        <div className="storm-searching-player-name">
+          <PlayerLink username={player.username}>{player.username}</PlayerLink>
+        </div>
+        <div className="storm-searching-player-meta">
+          <CountryBadge countryCode={player.countryCode} compact />
+          <span>{player.mmr.toLocaleString("es-AR")} MMR</span>
+        </div>
+      </div>
+      <div className="storm-searching-rank" title={rankMeta.label} aria-label={rankMeta.label}>
+        <img src={rankMeta.iconSrc} alt="" />
+        <span>{rankMeta.label}</span>
+      </div>
+    </div>
+  );
 }
-function LiveMetric({ icon, label, value, highlight }: { icon: string; label: string; value: string; highlight?: boolean }) {
+
+
+function LiveMetric({ icon, label, value, highlight }: { icon: ReactNode; label: string; value: string; highlight?: boolean }) {
   return <div className="storm-live-row"><span className="storm-row-icon">{icon}</span><span>{label}</span><strong className={highlight ? "highlight" : undefined}>{value}</strong></div>;
 }
 function Sparkline() { return <div className="storm-sparkline" aria-hidden="true"><svg viewBox="0 0 360 80" preserveAspectRatio="none"><defs><linearGradient id="lineGradient" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stopColor="#277cff" /><stop offset="0.45" stopColor="#9b55ff" /><stop offset="1" stopColor="#37d9ff" /></linearGradient><linearGradient id="fillGradient" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#9b55ff" stopOpacity="0.32" /><stop offset="1" stopColor="#37d9ff" stopOpacity="0" /></linearGradient></defs><path d="M0 62 L24 58 L42 60 L58 54 L76 55 L94 48 L110 50 L130 42 L148 47 L166 36 L184 41 L202 38 L220 43 L238 39 L258 41 L278 36 L294 39 L310 31 L330 34 L360 24 L360 80 L0 80 Z" fill="url(#fillGradient)" /><path d="M0 62 L24 58 L42 60 L58 54 L76 55 L94 48 L110 50 L130 42 L148 47 L166 36 L184 41 L202 38 L220 43 L238 39 L258 41 L278 36 L294 39 L310 31 L330 34 L360 24" fill="none" stroke="url(#lineGradient)" strokeWidth="3" strokeLinecap="round" /></svg><span className="storm-pulse-dot" /></div>; }
@@ -444,72 +502,6 @@ function liveToDisplayRow(match: LiveMatchRow): DisplayMatchRow {
 function getModeLabel(match: LiveMatchRow) {
   if (match.mode === "TEAM" || match.scrimDetails) return "SCRIM";
   return "Competitivo 5v5";
-}
-
-function getBestMap(matches: MatchHistoryEntry[]) {
-  const completed = matches.filter((entry) => (entry.match.winner === 1 || entry.match.winner === 2) && entry.match.selectedMap);
-  if (!completed.length) return { label: "Sin datos", winrate: "—" };
-
-  const byMap = new Map<string, { wins: number; played: number }>();
-  for (const entry of completed) {
-    const map = entry.match.selectedMap!;
-    const current = byMap.get(map) ?? { wins: 0, played: 0 };
-    current.played += 1;
-    if (entry.match.winner === entry.team) current.wins += 1;
-    byMap.set(map, current);
-  }
-
-  const sorted = [...byMap.entries()].sort((a, b) => {
-    const wrA = a[1].played ? a[1].wins / a[1].played : 0;
-    const wrB = b[1].played ? b[1].wins / b[1].played : 0;
-    if (wrB !== wrA) return wrB - wrA;
-    return b[1].played - a[1].played;
-  });
-  const [label, stats] = sorted[0];
-  const winrate = `${Math.round((stats.wins / stats.played) * 100)}% WR`;
-  return { label, winrate };
-}
-
-function getBestHero(matches: MatchHistoryEntry[], username: string) {
-  const byHero = new Map<string, { wins: number; played: number }>();
-  for (const entry of matches) {
-    if (!(entry.match.winner === 1 || entry.match.winner === 2)) continue;
-    const hero = extractOwnHero(entry, username);
-    if (!hero) continue;
-    const current = byHero.get(hero) ?? { wins: 0, played: 0 };
-    current.played += 1;
-    if (entry.match.winner === entry.team) current.wins += 1;
-    byHero.set(hero, current);
-  }
-  if (byHero.size === 0) return { label: "Sin datos", winrate: "—" };
-
-  const sorted = [...byHero.entries()].sort((a, b) => {
-    const wrA = a[1].played ? a[1].wins / a[1].played : 0;
-    const wrB = b[1].played ? b[1].wins / b[1].played : 0;
-    if (wrB !== wrA) return wrB - wrA;
-    return b[1].played - a[1].played;
-  });
-
-  const [label, stats] = sorted[0];
-  return { label, winrate: `${Math.round((stats.wins / stats.played) * 100)}% WR` };
-}
-
-function extractOwnHero(entry: MatchHistoryEntry, username: string) {
-  const replay = entry.match.replayUploads?.[0];
-  const players = replay?.parsedSummary?.players ?? [];
-  if (!players.length) return null;
-  const normalizedUser = normalizeId(username);
-  const ownTeamPlayers = players.filter((player) => player.team == null || Number(player.team) === entry.team);
-  const own = ownTeamPlayers.find((player) => normalizeId(player.name ?? "").includes(normalizedUser) || normalizeId(player.battleTag ?? "").includes(normalizedUser)) ?? ownTeamPlayers[0];
-  return own?.hero ?? null;
-}
-
-function normalizeId(value: string) {
-  return value
-    .toLowerCase()
-    .normalize("NFD")
-    .replace(/\p{Diacritic}/gu, "")
-    .replace(/[^a-z0-9]+/g, "");
 }
 
 function averageMmr(players: Array<{ mmr: number; isBot?: boolean }>) {

@@ -11,11 +11,13 @@ const originals = {
   redisSetex: redis.setex.bind(redis),
   matchPlayerFindFirst: db.matchPlayer.findFirst.bind(db.matchPlayer),
   userFindUnique: db.user.findUnique.bind(db.user),
+  scrimSearchFindFirst: (db as any).scrimSearch.findFirst.bind((db as any).scrimSearch),
 }
 
 type JoinQueueMocks = {
   queued?: string | null
   activeMatch?: { matchId: string } | null
+  activeScrimSearch?: { id: string } | null
   user?: {
     mmr: number
     isBanned: boolean
@@ -27,6 +29,7 @@ type JoinQueueMocks = {
 function mockJoinQueueDependencies({
   queued = null,
   activeMatch = null,
+  activeScrimSearch = null,
   user = {
     mmr: 1420,
     isBanned: false,
@@ -52,6 +55,7 @@ function mockJoinQueueDependencies({
     return 'OK'
   }
   ;(db.matchPlayer as any).findFirst = async () => activeMatch
+  ;(db as any).scrimSearch.findFirst = async () => activeScrimSearch
   ;(db.user as any).findUnique = async () => user
 
   return writes
@@ -63,6 +67,7 @@ afterEach(() => {
   ;(redis as any).setex = originals.redisSetex
   ;(db.matchPlayer as any).findFirst = originals.matchPlayerFindFirst
   ;(db.user as any).findUnique = originals.userFindUnique
+  ;(db as any).scrimSearch.findFirst = originals.scrimSearchFindFirst
 })
 
 async function assertJoinQueueError(expectedMessage: string, mocks: JoinQueueMocks) {
@@ -86,6 +91,12 @@ test('joinQueue blocks users already in queue', async () => {
 test('joinQueue blocks users with an active match', async () => {
   await assertJoinQueueError('Cannot join queue while you have an active match', {
     activeMatch: { matchId: 'match-1' },
+  })
+})
+
+test('joinQueue blocks users selected in an open scrim search', async () => {
+  await assertJoinQueueError('Cannot join queue while selected in an open scrim search', {
+    activeScrimSearch: { id: 'scrim-search-1' },
   })
 })
 

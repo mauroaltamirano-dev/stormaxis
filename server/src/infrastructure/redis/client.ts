@@ -29,4 +29,5 @@ export const REDIS_KEYS = {
   userInQueue: (userId: string) => `user_queue:${userId}`,
   rateLimitQueue: (userId: string) => `rl:queue:${userId}`,
   clientErrorEvents: () => 'client_error_events',
+  oauthCallbackCode: (code: string) => `oauth_callback:${code}`,
 } as const

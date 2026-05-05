@@ -377,6 +377,21 @@ export async function joinQueue(userId: string, mode: string) {
     throw Errors.CONFLICT('Cannot join queue while you have an active match')
   }
 
+  const activeScrimSearch = await (db as any).scrimSearch.findFirst({
+    where: {
+      status: 'OPEN',
+      OR: [
+        { starterUserIds: { array_contains: [userId] } },
+        { coachUserId: userId },
+        { observerUserIds: { array_contains: [userId] } },
+      ],
+    },
+    select: { id: true },
+  })
+  if (activeScrimSearch) {
+    throw Errors.CONFLICT('Cannot join queue while selected in an open scrim search')
+  }
+
   const user = await db.user.findUnique({
     where: { id: userId },
     select: { mmr: true, isBanned: true, mainRole: true, secondaryRole: true },

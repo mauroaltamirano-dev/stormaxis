@@ -5,6 +5,7 @@ import { PageHeader } from "../components/PageHeader";
 import { getRankMeta, parseRankLevel } from "../lib/ranks";
 import { getCountryFlag, getCountryName } from "../lib/countries";
 import { CountryBadge } from "../components/CountryBadge";
+import { PlayerLink } from "../components/PlayerLink";
 import { getRoleMeta, ROLE_META, type PlayerRoleKey } from "../lib/roles";
 import { Filter, Trophy as TrophyIcon } from "lucide-react";
 
@@ -128,7 +129,12 @@ export function Leaderboard() {
             <div style={eyebrowStyle}>Scouting filters</div>
             <strong style={toolbarTitleStyle}>{filteredEntries.length} jugadores visibles</strong>
             <div style={toolbarMetaStyle}>
-              {topFiltered ? `Líder del filtro: #${topFiltered.position} ${topFiltered.username}` : "Sin resultados para esta combinación"}
+              {topFiltered ? (
+                <>
+                  Líder del filtro: #{topFiltered.position}{" "}
+                  <PlayerLink username={topFiltered.username} style={toolbarLeaderLinkStyle}>{topFiltered.username}</PlayerLink>
+                </>
+              ) : "Sin resultados para esta combinación"}
               {averageMmr ? ` · Promedio ${averageMmr.toLocaleString()} MMR` : ""}
             </div>
           </div>
@@ -215,7 +221,7 @@ export function Leaderboard() {
                     <div style={{ minWidth: 0 }}>
                       <div style={{ color: "#e2e8f0", fontWeight: 800 }}>
                         <span style={{ marginRight: "0.35rem" }}><CountryBadge countryCode={entry.countryCode} compact /></span>
-                        {entry.username}
+                        <PlayerLink username={entry.username} style={playerNameLinkStyle}>{entry.username}</PlayerLink>
                       </div>
                       <div style={{ ...rankLineStyle, color: meta.color }}>{meta.label}</div>
                     </div>
@@ -285,6 +291,7 @@ const toolbarStyle: CSSProperties = { display: "flex", justifyContent: "space-be
 const eyebrowStyle: CSSProperties = { color: "#00c8ff", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.18em", textTransform: "uppercase" };
 const toolbarTitleStyle: CSSProperties = { display: "block", marginTop: "0.15rem", color: "#f8fafc", fontFamily: "var(--font-display)", letterSpacing: "0.06em", textTransform: "uppercase" };
 const toolbarMetaStyle: CSSProperties = { marginTop: "0.25rem", color: "rgba(148,163,184,0.82)", fontSize: "0.82rem" };
+const toolbarLeaderLinkStyle: CSSProperties = { color: "#bae6fd", fontWeight: 900, textDecoration: "underline", textDecorationColor: "rgba(125,211,252,0.35)", textUnderlineOffset: "3px" };
 const resetButtonStyle: CSSProperties = { border: "1px solid rgba(148,163,184,0.18)", borderRadius: "10px", background: "rgba(2,6,23,0.45)", color: "#cbd5e1", padding: "0.55rem 0.7rem", cursor: "pointer", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" };
 const filtersGridStyle: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(180px, 0.8fr) minmax(180px, 0.8fr) minmax(260px, 1.4fr)", gap: "0.7rem", alignItems: "end" };
 const filterLabelStyle: CSSProperties = { display: "grid", gap: "0.35rem", color: "rgba(226,232,240,0.72)", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.14em", textTransform: "uppercase" };
@@ -299,6 +306,7 @@ const emptyTextStyle: CSSProperties = { margin: "0.25rem 0 0", color: "rgba(148,
 const emptyResetButtonStyle: CSSProperties = { border: "1px solid rgba(125,211,252,0.38)", borderRadius: "10px", background: "rgba(14,116,144,0.14)", color: "#7dd3fc", padding: "0.55rem 0.7rem", cursor: "pointer", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" };
 const rowStyle: CSSProperties = { display: "grid", gridTemplateColumns: "54px 72px minmax(0, 1fr) minmax(130px, 0.6fr) auto auto auto", gap: "0.8rem", alignItems: "center", border: "1px solid", borderRadius: "10px", padding: "0.65rem 0.8rem" };
 const rankLineStyle: CSSProperties = { marginTop: "0.16rem", fontSize: "0.78rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase" };
+const playerNameLinkStyle: CSSProperties = { color: "#e2e8f0", fontWeight: 900, textDecoration: "underline", textDecorationColor: "rgba(125,211,252,0.22)", textUnderlineOffset: "3px" };
 const roleStackStyle: CSSProperties = { display: "flex", gap: "0.35rem", flexWrap: "wrap", minWidth: 0 };
 const rolePillStyle: CSSProperties = { border: "1px solid", borderRadius: "999px", padding: "0.22rem 0.42rem", fontSize: "0.68rem", fontWeight: 900, letterSpacing: "0.08em", textTransform: "uppercase", whiteSpace: "nowrap" };
 const mutedStyle: CSSProperties = { color: "rgba(148,163,184,0.62)", fontSize: "0.78rem", fontWeight: 800 };

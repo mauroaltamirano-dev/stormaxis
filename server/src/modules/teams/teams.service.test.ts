@@ -7,6 +7,8 @@ import {
   createTeam,
   createTeamInvite,
   createTeamJoinRequest,
+  deleteTeam,
+  getPublicTeamStatsBySlug,
   removeTeamMember,
   respondToTeamInvite,
   respondToTeamJoinRequest,
@@ -17,6 +19,9 @@ const original = {
   teamMember: (db as any).teamMember,
   teamInvite: (db as any).teamInvite,
   teamJoinRequest: (db as any).teamJoinRequest,
+  scrimSearch: (db as any).scrimSearch,
+  scrimChallenge: (db as any).scrimChallenge,
+  match: (db as any).match,
   user: (db as any).user,
   transaction: (db as any).$transaction,
 }
@@ -26,6 +31,9 @@ afterEach(() => {
   ;(db as any).teamMember = original.teamMember
   ;(db as any).teamInvite = original.teamInvite
   ;(db as any).teamJoinRequest = original.teamJoinRequest
+  ;(db as any).scrimSearch = original.scrimSearch
+  ;(db as any).scrimChallenge = original.scrimChallenge
+  ;(db as any).match = original.match
   ;(db as any).user = original.user
   ;(db as any).$transaction = original.transaction
 })
@@ -342,4 +350,127 @@ test('addTestBotsToTeam creates enough bot users to complete a five-player roste
   assert.equal(result.bots[0].isBot, true)
   assert.equal(createdUsers[0].data.email.endsWith('@bots.local'), true)
   assert.deepEqual(createdMembers.map((entry) => entry.data.teamId), ['team-1', 'team-1', 'team-1'])
+})
+
+
+test('getPublicTeamBySlug returns active team public fields by slug', async () => {
+  const { getPublicTeamBySlug } = await import('./teams.service')
+  const calls: any[] = []
+  ;(db as any).team = {
+    findFirst: async (args: any) => {
+      calls.push(args)
+      return { id: 'team-1', slug: 'storm-alpha', name: 'Storm Alpha', members: [] }
+    },
+  }
+
+  const team = await getPublicTeamBySlug(' storm-alpha ')
+
+  assert.equal(team.id, 'team-1')
+  assert.deepEqual(calls[0].where, { slug: 'storm-alpha', status: 'ACTIVE' })
+  assert.equal(calls[0].select.ownerId, true)
+  assert.equal(calls[0].select.members.where.status, 'ACTIVE')
+})
+
+test('getPublicTeamBySlug rejects missing public teams', async () => {
+  const { getPublicTeamBySlug } = await import('./teams.service')
+  ;(db as any).team = { findFirst: async () => null }
+
+  await assert.rejects(
+    () => getPublicTeamBySlug('missing-team'),
+    (error) => {
+      assert.ok(error instanceof AppError)
+      assert.equal(error.statusCode, 404)
+      return true
+    },
+  )
+})
+
+test('deleteTeam soft-archives a team and expires pending team activity for owners', async () => {
+  const calls: any[] = []
+  ;(db as any).teamMember = {
+    findFirst: async () => ({ id: 'owner-member', teamId: 'team-1', userId: 'owner-1', role: 'OWNER', status: 'ACTIVE' }),
+    findMany: async () => [{ userId: 'owner-1' }, { userId: 'member-2' }],
+  }
+  ;(db as any).$transaction = async (fn: any) => fn({
+    team: {
+      update: async (args: any) => { calls.push(['team.update', args]); return { id: 'team-1', status: 'ARCHIVED' } },
+    },
+    teamMember: {
+      updateMany: async (args: any) => { calls.push(['teamMember.updateMany', args]); return { count: 2 } },
+    },
+    teamInvite: {
+      updateMany: async (args: any) => { calls.push(['teamInvite.updateMany', args]); return { count: 1 } },
+    },
+    teamJoinRequest: {
+      updateMany: async (args: any) => { calls.push(['teamJoinRequest.updateMany', args]); return { count: 1 } },
+    },
+    scrimSearch: {
+      updateMany: async (args: any) => { calls.push(['scrimSearch.updateMany', args]); return { count: 1 } },
+    },
+    scrimChallenge: {
+      updateMany: async (args: any) => { calls.push(['scrimChallenge.updateMany', args]); return { count: 1 } },
+    },
+  })
+
+  const result = await deleteTeam('owner-1', 'team-1')
+
+  assert.equal(result.status, 'ARCHIVED')
+  assert.deepEqual(calls[0], ['team.update', { where: { id: 'team-1' }, data: { status: 'ARCHIVED' } }])
+  assert.deepEqual(calls[1][1].data, { status: 'LEFT' })
+  assert.equal(calls.some(([name, args]) => name === 'teamInvite.updateMany' && args.data.status === 'EXPIRED'), true)
+  assert.equal(calls.some(([name, args]) => name === 'scrimChallenge.updateMany' && args.data.status === 'EXPIRED'), true)
+})
+
+test('deleteTeam blocks non-owner team members', async () => {
+  ;(db as any).teamMember = {
+    findFirst: async () => ({ id: 'captain-member', teamId: 'team-1', userId: 'captain-1', role: 'CAPTAIN', status: 'ACTIVE' }),
+  }
+  ;(db as any).$transaction = async () => assert.fail('non-owner should not archive team')
+
+  await assert.rejects(
+    () => deleteTeam('captain-1', 'team-1'),
+    (error) => {
+      assert.ok(error instanceof AppError)
+      assert.equal(error.statusCode, 403)
+      return true
+    },
+  )
+})
+
+test('getPublicTeamStatsBySlug derives scrim summary, map stats, performance, and paginated history', async () => {
+  const createdAt = [
+    new Date('2026-05-04T10:00:00Z'),
+    new Date('2026-05-03T10:00:00Z'),
+    new Date('2026-05-02T10:00:00Z'),
+  ]
+  const matches = [
+    { id: 'm3', createdAt: createdAt[0], selectedMap: 'Infernal Shrines', winner: 1, duration: 1200, scrimDetails: { team1Id: 'team-1', team2Id: 'team-2', team1Name: 'Storm Alpha', team2Name: 'Nexus Beta' } },
+    { id: 'm2', createdAt: createdAt[1], selectedMap: 'Tomb of the Spider Queen', winner: 2, duration: 1100, scrimDetails: { team1Id: 'team-2', team2Id: 'team-1', team1Name: 'Nexus Beta', team2Name: 'Storm Alpha' } },
+    { id: 'm1', createdAt: createdAt[2], selectedMap: 'Infernal Shrines', winner: 2, duration: 1000, scrimDetails: { team1Id: 'team-1', team2Id: 'team-3', team1Name: 'Storm Alpha', team2Name: 'Sky Temple' } },
+  ]
+  const matchCalls: any[] = []
+  ;(db as any).team = {
+    findFirst: async () => ({ id: 'team-1', slug: 'storm-alpha', name: 'Storm Alpha' }),
+  }
+  ;(db as any).match = {
+    findMany: async (args: any) => {
+      matchCalls.push(args)
+      const take = args.take ?? matches.length
+      return matches.slice(0, take)
+    },
+  }
+
+  const result = await getPublicTeamStatsBySlug('storm-alpha', { limit: 2 })
+
+  assert.deepEqual(matchCalls[0].where.scrimDetails.OR, [{ team1Id: 'team-1' }, { team2Id: 'team-1' }])
+  assert.equal(result.summary.totalMatches, 3)
+  assert.equal(result.summary.wins, 2)
+  assert.equal(result.summary.losses, 1)
+  assert.equal(result.summary.winrate, 67)
+  assert.deepEqual(result.summary.recentResults, ['W', 'W', 'L'])
+  assert.deepEqual(result.mapStats[0], { map: 'Infernal Shrines', matches: 2, wins: 1, winrate: 50 })
+  assert.equal(result.matches.length, 2)
+  assert.equal(result.matches[0].result, 'W')
+  assert.equal(result.nextCursor, createdAt[1].toISOString())
+  assert.equal(result.performance.length, 3)
 })

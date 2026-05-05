@@ -13,6 +13,8 @@ import {
   verifyAccessToken,
   rotateRefreshToken,
   revokeRefreshToken,
+  createOAuthCallbackCode,
+  consumeOAuthCallbackCode,
   isDiscordConfigured,
   getDiscordAuthorizeUrl,
   exchangeDiscordCode,
@@ -332,6 +334,20 @@ authRouter.post('/logout', requireTrustedCookieRequest, authenticate, async (req
   }
 })
 
+const OAuthExchangeSchema = z.object({
+  code: z.string().trim().min(1),
+})
+
+authRouter.post('/oauth/exchange', requireTrustedCookieRequest, async (req, res, next) => {
+  try {
+    const { code } = OAuthExchangeSchema.parse(req.body ?? {})
+    const accessToken = await consumeOAuthCallbackCode(code)
+    res.json({ accessToken })
+  } catch (err) {
+    next(err)
+  }
+})
+
 // ─── Discord OAuth ────────────────────────────────────────
 
 authRouter.get('/discord', (req, res) => {
@@ -501,7 +517,7 @@ authRouter.get('/discord/callback', async (req, res) => {
     clearOAuthCookies()
     res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
     return redirectToClient(
-      { provider: 'discord', mode: 'login', access: 'granted', accessToken },
+      { provider: 'discord', mode: 'login', access: 'granted', code: await createOAuthCallbackCode(accessToken) },
       clientOrigin,
     )
   } catch {
@@ -654,7 +670,7 @@ authRouter.get('/bnet/callback', async (req, res) => {
     clearOAuthCookies()
     res.cookie('refreshToken', refreshToken, COOKIE_OPTIONS)
     return redirectToClient(
-      { provider: 'bnet', mode: 'login', access: 'granted', accessToken },
+      { provider: 'bnet', mode: 'login', access: 'granted', code: await createOAuthCallbackCode(accessToken) },
       clientOrigin,
     )
   } catch {

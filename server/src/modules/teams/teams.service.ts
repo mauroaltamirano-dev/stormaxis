@@ -14,6 +14,11 @@ export type CreateTeamInput = {
   logoUrl?: string | null
   bannerUrl?: string | null
   description?: string | null
+  countryCode?: string | null
+  about?: string | null
+  isRecruiting?: boolean | null
+  recruitingRoles?: string[] | null
+  socialLinks?: TeamSocialLinkInput[] | null
   availabilityDays?: string[] | null
 }
 
@@ -31,6 +36,11 @@ export type UpdateTeamProfileInput = {
   logoUrl?: string | null
   bannerUrl?: string | null
   description?: string | null
+  countryCode?: string | null
+  about?: string | null
+  isRecruiting?: boolean | null
+  recruitingRoles?: string[] | null
+  socialLinks?: TeamSocialLinkInput[] | null
   availabilityDays?: string[] | null
 }
 
@@ -38,11 +48,19 @@ export type AddTestBotsToTeamInput = {
   targetSize?: number
 }
 
+export type TeamSocialLinkInput = {
+  label?: string | null
+  url?: string | null
+}
+
 const TEAM_NAME_MAX_LENGTH = 80
 const TEAM_PROFILE_TEXT_MAX_LENGTH = 500
+const TEAM_ABOUT_MAX_LENGTH = 700
 const TEAM_AVAILABILITY_DAY_MAX = 14
 const TEAM_MAX_STARTERS = 5
 const TEAM_MAX_CAPTAINS = 1
+const TEAM_RECRUITING_ROLES = new Set(['RANGED', 'HEALER', 'OFFLANE', 'FLEX', 'TANK'])
+const TEAM_SOCIAL_LINK_MAX = 5
 
 function teamDb() {
   return db as any
@@ -96,11 +114,28 @@ function prismaClientSupportsUserIsBot() {
   return Boolean(userModel?.fields.some((field) => field.name === 'isBot'))
 }
 
+function prismaClientSupportsTeamPublicFields() {
+  const teamModel = Prisma.dmmf.datamodel.models.find((model) => model.name === 'Team')
+  return Boolean(teamModel?.fields.some((field) => field.name === 'countryCode'))
+}
+
 function userSelect<T extends Record<string, boolean>>(select: T) {
   return {
     ...select,
     ...(prismaClientSupportsUserIsBot() ? { isBot: true } : {}),
   }
+}
+
+function teamPublicSelect() {
+  return prismaClientSupportsTeamPublicFields()
+    ? {
+        countryCode: true,
+        about: true,
+        isRecruiting: true,
+        recruitingRoles: true,
+        socialLinks: true,
+      }
+    : {}
 }
 
 async function markBotUserRaw(executor: { $executeRaw: typeof db.$executeRaw }, userId: string) {
@@ -147,6 +182,154 @@ function cleanDescription(value?: string | null) {
   return trimmed.length > 0 ? trimmed.slice(0, TEAM_PROFILE_TEXT_MAX_LENGTH) : null
 }
 
+function cleanAbout(value?: string | null) {
+  const trimmed = value?.trim() ?? ''
+  return trimmed.length > 0 ? trimmed.slice(0, TEAM_ABOUT_MAX_LENGTH) : null
+}
+
+function cleanCountryCode(value?: string | null) {
+  const trimmed = value?.trim().toUpperCase() ?? ''
+  return /^[A-Z]{2}$/.test(trimmed) ? trimmed : null
+}
+
+function cleanRecruitingRoles(value?: string[] | null) {
+  if (!Array.isArray(value)) return null
+  const roles = uniqueIds(
+    value
+      .filter((role): role is string => typeof role === 'string')
+      .map((role) => role.trim().toUpperCase())
+      .filter((role) => TEAM_RECRUITING_ROLES.has(role)),
+  )
+  return roles.length > 0 ? roles : null
+}
+
+function cleanSocialLinks(value?: TeamSocialLinkInput[] | null) {
+  if (!Array.isArray(value)) return null
+  const links = value
+    .map((entry) => ({
+      label: entry?.label?.trim().slice(0, 32) ?? '',
+      url: entry?.url?.trim().slice(0, TEAM_PROFILE_TEXT_MAX_LENGTH) ?? '',
+    }))
+    .filter((entry) => entry.label.length > 0 && /^https?:\/\//i.test(entry.url))
+    .slice(0, TEAM_SOCIAL_LINK_MAX)
+  return links.length > 0 ? links : null
+}
+
+function hasTeamPublicProfileInput(input: Partial<CreateTeamInput & UpdateTeamProfileInput>) {
+  return (
+    input.countryCode !== undefined ||
+    input.about !== undefined ||
+    input.isRecruiting !== undefined ||
+    input.recruitingRoles !== undefined ||
+    input.socialLinks !== undefined
+  )
+}
+
+function buildTeamPublicData(input: Partial<CreateTeamInput & UpdateTeamProfileInput>) {
+  const data: Record<string, unknown> = {}
+  if (input.countryCode !== undefined) data.countryCode = cleanCountryCode(input.countryCode)
+  if (input.about !== undefined) data.about = cleanAbout(input.about)
+  if (input.isRecruiting !== undefined) data.isRecruiting = Boolean(input.isRecruiting)
+  if (input.recruitingRoles !== undefined) data.recruitingRoles = cleanRecruitingRoles(input.recruitingRoles)
+  if (input.socialLinks !== undefined) data.socialLinks = cleanSocialLinks(input.socialLinks)
+  return data
+}
+
+function isMissingTeamPublicProfileColumn(err: unknown) {
+  const candidate = err as { code?: string; meta?: { code?: string; message?: string }; message?: string }
+  const message = `${candidate.meta?.message ?? ''} ${candidate.message ?? ''}`
+  return (
+    candidate.code === 'P2010' ||
+    candidate.code === 'P2022' ||
+    candidate.meta?.code === '42703' ||
+    message.includes('countryCode') ||
+    message.includes('isRecruiting') ||
+    message.includes('recruitingRoles') ||
+    message.includes('socialLinks')
+  )
+}
+
+async function getTeamPublicFieldsRaw(teamIds: string[]) {
+  const ids = uniqueIds(teamIds)
+  if (ids.length === 0) return new Map<string, Record<string, unknown>>()
+  try {
+    const rows = await db.$queryRaw<Array<{
+      id: string
+      countryCode: string | null
+      about: string | null
+      isRecruiting: boolean
+      recruitingRoles: unknown
+      socialLinks: unknown
+    }>>(Prisma.sql`
+      SELECT
+        "id",
+        "countryCode",
+        "about",
+        "isRecruiting",
+        "recruitingRoles",
+        "socialLinks"
+      FROM "Team"
+      WHERE "id" IN (${Prisma.join(ids)})
+    `)
+    return new Map(rows.map((row) => [row.id, {
+      countryCode: row.countryCode,
+      about: row.about,
+      isRecruiting: row.isRecruiting,
+      recruitingRoles: row.recruitingRoles,
+      socialLinks: row.socialLinks,
+    }]))
+  } catch (err) {
+    if (isMissingTeamPublicProfileColumn(err)) return new Map<string, Record<string, unknown>>()
+    throw err
+  }
+}
+
+async function persistTeamPublicFieldsRaw(teamId: string, input: Partial<CreateTeamInput & UpdateTeamProfileInput>) {
+  if (!hasTeamPublicProfileInput(input)) return
+  const assignments: Prisma.Sql[] = []
+  if (input.countryCode !== undefined) assignments.push(Prisma.sql`"countryCode" = ${cleanCountryCode(input.countryCode)}`)
+  if (input.about !== undefined) assignments.push(Prisma.sql`"about" = ${cleanAbout(input.about)}`)
+  if (input.isRecruiting !== undefined) assignments.push(Prisma.sql`"isRecruiting" = ${Boolean(input.isRecruiting)}`)
+  if (input.recruitingRoles !== undefined) {
+    const rolesJson = JSON.stringify(cleanRecruitingRoles(input.recruitingRoles))
+    assignments.push(Prisma.sql`"recruitingRoles" = ${rolesJson}::jsonb`)
+  }
+  if (input.socialLinks !== undefined) {
+    const linksJson = JSON.stringify(cleanSocialLinks(input.socialLinks))
+    assignments.push(Prisma.sql`"socialLinks" = ${linksJson}::jsonb`)
+  }
+  if (assignments.length === 0) return
+  try {
+    await db.$executeRaw(Prisma.sql`
+      UPDATE "Team"
+      SET ${Prisma.join(assignments, ', ')}
+      WHERE "id" = ${teamId}
+    `)
+  } catch (err) {
+    if (!isMissingTeamPublicProfileColumn(err)) throw err
+  }
+}
+
+async function enrichTeamsWithPublicFields<T extends { id: string }>(teams: T[]) {
+  if (prismaClientSupportsTeamPublicFields() || teams.length === 0) return teams
+  const fieldsById = await getTeamPublicFieldsRaw(teams.map((team) => team.id))
+  return teams.map((team) => Object.assign(
+    {
+      countryCode: null,
+      about: null,
+      isRecruiting: false,
+      recruitingRoles: null,
+      socialLinks: null,
+    },
+    team,
+    fieldsById.get(team.id) ?? {},
+  ))
+}
+
+async function enrichTeamWithPublicFields<T extends { id: string }>(team: T) {
+  return (await enrichTeamsWithPublicFields([team]))[0]
+}
+
 function cleanAvailabilityDays(value?: string[] | null) {
   if (!Array.isArray(value)) return null
   const cleaned = uniqueIds(
@@ -189,6 +372,7 @@ export async function createTeam(actorId: string, input: CreateTeamInput) {
       logoUrl: cleanNullableUrl(input.logoUrl),
       bannerUrl: cleanNullableUrl(input.bannerUrl),
       description: cleanDescription(input.description),
+      ...(prismaClientSupportsTeamPublicFields() ? buildTeamPublicData(input) : {}),
       availabilityDays: cleanAvailabilityDays(input.availabilityDays),
       ownerId: actorId,
       members: {
@@ -199,6 +383,9 @@ export async function createTeam(actorId: string, input: CreateTeamInput) {
       members: { include: { user: { select: userSelect({ id: true, username: true, avatar: true, mmr: true }) } } },
     },
   })
+  if (!prismaClientSupportsTeamPublicFields()) {
+    await persistTeamPublicFieldsRaw(team.id, input)
+  }
   emitTeamEvent('teams:updated', [actorId])
   return team
 }
@@ -318,7 +505,7 @@ export async function respondToTeamInvite(userId: string, inviteId: string, resp
 }
 
 export async function listTeamDirectory() {
-  return teamDb().team.findMany({
+  const teams = await teamDb().team.findMany({
     where: { status: 'ACTIVE' },
     select: {
       id: true,
@@ -327,6 +514,7 @@ export async function listTeamDirectory() {
       logoUrl: true,
       bannerUrl: true,
       description: true,
+      ...teamPublicSelect(),
       availabilityDays: true,
       ownerId: true,
       members: {
@@ -342,6 +530,99 @@ export async function listTeamDirectory() {
     orderBy: [{ createdAt: 'desc' }],
     take: 60,
   })
+  return enrichTeamsWithPublicFields(teams)
+}
+
+export async function getPublicTeamBySlug(slug: string, viewerId?: string | null) {
+  const normalized = slug.trim()
+  if (!normalized) throw Errors.NOT_FOUND('Team')
+
+  const team = await teamDb().team.findFirst({
+    where: { slug: normalized, status: 'ACTIVE' },
+    select: {
+      id: true,
+      name: true,
+      slug: true,
+      logoUrl: true,
+      bannerUrl: true,
+      description: true,
+      ...teamPublicSelect(),
+      availabilityDays: true,
+      ownerId: true,
+      members: {
+        where: { status: 'ACTIVE' },
+        select: {
+          userId: true,
+          role: true,
+          competitiveRole: true,
+          user: {
+            select: userSelect({
+              id: true,
+              username: true,
+              avatar: true,
+              mmr: true,
+              rank: true,
+              mainRole: true,
+              secondaryRole: true,
+              countryCode: true,
+            }),
+          },
+        },
+      },
+    },
+  })
+  if (!team) throw Errors.NOT_FOUND('Team')
+  const enrichedTeam = await enrichTeamWithPublicFields(team)
+  const viewerMembership = viewerId ? enrichedTeam.members.find((member: any) => member.userId === viewerId) ?? null : null
+  const viewerCanManageTeam = canManageTeamRole(viewerMembership?.role)
+  const [viewerPendingInvite, viewerPendingJoinRequest, viewerActiveMembership] = viewerId
+    ? await Promise.all([
+        teamDb().teamInvite.findFirst({
+          where: { teamId: enrichedTeam.id, invitedUserId: viewerId, status: 'PENDING' },
+          select: { id: true, status: true, createdAt: true },
+        }),
+        teamDb().teamJoinRequest.findFirst({
+          where: { teamId: enrichedTeam.id, userId: viewerId, status: 'PENDING' },
+          select: { id: true, status: true, createdAt: true },
+        }),
+        findActiveMembership(viewerId),
+      ])
+    : [null, null, null]
+  const [pendingInvites, incomingJoinRequests] = viewerCanManageTeam
+    ? await Promise.all([
+        teamDb().teamInvite.findMany({
+          where: { teamId: enrichedTeam.id, status: 'PENDING' },
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            invitedUser: { select: userSelect({ id: true, username: true, avatar: true, mmr: true, rank: true }) },
+            invitedBy: { select: userSelect({ id: true, username: true, avatar: true }) },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+        teamDb().teamJoinRequest.findMany({
+          where: { teamId: enrichedTeam.id, status: 'PENDING' },
+          select: {
+            id: true,
+            status: true,
+            createdAt: true,
+            user: { select: userSelect({ id: true, username: true, avatar: true, mmr: true, rank: true }) },
+          },
+          orderBy: { createdAt: 'desc' },
+        }),
+      ])
+    : [[], []]
+  return {
+    ...enrichedTeam,
+    viewerRole: viewerMembership?.role ?? null,
+    canEdit: viewerMembership?.role === 'OWNER',
+    viewerHasTeam: Boolean(viewerActiveMembership),
+    viewerPendingInvite,
+    viewerPendingJoinRequest,
+    pendingInvites,
+    incomingJoinRequests,
+  }
 }
 
 export async function listMyTeamJoinRequests(userId: string) {
@@ -520,6 +801,7 @@ export async function updateTeamProfile(actorId: string, teamId: string, input: 
   if (input.logoUrl !== undefined) data.logoUrl = cleanNullableUrl(input.logoUrl)
   if (input.bannerUrl !== undefined) data.bannerUrl = cleanNullableUrl(input.bannerUrl)
   if (input.description !== undefined) data.description = cleanDescription(input.description)
+  if (prismaClientSupportsTeamPublicFields()) Object.assign(data, buildTeamPublicData(input))
   if (input.availabilityDays !== undefined) data.availabilityDays = cleanAvailabilityDays(input.availabilityDays)
 
   const team = await teamDb().team.update({
@@ -532,9 +814,12 @@ export async function updateTeamProfile(actorId: string, teamId: string, input: 
       },
     },
   })
+  if (!prismaClientSupportsTeamPublicFields()) {
+    await persistTeamPublicFieldsRaw(teamId, input)
+  }
   const audience = await getTeamAudienceUserIds(teamId)
   emitTeamEvent('teams:updated', [...audience, actorId])
-  return team
+  return enrichTeamWithPublicFields(team)
 }
 
 export async function assignTeamCompetitiveRole(
@@ -605,6 +890,168 @@ export async function removeTeamMember(actorId: string, teamId: string, targetUs
   const audience = await getTeamAudienceUserIds(teamId)
   emitTeamEvent('teams:updated', [...audience, actorId, targetUserId])
   return member
+}
+
+export async function deleteTeam(actorId: string, teamId: string) {
+  const membership = await teamDb().teamMember.findFirst({
+    where: { teamId, userId: actorId, status: 'ACTIVE' },
+  })
+  if (membership?.role !== 'OWNER') throw Errors.FORBIDDEN()
+
+  const audience = await getTeamAudienceUserIds(teamId)
+  const archived = await teamDb().$transaction(async (tx: any) => {
+    const team = await tx.team.update({
+      where: { id: teamId },
+      data: { status: 'ARCHIVED' },
+    })
+    await tx.teamMember.updateMany({
+      where: { teamId, status: 'ACTIVE' },
+      data: { status: 'LEFT' },
+    })
+    await tx.teamInvite.updateMany({
+      where: { teamId, status: 'PENDING' },
+      data: { status: 'EXPIRED', respondedAt: new Date() },
+    })
+    await tx.teamJoinRequest.updateMany({
+      where: { teamId, status: 'PENDING' },
+      data: { status: 'EXPIRED', respondedAt: new Date() },
+    })
+    await tx.scrimSearch?.updateMany?.({
+      where: { teamId, status: { in: ['OPEN', 'CHALLENGED'] } },
+      data: { status: 'EXPIRED' },
+    })
+    await tx.scrimChallenge?.updateMany?.({
+      where: {
+        status: 'PENDING',
+        OR: [{ fromTeamId: teamId }, { toTeamId: teamId }],
+      },
+      data: { status: 'EXPIRED', respondedAt: new Date() },
+    })
+    return team
+  })
+  emitTeamEvent('teams:updated', [...audience, actorId])
+  emitTeamEvent('teams:invite_updated', [...audience, actorId])
+  emitTeamEvent('teams:join_request_updated', [...audience, actorId])
+  return archived
+}
+
+type TeamStatsOptions = {
+  limit?: number
+  cursor?: string | null
+}
+
+function clampStatsLimit(value?: number) {
+  if (!Number.isFinite(value ?? 0)) return 10
+  return Math.max(1, Math.min(25, Math.floor(value ?? 10)))
+}
+
+function getTeamSideFromScrimDetails(teamId: string, scrimDetails: any) {
+  if (scrimDetails?.team1Id === teamId) return 1
+  if (scrimDetails?.team2Id === teamId) return 2
+  return null
+}
+
+function getMatchResultForTeam(teamId: string, match: any): 'W' | 'L' {
+  const side = getTeamSideFromScrimDetails(teamId, match.scrimDetails)
+  return side != null && match.winner === side ? 'W' : 'L'
+}
+
+function serializeTeamHistoryMatch(teamId: string, match: any) {
+  const side = getTeamSideFromScrimDetails(teamId, match.scrimDetails)
+  const opponentName = side === 1 ? match.scrimDetails?.team2Name : match.scrimDetails?.team1Name
+  return {
+    id: match.id,
+    createdAt: match.createdAt,
+    selectedMap: match.selectedMap ?? 'Mapa no definido',
+    duration: match.duration ?? null,
+    result: getMatchResultForTeam(teamId, match),
+    teamSide: side,
+    winner: match.winner ?? null,
+    opponentName: opponentName ?? 'Equipo rival',
+  }
+}
+
+function buildTeamStatsPayload(teamId: string, allMatches: any[], pageMatches: any[], limit: number) {
+  const summaryMatches = allMatches.filter((match) => getTeamSideFromScrimDetails(teamId, match.scrimDetails) != null)
+  const wins = summaryMatches.filter((match) => getMatchResultForTeam(teamId, match) === 'W').length
+  const losses = Math.max(0, summaryMatches.length - wins)
+  const mapBuckets = new Map<string, { map: string; matches: number; wins: number }>()
+  for (const match of summaryMatches) {
+    const map = match.selectedMap ?? 'Mapa no definido'
+    const current = mapBuckets.get(map) ?? { map, matches: 0, wins: 0 }
+    current.matches += 1
+    if (getMatchResultForTeam(teamId, match) === 'W') current.wins += 1
+    mapBuckets.set(map, current)
+  }
+
+  const chronological = [...summaryMatches].reverse()
+  let rollingWins = 0
+  const performance = chronological.map((match, index) => {
+    if (getMatchResultForTeam(teamId, match) === 'W') rollingWins += 1
+    return {
+      matchId: match.id,
+      createdAt: match.createdAt,
+      value: Math.round((rollingWins / (index + 1)) * 100),
+    }
+  })
+
+  const visiblePageMatches = pageMatches.slice(0, limit)
+  return {
+    summary: {
+      totalMatches: summaryMatches.length,
+      wins,
+      losses,
+      winrate: summaryMatches.length > 0 ? Math.round((wins / summaryMatches.length) * 100) : 0,
+      recentResults: summaryMatches.slice(0, 5).map((match) => getMatchResultForTeam(teamId, match)),
+    },
+    mapStats: [...mapBuckets.values()]
+      .map((entry) => ({
+        ...entry,
+        winrate: entry.matches > 0 ? Math.round((entry.wins / entry.matches) * 100) : 0,
+      }))
+      .sort((a, b) => b.matches - a.matches || a.map.localeCompare(b.map)),
+    performance,
+    matches: visiblePageMatches.map((match) => serializeTeamHistoryMatch(teamId, match)),
+    nextCursor: pageMatches.length > limit ? visiblePageMatches[visiblePageMatches.length - 1]?.createdAt?.toISOString?.() ?? null : null,
+  }
+}
+
+export async function getPublicTeamStatsBySlug(slug: string, options: TeamStatsOptions = {}) {
+  const normalized = slug.trim()
+  if (!normalized) throw Errors.NOT_FOUND('Team')
+  const team = await teamDb().team.findFirst({
+    where: { slug: normalized, status: 'ACTIVE' },
+    select: { id: true, slug: true, name: true },
+  })
+  if (!team) throw Errors.NOT_FOUND('Team')
+
+  const limit = clampStatsLimit(options.limit)
+  const cursorDate = options.cursor ? new Date(options.cursor) : null
+  const baseWhere = {
+    status: 'COMPLETED',
+    origin: { in: ['SCRIM_SELF_SERVE', 'SCRIM_ADMIN'] },
+    scrimDetails: { OR: [{ team1Id: team.id }, { team2Id: team.id }] },
+  }
+  const include = { scrimDetails: true }
+  const orderBy = { createdAt: 'desc' }
+  const [allMatches, pageMatches] = await Promise.all([
+    teamDb().match.findMany({
+      where: baseWhere,
+      include,
+      orderBy,
+    }),
+    teamDb().match.findMany({
+      where: {
+        ...baseWhere,
+        ...(cursorDate && !Number.isNaN(cursorDate.getTime()) ? { createdAt: { lt: cursorDate } } : {}),
+      },
+      include,
+      orderBy,
+      take: limit + 1,
+    }),
+  ])
+
+  return buildTeamStatsPayload(team.id, allMatches, pageMatches, limit)
 }
 
 function testBotUsername(teamName: string, index: number, suffix: string) {

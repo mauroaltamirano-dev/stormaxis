@@ -12,6 +12,8 @@ import { leaderboardRouter } from '../../modules/leaderboard/leaderboard.router'
 import { adminRouter } from '../../modules/admin/admin.router'
 import { teamsRouter } from '../../modules/teams/teams.router'
 import { scrimsRouter } from '../../modules/scrims/scrims.router'
+import { friendsRouter } from '../../modules/friends/friends.router'
+import { notificationsRouter } from '../../modules/notifications/notifications.router'
 import { redis, REDIS_KEYS } from '../redis/client'
 import { logger } from '../logging/logger'
 
@@ -151,6 +153,8 @@ export function createApp() {
   app.use('/api/leaderboard', leaderboardRouter)
   app.use('/api/teams', teamsRouter)
   app.use('/api/scrims', scrimsRouter)
+  app.use('/api/friends', friendsRouter)
+  app.use('/api/notifications', notificationsRouter)
   app.use('/api/admin', adminRouter)
 
   // Error handler (must be last)

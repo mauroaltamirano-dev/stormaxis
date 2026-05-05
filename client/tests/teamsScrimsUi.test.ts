@@ -4,7 +4,14 @@ import test from "node:test";
 import {
   computeTeamHubSnapshot,
   computeScrimCommandSnapshot,
+  computeScrimCommandCenter,
   getScrimChallengeActionState,
+  getTeamsEntryPath,
+  getTeamPublicPath,
+  canShowTeamSettings,
+  filterTeamDirectory,
+  summarizePublicTeamStats,
+  getSelectedPlayerRoles,
 } from "../src/pages/teamsScrimsUi";
 
 test("computeTeamHubSnapshot returns status counts for team owners", () => {
@@ -79,10 +86,32 @@ test("computeScrimCommandSnapshot returns setup state when roster is incomplete"
   assert.equal(snapshot.badgeTone, "warn");
 });
 
+test("computeScrimCommandCenter summarizes SCRIMS command center state", () => {
+  const snapshot = computeScrimCommandCenter({
+    hasTeam: true,
+    canManage: true,
+    hasPublishedSearch: false,
+    startersSelected: 4,
+    incomingChallenges: 2,
+    outgoingChallenges: 1,
+    openCatalogRooms: 6,
+  });
+
+  assert.equal(snapshot.headline, "Falta 1 titular");
+  assert.equal(snapshot.progressLabel, "4/5 titulares");
+  assert.equal(snapshot.tone, "warn");
+  assert.deepEqual(snapshot.metrics, [
+    { label: "Readiness", value: "Configura 5 titulares" },
+    { label: "Rivales", value: "6" },
+    { label: "Entrantes", value: "2" },
+    { label: "Salientes", value: "1" },
+  ]);
+});
+
 test("getScrimChallengeActionState explains disabled reasons", () => {
   assert.deepEqual(
     getScrimChallengeActionState({ hasTeam: false, canManage: false, hasPublishedSearch: false }),
-    { disabled: true, label: "Necesitas equipo", hint: "Ve a /teams para crear o unirte a uno." },
+    { disabled: true, label: "Necesitas equipo", hint: "Ve a /teams para ver o crear tu escuadra." },
   );
 
   assert.deepEqual(
@@ -99,4 +128,74 @@ test("getScrimChallengeActionState explains disabled reasons", () => {
     getScrimChallengeActionState({ hasTeam: true, canManage: true, hasPublishedSearch: true }),
     { disabled: false, label: "Enviar solicitud", hint: "Reto listo para enviar." },
   );
+});
+
+
+test("getTeamPublicPath builds encoded public team route", () => {
+  assert.equal(getTeamPublicPath("storm-alpha"), "/teams/storm-alpha");
+  assert.equal(getTeamPublicPath("Storm Alpha"), "/teams/Storm%20Alpha");
+});
+
+test("getTeamsEntryPath opens own public team profile when available", () => {
+  assert.equal(getTeamsEntryPath({ slug: "storm-alpha" }), "/teams/storm-alpha");
+  assert.equal(getTeamsEntryPath({ slug: "Storm Alpha" }), "/teams/Storm%20Alpha");
+  assert.equal(getTeamsEntryPath(null), null);
+  assert.equal(getTeamsEntryPath({ slug: "  " }), null);
+});
+
+test("filterTeamDirectory matches team name, description, owner, and member usernames", () => {
+  const teams = [
+    {
+      id: "team-1",
+      name: "Storm Alpha",
+      slug: "storm-alpha",
+      description: "Aggressive scrim squad",
+      members: [
+        { role: "OWNER", user: { username: "Luna" } },
+        { role: "MEMBER", user: { username: "TankMain" } },
+      ],
+    },
+    {
+      id: "team-2",
+      name: "Nexus Beta",
+      slug: "nexus-beta",
+      description: "Macro focused",
+      members: [{ role: "OWNER", user: { username: "Kappa" } }],
+    },
+  ];
+
+  assert.deepEqual(filterTeamDirectory(teams, "alpha").map((team) => team.id), ["team-1"]);
+  assert.deepEqual(filterTeamDirectory(teams, "kappa").map((team) => team.id), ["team-2"]);
+  assert.deepEqual(filterTeamDirectory(teams, "").map((team) => team.id), ["team-1", "team-2"]);
+});
+
+test("canShowTeamSettings only exposes settings to owners", () => {
+  assert.equal(canShowTeamSettings("OWNER"), true);
+  assert.equal(canShowTeamSettings("CAPTAIN"), false);
+  assert.equal(canShowTeamSettings("MEMBER"), false);
+  assert.equal(canShowTeamSettings(null), false);
+});
+
+test("summarizePublicTeamStats returns FACEIT-style public stat cards", () => {
+  const summary = summarizePublicTeamStats({
+    totalMatches: 23,
+    wins: 13,
+    losses: 10,
+    winrate: 57,
+    recentResults: ["W", "W", "L", "W", "W"],
+  });
+
+  assert.deepEqual(summary, [
+    { label: "Total de partidas", value: "23" },
+    { label: "Porcentaje ganado", value: "57%" },
+    { label: "Victorias", value: "13" },
+    { label: "Resultados recientes", value: "W W L W W" },
+  ]);
+});
+
+test("getSelectedPlayerRoles returns selected unique player roles in display order", () => {
+  assert.deepEqual(getSelectedPlayerRoles("HEALER", "FLEX"), ["HEALER", "FLEX"]);
+  assert.deepEqual(getSelectedPlayerRoles("TANK", "TANK"), ["TANK"]);
+  assert.deepEqual(getSelectedPlayerRoles(null, "RANGED"), ["RANGED"]);
+  assert.deepEqual(getSelectedPlayerRoles(undefined, null), []);
 });

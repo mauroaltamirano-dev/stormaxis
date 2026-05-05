@@ -3,16 +3,21 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate, useRouterState } from "@tanstack/react-router";
 import {
   CheckCircle2,
+  Check,
   Clock3,
   Crosshair,
   Save,
   Search,
   ShieldCheck,
   Trophy,
+  UserMinus,
+  UserPlus,
+  X,
 } from "lucide-react";
 import { api } from "../lib/api";
 import { buildApiUrl } from "../lib/backend";
 import { RankBadge } from "../components/RankBadge";
+import { PlayerLink } from "../components/PlayerLink";
 import { useAuthStore } from "../stores/auth.store";
 import { getRoleMeta } from "../lib/roles";
 import { getRankMeta } from "../lib/ranks";
@@ -82,6 +87,25 @@ type SearchResult = {
   countryCode?: string | null;
   displayLevel?: string;
   winrate?: number;
+};
+
+type FriendStatusState = {
+  status: "SELF" | "NONE" | "FRIENDS" | "OUTGOING" | "INCOMING";
+  requestId: string | null;
+  user?: SearchResult | ProfileUser | null;
+};
+
+type FriendRequestSummary = {
+  id: string;
+  status: string;
+  createdAt?: string;
+  user: SearchResult | null;
+};
+
+type FriendsResponse = {
+  friends: SearchResult[];
+  incomingRequests: FriendRequestSummary[];
+  outgoingRequests: FriendRequestSummary[];
 };
 
 type ProfileTab = "overview" | "history" | "accounts";
@@ -215,6 +239,10 @@ export function Profile() {
   const [searchTerm, setSearchTerm] = useState("");
   const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
   const [searchLoading, setSearchLoading] = useState(false);
+  const [friendStatus, setFriendStatus] = useState<FriendStatusState | null>(null);
+  const [friendsData, setFriendsData] = useState<FriendsResponse | null>(null);
+  const [friendBusy, setFriendBusy] = useState(false);
+  const [friendMessage, setFriendMessage] = useState<string | null>(null);
 
   const level = profile?.level ?? 1;
   const rankMeta = getRankMeta(level);
@@ -370,6 +398,108 @@ export function Profile() {
       window.clearTimeout(timeout);
     };
   }, [searchTerm]);
+
+  async function loadFriendStatus(username = routeUsername) {
+    if (isOwnProfile || !username) {
+      setFriendStatus(null);
+      return;
+    }
+    try {
+      const { data } = await api.get<FriendStatusState>(
+        `/friends/status/${encodeURIComponent(username)}`,
+      );
+      setFriendStatus(data);
+    } catch {
+      setFriendStatus(null);
+    }
+  }
+
+  async function loadFriends() {
+    if (!isOwnProfile) {
+      setFriendsData(null);
+      return;
+    }
+    try {
+      const { data } = await api.get<FriendsResponse>("/friends/me");
+      setFriendsData(data);
+    } catch {
+      setFriendsData(null);
+    }
+  }
+
+  useEffect(() => {
+    setFriendMessage(null);
+    if (isOwnProfile) {
+      void loadFriends();
+      setFriendStatus(null);
+      return;
+    }
+    setFriendsData(null);
+    void loadFriendStatus(routeUsername);
+  }, [isOwnProfile, routeUsername]);
+
+  function getApiMessage(err: any, fallback: string) {
+    return err.response?.data?.error?.message ?? err.response?.data?.message ?? fallback;
+  }
+
+  async function sendFriendRequest() {
+    if (!profile || isOwnProfile) return;
+    setFriendBusy(true);
+    setFriendMessage(null);
+    try {
+      await api.post("/friends/requests", { toUserId: profile.id });
+      setFriendMessage("Solicitud enviada. Queda pendiente de decisión.");
+      await loadFriendStatus(profile.username);
+    } catch (err: any) {
+      setFriendMessage(getApiMessage(err, "No pude enviar la solicitud."));
+    } finally {
+      setFriendBusy(false);
+    }
+  }
+
+  async function cancelOutgoingFriendRequest(requestId?: string | null) {
+    if (!requestId) return;
+    setFriendBusy(true);
+    setFriendMessage(null);
+    try {
+      await api.post(`/friends/requests/${requestId}/cancel`);
+      setFriendMessage("Solicitud cancelada.");
+      await Promise.all([loadFriendStatus(profile?.username), loadFriends()]);
+    } catch (err: any) {
+      setFriendMessage(getApiMessage(err, "No pude cancelar la solicitud."));
+    } finally {
+      setFriendBusy(false);
+    }
+  }
+
+  async function respondIncomingFriendRequest(requestId: string, response: "ACCEPT" | "DECLINE") {
+    setFriendBusy(true);
+    setFriendMessage(null);
+    try {
+      await api.post(`/friends/requests/${requestId}/respond`, { response });
+      setFriendMessage(response === "ACCEPT" ? "Solicitud aceptada." : "Solicitud rechazada.");
+      await Promise.all([loadFriendStatus(profile?.username), loadFriends()]);
+    } catch (err: any) {
+      setFriendMessage(getApiMessage(err, "No pude responder la solicitud."));
+    } finally {
+      setFriendBusy(false);
+    }
+  }
+
+  async function removeFriend(friendUserId?: string | null) {
+    if (!friendUserId) return;
+    setFriendBusy(true);
+    setFriendMessage(null);
+    try {
+      await api.delete(`/friends/${friendUserId}`);
+      setFriendMessage("Amigo eliminado.");
+      await Promise.all([loadFriendStatus(profile?.username), loadFriends()]);
+    } catch (err: any) {
+      setFriendMessage(getApiMessage(err, "No pude eliminar al amigo."));
+    } finally {
+      setFriendBusy(false);
+    }
+  }
 
   async function handleSaveProfile() {
     setSaving(true);
@@ -627,6 +757,18 @@ export function Profile() {
                       >
                         + Vincular Battle.net
                       </a>
+                    ) : null}
+                    {!isOwnProfile ? (
+                      <FriendActionBar
+                        status={friendStatus}
+                        busy={friendBusy}
+                        message={friendMessage}
+                        onSend={sendFriendRequest}
+                        onCancel={() => cancelOutgoingFriendRequest(friendStatus?.requestId)}
+                        onAccept={() => friendStatus?.requestId && respondIncomingFriendRequest(friendStatus.requestId, "ACCEPT")}
+                        onReject={() => friendStatus?.requestId && respondIncomingFriendRequest(friendStatus.requestId, "DECLINE")}
+                        onRemove={() => removeFriend(profile.id)}
+                      />
                     ) : null}
                     <div
                       style={{
@@ -1459,7 +1601,7 @@ export function Profile() {
                               fontSize: "13px",
                             }}
                           >
-                            {result.username}
+                            <PlayerLink username={result.username}>{result.username}</PlayerLink>
                           </div>
                           <div
                             style={{
@@ -1508,6 +1650,18 @@ export function Profile() {
               </div>
             )}
           </section>
+
+          {isOwnProfile ? (
+            <FriendsPanel
+              data={friendsData}
+              busy={friendBusy}
+              message={friendMessage}
+              onOpenProfile={openProfile}
+              onCancel={cancelOutgoingFriendRequest}
+              onRespond={respondIncomingFriendRequest}
+              onRemove={removeFriend}
+            />
+          ) : null}
         </div>
       </div>
     </div>
@@ -2151,6 +2305,279 @@ function AccountCard({
   );
 }
 
+function FriendActionBar({
+  status,
+  busy,
+  message,
+  onSend,
+  onCancel,
+  onAccept,
+  onReject,
+  onRemove,
+}: {
+  status: FriendStatusState | null;
+  busy: boolean;
+  message: string | null;
+  onSend: () => void;
+  onCancel: () => void;
+  onAccept: () => void;
+  onReject: () => void;
+  onRemove: () => void;
+}) {
+  const current = status?.status ?? "NONE";
+  return (
+    <div style={{ display: "grid", gap: "8px", marginTop: "8px", maxWidth: "520px" }}>
+      <div style={{ display: "flex", gap: "8px", flexWrap: "wrap" }}>
+        {current === "NONE" ? (
+          <button type="button" disabled={busy} onClick={onSend} style={friendPrimaryButtonStyle(busy)}>
+            <UserPlus size={14} />
+            {busy ? "Enviando..." : "Enviar solicitud"}
+          </button>
+        ) : null}
+
+        {current === "OUTGOING" ? (
+          <>
+            <span style={friendPendingPillStyle}>
+              <Clock3 size={14} />
+              Pendiente
+            </span>
+            <button type="button" disabled={busy} onClick={onCancel} style={secondaryButtonStyle(busy)}>
+              <X size={14} />
+              Cancelar solicitud
+            </button>
+          </>
+        ) : null}
+
+        {current === "INCOMING" ? (
+          <>
+            <span style={friendPendingPillStyle}>
+              <UserPlus size={14} />
+              Te envió solicitud
+            </span>
+            <button type="button" disabled={busy} onClick={onAccept} style={friendPrimaryButtonStyle(busy)}>
+              <Check size={14} />
+              Aceptar
+            </button>
+            <button type="button" disabled={busy} onClick={onReject} style={secondaryButtonStyle(busy)}>
+              <X size={14} />
+              Rechazar
+            </button>
+          </>
+        ) : null}
+
+        {current === "FRIENDS" ? (
+          <>
+            <span style={friendAcceptedPillStyle}>
+              <CheckCircle2 size={14} />
+              Amigos
+            </span>
+            <button type="button" disabled={busy} onClick={onRemove} style={secondaryButtonStyle(busy)}>
+              <UserMinus size={14} />
+              Eliminar
+            </button>
+          </>
+        ) : null}
+      </div>
+      {message ? <span style={friendMessageStyle}>{message}</span> : null}
+    </div>
+  );
+}
+
+function FriendsPanel({
+  data,
+  busy,
+  message,
+  onOpenProfile,
+  onCancel,
+  onRespond,
+  onRemove,
+}: {
+  data: FriendsResponse | null;
+  busy: boolean;
+  message: string | null;
+  onOpenProfile: (username: string) => void;
+  onCancel: (requestId?: string | null) => void;
+  onRespond: (requestId: string, response: "ACCEPT" | "DECLINE") => void;
+  onRemove: (friendUserId?: string | null) => void;
+}) {
+  const friends = data?.friends ?? [];
+  const incoming = data?.incomingRequests ?? [];
+  const outgoing = data?.outgoingRequests ?? [];
+
+  return (
+    <section style={{ ...cardStyle, display: "grid", gap: "14px" }}>
+      <div>
+        <div
+          style={{
+            fontFamily: "var(--font-display)",
+            fontSize: "16px",
+            fontWeight: 800,
+            letterSpacing: "2px",
+            textTransform: "uppercase",
+            color: "var(--nexus-text)",
+          }}
+        >
+          Amigos
+        </div>
+        <div style={{ color: "var(--nexus-muted)", fontSize: "12.5px", marginTop: "3px" }}>
+          Red mutua, solicitudes recibidas y solicitudes enviadas.
+        </div>
+      </div>
+
+      {message ? <MessageBanner text={message} /> : null}
+
+      <FriendSection title="Añadidos" count={friends.length}>
+        {friends.length === 0 ? (
+          <EmptyBlock text="Todavía no tenés amigos añadidos." />
+        ) : (
+          friends.map((friend) => (
+            <FriendRow
+              key={friend.id}
+              user={friend}
+              meta={`${friend.displayLevel ?? "Lvl 1"} · ${friend.mmr} MMR`}
+              onOpen={onOpenProfile}
+              action={
+                <button type="button" disabled={busy} style={secondaryButtonStyle(busy)} onClick={() => onRemove(friend.id)}>
+                  <UserMinus size={13} /> Eliminar
+                </button>
+              }
+            />
+          ))
+        )}
+      </FriendSection>
+
+      <FriendSection title="Solicitudes recibidas" count={incoming.length}>
+        {incoming.length === 0 ? (
+          <EmptyBlock text="No hay solicitudes esperando tu decisión." />
+        ) : (
+          incoming.map((request) => request.user ? (
+            <FriendRow
+              key={request.id}
+              user={request.user}
+              meta="Quiere añadirte"
+              onOpen={onOpenProfile}
+              action={
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  <button type="button" disabled={busy} style={friendIconButtonStyle("#00e676", busy)} onClick={() => onRespond(request.id, "ACCEPT")} aria-label="Aceptar">
+                    <Check size={13} />
+                  </button>
+                  <button type="button" disabled={busy} style={friendIconButtonStyle("#ff6b8a", busy)} onClick={() => onRespond(request.id, "DECLINE")} aria-label="Rechazar">
+                    <X size={13} />
+                  </button>
+                </div>
+              }
+            />
+          ) : null)
+        )}
+      </FriendSection>
+
+      <FriendSection title="Solicitudes enviadas" count={outgoing.length}>
+        {outgoing.length === 0 ? (
+          <EmptyBlock text="No tenés solicitudes enviadas pendientes." />
+        ) : (
+          outgoing.map((request) => request.user ? (
+            <FriendRow
+              key={request.id}
+              user={request.user}
+              meta="Pendiente de respuesta"
+              onOpen={onOpenProfile}
+              action={
+                <button type="button" disabled={busy} style={secondaryButtonStyle(busy)} onClick={() => onCancel(request.id)}>
+                  <X size={13} /> Cancelar
+                </button>
+              }
+            />
+          ) : null)
+        )}
+      </FriendSection>
+    </section>
+  );
+}
+
+function FriendSection({
+  title,
+  count,
+  children,
+}: {
+  title: string;
+  count: number;
+  children: ReactNode;
+}) {
+  return (
+    <div style={{ display: "grid", gap: "8px" }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px" }}>
+        <strong
+          style={{
+            color: "var(--nexus-text)",
+            fontFamily: "var(--font-display)",
+            fontSize: "12px",
+            letterSpacing: "1.4px",
+            textTransform: "uppercase",
+          }}
+        >
+          {title}
+        </strong>
+        <span style={{ color: "var(--nexus-accent)", fontSize: "11px", fontWeight: 900 }}>
+          {count}
+        </span>
+      </div>
+      <div style={{ display: "grid", gap: "8px" }}>{children}</div>
+    </div>
+  );
+}
+
+function FriendRow({
+  user,
+  meta,
+  action,
+  onOpen,
+}: {
+  user: SearchResult;
+  meta: string;
+  action: ReactNode;
+  onOpen: (username: string) => void;
+}) {
+  return (
+    <div
+      style={{
+        border: "1px solid rgba(255,255,255,0.07)",
+        background: "rgba(255,255,255,0.025)",
+        padding: "10px",
+        display: "grid",
+        gridTemplateColumns: "minmax(0, 1fr) auto",
+        gap: "10px",
+        alignItems: "center",
+      }}
+    >
+      <button
+        type="button"
+        onClick={() => onOpen(user.username)}
+        style={{
+          border: 0,
+          background: "transparent",
+          color: "inherit",
+          padding: 0,
+          cursor: "pointer",
+          display: "flex",
+          alignItems: "center",
+          gap: "10px",
+          textAlign: "left",
+          minWidth: 0,
+        }}
+      >
+        <AvatarBlock avatar={user.avatar} username={user.username} size={34} />
+        <span style={{ minWidth: 0 }}>
+          <strong style={{ color: "var(--nexus-text)", fontSize: "13px", display: "block" }}>
+            <PlayerLink username={user.username}>{user.username}</PlayerLink>
+          </strong>
+          <span style={{ color: "var(--nexus-muted)", fontSize: "12px" }}>{meta}</span>
+        </span>
+      </button>
+      {action}
+    </div>
+  );
+}
+
 function MessageBanner({ text }: { text: string }) {
   return (
     <div
@@ -2221,6 +2648,57 @@ function ProfileHistoryEmpty({
       </div>
     </div>
   );
+}
+
+const friendPendingPillStyle: CSSProperties = {
+  display: "inline-flex",
+  alignItems: "center",
+  gap: "8px",
+  border: "1px solid rgba(255,255,255,0.10)",
+  borderRadius: "10px",
+  background: "rgba(255,255,255,0.04)",
+  color: "rgba(226,232,240,0.78)",
+  padding: "10px 12px",
+  fontSize: "11px",
+  fontWeight: 900,
+  letterSpacing: "1px",
+  textTransform: "uppercase",
+};
+
+const friendAcceptedPillStyle: CSSProperties = {
+  ...friendPendingPillStyle,
+  border: "1px solid rgba(0,230,118,0.30)",
+  background: "rgba(0,230,118,0.08)",
+  color: "#00e676",
+};
+
+const friendMessageStyle: CSSProperties = {
+  color: "var(--nexus-muted)",
+  fontSize: "12px",
+  fontWeight: 700,
+};
+
+function friendPrimaryButtonStyle(disabled: boolean): CSSProperties {
+  return {
+    ...primaryButtonStyle,
+    opacity: disabled ? 0.65 : 1,
+    cursor: disabled ? "not-allowed" : "pointer",
+  };
+}
+
+function friendIconButtonStyle(accent: string, disabled: boolean): CSSProperties {
+  return {
+    width: "34px",
+    height: "34px",
+    display: "inline-grid",
+    placeItems: "center",
+    border: `1px solid ${accent}55`,
+    borderRadius: "10px",
+    background: `${accent}14`,
+    color: accent,
+    cursor: disabled ? "not-allowed" : "pointer",
+    opacity: disabled ? 0.6 : 1,
+  };
 }
 
 const fieldStyle: CSSProperties = {

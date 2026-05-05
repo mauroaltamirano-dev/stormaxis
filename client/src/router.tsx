@@ -96,7 +96,19 @@ const scrimsRoute = createRoute({
 const teamsRoute = createRoute({
   getParentRoute: () => appRoute,
   path: "/teams",
-  component: lazyRouteComponent(() => import("./pages/Teams")),
+  component: lazyRouteComponent(() => import("./pages/TeamsEntry")),
+});
+
+const teamsManageRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/teams/manage",
+  component: lazyRouteComponent(() => import("./pages/TeamsEntry")),
+});
+
+const publicTeamRoute = createRoute({
+  getParentRoute: () => appRoute,
+  path: "/teams/$slug",
+  component: lazyRouteComponent(() => import("./pages/TeamPublicProfile")),
 });
 
 const adminRoute = createRoute({
@@ -157,6 +169,8 @@ const routeTree = rootRoute.addChildren([
     appRoute.addChildren([
       dashboardRoute,
       teamsRoute,
+      teamsManageRoute,
+      publicTeamRoute,
       scrimsRoute,
       adminRoute,
       leaderboardRoute,

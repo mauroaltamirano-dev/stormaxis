@@ -2,6 +2,7 @@ import jwt from 'jsonwebtoken'
 import bcrypt from 'bcrypt'
 import { randomUUID } from 'crypto'
 import { db } from '../../infrastructure/database/client'
+import { redis, REDIS_KEYS } from '../../infrastructure/redis/client'
 import { Errors } from '../../shared/errors/AppError'
 
 const ACCESS_SECRET = process.env.JWT_SECRET!
@@ -44,6 +45,26 @@ export function verifyRefreshToken(token: string): { sub: string; jti: string } 
   } catch {
     return null
   }
+}
+
+const OAUTH_CALLBACK_CODE_TTL_SECONDS = 60
+
+export async function createOAuthCallbackCode(accessToken: string) {
+  const code = randomUUID()
+  await redis.set(REDIS_KEYS.oauthCallbackCode(code), accessToken, 'EX', OAUTH_CALLBACK_CODE_TTL_SECONDS)
+  return code
+}
+
+export async function consumeOAuthCallbackCode(code: string) {
+  const normalized = code.trim()
+  if (!normalized) throw Errors.UNAUTHORIZED()
+
+  const key = REDIS_KEYS.oauthCallbackCode(normalized)
+  const accessToken = await redis.get(key)
+  if (!accessToken) throw Errors.UNAUTHORIZED()
+
+  await redis.del(key)
+  return accessToken
 }
 
 // ─── Auth operations ──────────────────────────────────────
